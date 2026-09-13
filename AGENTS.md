@@ -22,6 +22,19 @@
 - **`concepts_and_docs/features.md` is the master feature list** (completeness net): a new feature lands there first (with a status), then an ADR/roadmap entry may implement it.
 - **V1 = the public launch build**; post-V1 additions live in the vault. The V1 ships a **1st-party starter catalog** (CC0 + re-targeted animations, ADR-017) — the community pipeline is augmentative post-V1, never a V1 dependency.
 
+## Folder structure
+
+- `concepts_and_docs/` — design docs (English); `features.md` is the master list.
+- `data/` — all game content as JSON (data-driven):
+  - `schema/` world/character/prefab schemas (versioned), `catalog/` starter manifest + its schema, `items/` item instances, `characters/` base humanoid + morphs, `enemies/` definitions, `worlds/` world compositions, `localization/` `en` key table (later).
+- `src/` — GDScript organized by concept: `autoloads/`, `runtime/` (combat, bonfire, camera, streaming), `editors/`, `ui/`, `dataio/` (JSON load/validate), `tools/` (headless: `import_check.gd`, `build_pck`, data validation).
+- `scenes/` — `.tscn` (main, prefabs, UI screens, humanoid template).
+- `creator_docs/` — short creator-facing docs (decision I).
+- `assets/` — 1st-party local sources (CC0 + re-targeted), **gitignored** (ADR-017): packed into the PCK at P10; never versioned.
+- `catalog/cache/` — community Drive download cache, gitignored (ADR-010).
+- `addons/` — editor-only personal tools (`godotty/`, gitignored).
+- Run saves never live in the repo: `user://` (GameState serialized).
+
 ## Useful commands
 
 - Run the project live from the terminal:

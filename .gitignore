@@ -5,5 +5,8 @@
 # Asset pipeline (ADR-010): downloaded binaries cache, never versioned
 catalog/cache/
 
+# 1st-party asset sources (ADR-017): local binaries stay OUT of git — packed into the PCK at P10; the manifest (data/catalog/) is the versioned source of truth
+assets/
+
 # Editor-only personal tool, not part of the game or the repo
 addons/godotty/
