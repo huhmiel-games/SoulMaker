@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schemastore.specs.github.io/draft/2020-12/schema",
+  "$id": "data/schema/prefab_v0.1.json",
+  "title": "SoulMaker prefab schema v0.1",
+  "description": "Prefab = a group of catalog assets with relative transforms (features/06, Level 1 of construction). Referenced by name from the world schema. Leaf objects tolerate unknown fields (ADR-009).",
+  "type": "object",
+  "required": ["format_version", "name", "assets"],
+  "properties": {
+    "format_version": { "const": "0.1" },
+    "name": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+    "assets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["asset_id"],
+        "properties": {
+          "asset_id": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+          "transform": { "$ref": "#/$defs/transform" }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "transform": {
+      "type": "object",
+      "description": "Position + orientation + scale; free placement, overlaps allowed (anti-grid identity).",
+      "properties": {
+        "position": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+        "rotation": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+        "scale": { "type": "array", "items": { "type": "number", "exclusiveMinimum": 0 }, "minItems": 3, "maxItems": 3 }
+      },
+      "required": ["position"],
+      "additionalProperties": true
+    }
+  }
+}

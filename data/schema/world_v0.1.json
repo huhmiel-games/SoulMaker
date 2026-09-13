@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schemastore.specs.github.io/draft/2020-12/schema",
+  "$id": "data/schema/world_v0.1.json",
+  "title": "SoulMaker composed world schema v0.1",
+  "description": "Composed world file (features/06, features/14): maps assembled from prefabs, the socket/graph linking, ambiance, spawns and content. Distribution format — validated strictly on required + bounds at import, tolerant to unknown fields (ADR-009: unknown extras never fail, never silent deletion).",
+  "type": "object",
+  "required": ["format_version", "world_name", "maps", "graph"],
+  "properties": {
+    "format_version": { "const": "0.1" },
+    "world_name": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+    "display_overrides": {
+      "type": "object",
+      "description": "World-level label renames (features/03): stats, currency and accessory family are display-only labels. Data always stores canonical ids.",
+      "properties": {
+        "stat_names": {
+          "type": "object",
+          "description": "Per-stat display rename (e.g. {\"faith\": \"Spirit\"}).",
+          "additionalProperties": { "type": "string" }
+        },
+        "currency_name": { "type": "string", "description": "Display name for the run currency (default: \"souls\")." },
+        "accessory_name": { "type": "string", "description": "Display name for the accessory family (default: \"ring\", e.g. \"sigil\", \"talisman\")." }
+      },
+      "additionalProperties": true
+    },
+    "ambiance": { "$ref": "#/$defs/ambiance", "description": "World-level defaults (sun, fog, tonemapping)." },
+    "maps": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/map" }
+    },
+    "sockets": {
+      "type": "array",
+      "description": "Discrete connection points (features/06): position + orientation per map.",
+      "items": { "$ref": "#/$defs/socket" }
+    },
+    "graph": {
+      "type": "object",
+      "description": "World graph of sockets (Level 3): directional links, bidirectional by default.",
+      "properties": {
+        "links": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["from_socket", "to_socket"],
+            "properties": {
+              "from_socket": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+              "to_socket": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+              "bidirectional": { "type": "boolean", "default": true }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "required": ["links"],
+      "additionalProperties": true
+    },
+    "spawns": {
+      "type": "array",
+      "description": "World-level spawn points: new run + transitions (features/06).",
+      "items": { "$ref": "#/$defs/spawn" }
+    },
+    "content": {
+      "type": "object",
+      "description": "Placed game content, referenced to a map + catalog id. Every list optional.",
+      "properties": {
+        "enemies": { "type": "array", "items": { "$ref": "#/$defs/content_placement" } },
+        "npcs": { "type": "array", "items": { "$ref": "#/$defs/content_placement" } },
+        "loot": { "type": "array", "items": { "$ref": "#/$defs/content_placement" } },
+        "chests": { "type": "array", "items": { "$ref": "#/$defs/content_placement" } },
+        "levers": { "type": "array", "items": { "$ref": "#/$defs/content_placement" } },
+        "bonfires": { "type": "array", "items": { "$ref": "#/$defs/content_placement" } },
+        "fog_gates": { "type": "array", "items": { "$ref": "#/$defs/content_placement" } }
+      },
+      "additionalProperties": true
+    },
+    "flags": {
+      "type": "object",
+      "description": "Initial flag values for this world's GameState (features/08: flags registry declared before use).",
+      "additionalProperties": { "type": ["boolean", "number", "string"] }
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "transform": {
+      "type": "object",
+      "properties": {
+        "position": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+        "rotation": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+        "scale": { "type": "array", "items": { "type": "number", "exclusiveMinimum": 0 }, "minItems": 3, "maxItems": 3 }
+      },
+      "required": ["position"],
+      "additionalProperties": true
+    },
+    "map": {
+      "type": "object",
+      "required": ["name", "prefabs"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+        "prefabs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["prefab_id"],
+            "properties": {
+              "prefab_id": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+              "instance_id": { "type": "string", "pattern": "^[a-z0-9_]+$", "description": "Per-instance identity for content references." },
+              "transform": { "$ref": "#/$defs/transform" }
+            },
+            "additionalProperties": true
+          }
+        },
+        "ambiance": { "$ref": "#/$defs/ambiance", "description": "Optional per-map override of the world defaults (e.g. a dark cave inside a sunny world)." },
+        "lights": { "type": "object", "description": "Per-map embedded lights (bounded, editor counter).", "additionalProperties": true }
+      },
+      "additionalProperties": true
+    },
+    "socket": {
+      "type": "object",
+      "required": ["id", "map", "position"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+        "map": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+        "position": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+        "orientation": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 }
+      },
+      "additionalProperties": true
+    },
+    "spawn": {
+      "type": "object",
+      "required": ["id", "map", "position"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+        "map": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+        "position": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 }
+      },
+      "additionalProperties": true
+    },
+    "content_placement": {
+      "type": "object",
+      "required": ["id", "map", "position"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+        "map": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+        "position": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+        "rotation": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 }
+      },
+      "additionalProperties": true
+    },
+    "ambiance": {
+      "type": "object",
+      "description": "Sun + fog + tonemapping presets (bounded, features/06).",
+      "properties": {
+        "sun": { "type": "object", "additionalProperties": true },
+        "fog": { "type": "object", "additionalProperties": true },
+        "tonemapping": { "type": "object", "additionalProperties": true }
+      },
+      "additionalProperties": true
+    }
+  }
+}

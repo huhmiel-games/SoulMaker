@@ -1,0 +1,9 @@
+# Godot 4+ specific ignores
+.godot/
+/android/
+
+# Asset pipeline (ADR-010): downloaded binaries cache, never versioned
+catalog/cache/
+
+# Editor-only personal tool, not part of the game or the repo
+addons/godotty/

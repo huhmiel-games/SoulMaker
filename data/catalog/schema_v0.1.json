@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schemastore.specs.github.io/draft/2020-12/schema",
+  "$id": "data/catalog/schema_v0.1.json",
+  "title": "SoulMaker catalog manifest schema v0.1",
+  "description": "Catalog manifest (ADR-010/017): the source of truth for every catalog asset. Both streams (1st-party starter catalog, community) write into the same manifest. Unknown/extra fields are tolerated at load (ADR-009) — leaf objects keep additionalProperties true.",
+  "type": "object",
+  "required": ["format_version", "entries"],
+  "properties": {
+    "format_version": { "const": "0.1" },
+    "entries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/entry" }
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "description": "A single catalog asset; a revision is a new id (never overwrite in place, history lives in git).",
+      "required": ["id", "name", "category", "license", "files"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+        "name": { "type": "string" },
+        "category": {
+          "type": "string",
+          "enum": [
+            "prop_natural",
+            "architecture",
+            "light",
+            "enemy_character",
+            "clothing",
+            "equipment",
+            "animation",
+            "prefab",
+            "material"
+          ]
+        },
+        "license": { "type": "string" },
+        "author": { "type": "string" },
+        "bounds": {
+          "type": "object",
+          "properties": {
+            "triangles_max": { "type": "integer", "minimum": 0 },
+            "texture_size_max": { "type": "integer", "minimum": 0 },
+            "bbox": {
+              "type": "object",
+              "properties": {
+                "x": { "type": "number", "exclusiveMinimum": 0 },
+                "y": { "type": "number", "exclusiveMinimum": 0 },
+                "z": { "type": "number", "exclusiveMinimum": 0 }
+              },
+              "required": ["x", "y", "z"],
+              "additionalProperties": true
+            }
+          },
+          "required": ["triangles_max", "texture_size_max", "bbox"],
+          "additionalProperties": true
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path", "sha256"],
+            "properties": {
+              "path": { "type": "string" },
+              "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+            },
+            "additionalProperties": true
+          }
+        },
+        "fit": {
+          "type": "object",
+          "description": "Armor shells only (02 fit rule): minimum clearance vs the max-morph body.",
+          "properties": {
+            "shell_clearance": { "type": "number", "exclusiveMinimum": 0 },
+            "shares_base_morphs": { "type": "boolean" }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}
