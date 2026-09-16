@@ -6,13 +6,13 @@
 
 - **Objective**: P1 map editor — data-driven input layer (keyboard + gamepad)
 - **Expected mode**: edit
-- **Next step**: live test the aligned keyboard/gamepad camera in `map_editor.tscn` (recipe below); then resume P1 unit 1 (object-move rework decision, undo/redo, gizmos, or save/load polish).
-- **Last step done**: editor camera input unified and drag-free — identical across devices: arrows / LS pan, mouse motion / RS orbit in place (same non-inverted mapping), wheel / triggers zoom; middle/right-drag removed. Fixes the keyboard Y-inversion (old flat fallback) and the mouse-orbit X-inversion (raw vs negated stick) that differed from the gamepad. Docs + recipe updated.
+- **Next step**: live test the mouse/wheel-through-InputManager change in `map_editor.tscn` (recipe below); then resume P1 unit 1 (object-move rework decision, undo/redo, gizmos, or save/load polish).
+- **Last step done**: mouse motion and wheel now flow through InputManager like the right stick / triggers — `analog(action)` (stick + mouse_x/y + triggers summed, deadzone policy shared) and `wheel_ticks(action)` (discrete per-frame notches). `orbit_camera.gd` dropped all raw mouse event handling; orbit/zoom poll `PROFILES` entries in `_process`, and the `frozen` gate now covers every source (was mouse-only).
 
 ## Test recipe (human)
 
 1. Launch `scenes/editors/map_editor.tscn` (or `main.tscn`).
-2. Keyboard/mouse: at launch, arrows pan the camera and plain mouse motion orbits it (no click/drag) — directions must match the gamepad 1:1 (mouse right = RS right, mouse up = RS up). S save, L load, P playtest, Delete; clicking any toolbar/catalog button must NOT change arrow behavior (no focus steal). Typing in the map-name field keeps normal caret arrows.
+2. Keyboard/mouse: at launch, arrows pan the camera and plain mouse motion orbits it (no click/drag) — directions must match the gamepad 1:1 (mouse right = RS right, mouse up = RS up). Wheel zooms. **New: MOUSE_SCALE=0.14 and ORBIT_SENS=220 are the tuning knobs** — expected feel is unchanged from before this refactor; report zoom/orbit speed and direction if they drift. S save, L load, P playtest, Delete; clicking any toolbar/catalog button must NOT change arrow behavior (no focus steal). Typing in the map-name field keeps normal caret arrows.
 3. Gamepad: LS pans, RS orbits, LT/RT zoom; LB/RB cycle a highlighted catalog entry; A places the current entry (or selects under crosshair); B deselect; D-pad nudges selected; L3 fine; R1+D-pad nudge Y; Y playtest (LS moves, Y exits); Start quick-save.
 4. Report: any action not responding, unexpected double-action (e.g. arrows panning + nudging), and the DebugLabel state.
 

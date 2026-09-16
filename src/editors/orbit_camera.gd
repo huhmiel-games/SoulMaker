@@ -12,12 +12,19 @@ const MIN_DISTANCE := 0.5
 const MAX_DISTANCE := 120.0
 const MIN_PITCH := -80.0
 const MAX_PITCH := 80.0
-const MOUSE_ORBIT_SENS := 0.5
+## Orbit feel knob: applied to the unified right-stick + mouse analog vector.
+const ORBIT_SENS := 220.0
 
 ## Current distance from the focus point.
 var distance: float = 18.0
 ## Focus point the camera orbits around.
 var focus: Vector3 = DEFAULT_FOCUS
+
+## When true the camera accepts no input at all (pan/orbit/zoom). The editor
+## sets this while an edit-placement interaction or the menu is active, so the
+## view stays exactly where the user left it — Souls "become the object" the
+## sticks now move/rotate the placement, never the view.
+var frozen := false
 
 var _orbit_angle := 45.0
 var _pitch_angle := 35.0
@@ -27,24 +34,11 @@ func _ready() -> void:
 	_apply_transform()
 
 
-func _unhandled_input(event: InputEvent) -> void:
-	if not current:
-		return
-	if event is InputEventMouseMotion:
-		var mm := event as InputEventMouseMotion
-		# Mouse motion is the right-stick analogue: same non-inverted mapping,
-		# same in-place orbit, no button required.
-		_orbit_mouse(mm.relative)
-	elif event is InputEventMouseButton:
-		var mb := event as InputEventMouseButton
-		if mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.pressed:
-			_zoom(-1.0)
-		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and mb.pressed:
-			_zoom(1.0)
-
-
+## All camera input is now polled in _process through InputManager: mouse is
+## the right-stick parity (orbit) and the wheel the triggers parity (zoom), so
+## no raw event handling lives here anymore.
 func _process(delta: float) -> void:
-	if not current:
+	if not current or frozen:
 		return
 	# Pan input: arrows fill a left-stick-like vector, the analog stick adds on
 	# top — a single shared pan path, identical across devices. The keyboard
@@ -60,8 +54,20 @@ func _process(delta: float) -> void:
 		pan.y -= 1.0
 	pan = pan * 0.5 + InputManager.left_stick()
 	_pan_analog(pan, delta)
-	_orbit_analog(InputManager.right_stick(), delta)
-	_zoom_analog(InputManager.triggers(), delta)
+	# Orbit: right-stick + mouse-motion summed by InputManager; zoom: triggers
+	# + wheel. Both resolve through PROFILES, so keyboard/mouse/gamepad are the
+	# same device from the camera's point of view.
+	_orbit_analog(
+		Vector2(
+			InputManager.analog(&"cam_orbit_x"),
+			InputManager.analog(&"cam_orbit_y"),
+		),
+		delta,
+	)
+	var crank := InputManager.wheel_ticks(&"cam_zoom")
+	if crank != 0:
+		_zoom(-float(crank))
+	_zoom_analog(InputManager.analog(&"cam_zoom"), delta)
 
 
 func _pan_analog(stick: Vector2, delta: float) -> void:
@@ -78,24 +84,17 @@ func _pan_analog(stick: Vector2, delta: float) -> void:
 func _orbit_analog(stick: Vector2, delta: float) -> void:
 	if stick == Vector2.ZERO:
 		return
-	# Gamepad orbit pivots the camera around ITSELF (turret-like): the focus is
+	# Orbit pivots the camera around ITSELF (turret-like): the focus is
 	# re-glued ahead of the view so the camera stays in place while turning.
 	# Yaw and pitch are non-inverted (RS right = turn right, RS up = turn up);
 	# the option to invert arrives with Options (feature 11).
-	_orbit(Vector2(-stick.x, -stick.y) * 220.0 * delta, true)
+	_orbit(Vector2(-stick.x, -stick.y) * ORBIT_SENS * delta, true)
 
 
-func _zoom_analog(triggers: Vector2, delta: float) -> void:
-	var amount := triggers.y - triggers.x
+func _zoom_analog(amount: float, delta: float) -> void:
 	if absf(amount) < 0.001:
 		return
 	_zoom(-amount * 2.0 * delta)
-
-
-func _orbit_mouse(relative: Vector2) -> void:
-	# Mirrors the right-stick mapping (stick is negated before `_orbit`), so the
-	# mouse and the stick always turn the camera the same way.
-	_orbit(-relative * MOUSE_ORBIT_SENS, true)
 
 
 func _zoom(steps: float) -> void:

@@ -32,6 +32,11 @@ signal action_released(action: StringName)
 
 const DEVICE := 0
 const DEADZONE := 0.2
+## Mouse motion -> stick-units scale. Mouse is the right-stick parity but a
+## per-frame delta, not an absolute -1..1 axis: this constant converts pixels
+## into the same units the stick contributes, so both flow through the same
+## analog path. Preserves the old per-event MOUSE_ORBIT_SENS=0.5 feel at 60fps.
+const MOUSE_SCALE := 0.14
 ## Gamepad shift: Right Shoulder (R1).
 const SHIFT_BUTTON := JOY_BUTTON_RIGHT_SHOULDER
 ## Keyboard shift mirror: E held, the Souls event-action / quick-pouch.
@@ -43,6 +48,9 @@ const PROFILES := {
 		"cam_pan_right": {"key": KEY_D, "stick": JOY_AXIS_LEFT_X, "stick_sign": 1.0},
 		"cam_pan_fwd": {"key": KEY_W, "stick": JOY_AXIS_LEFT_Y, "stick_sign": -1.0},
 		"cam_pan_back": {"key": KEY_S, "stick": JOY_AXIS_LEFT_Y, "stick_sign": 1.0},
+		"cam_orbit_x": {"stick": JOY_AXIS_RIGHT_X, "mouse_x": true},
+		"cam_orbit_y": {"stick": JOY_AXIS_RIGHT_Y, "mouse_y": true},
+		"cam_zoom": {"triggers": true, "wheel": true},
 		"panel_left": {"btn": JOY_BUTTON_DPAD_LEFT, "key": KEY_LEFT},
 		"panel_right": {"btn": JOY_BUTTON_DPAD_RIGHT, "key": KEY_RIGHT},
 		"panel_up": {"btn": JOY_BUTTON_DPAD_UP, "key": KEY_UP},
@@ -73,6 +81,16 @@ var _active_profile := &"editor"
 ## never leaks stale edges between them.
 var _action_track: Dictionary = {}
 
+## Mouse motion and wheel accumulated during the frame (filled in
+## _unhandled_input, snapshot to the *_pub buffers in _process so consumers
+## read a stable value per frame). Keyed to PROFILES entries via the mouse_x /
+## mouse_y / wheel flags: motion is the right-stick parity, wheel the triggers
+## parity.
+var _mouse_buf := Vector2.ZERO
+var _wheel_buf := 0.0
+var _mouse_pub := Vector2.ZERO
+var _wheel_pub := 0.0
+
 
 func set_profile(profile: StringName) -> void:
 	if not PROFILES.has(profile):
@@ -87,8 +105,13 @@ func get_profile() -> StringName:
 
 ## Updates the per-action track once per rendered frame, before downstream
 ## nodes run their own _process. Read with is_just_pressed / is_just_released
-## / time_held within the same frame.
+## / time_held within the same frame. The mouse/wheel frame snapshot is
+## published here too, then the accumulators reset for the next frame.
 func _process(_delta: float) -> void:
+	_mouse_pub = _mouse_buf
+	_wheel_pub = _wheel_buf
+	_mouse_buf = Vector2.ZERO
+	_wheel_buf = 0.0
 	var entries: Dictionary = PROFILES[_active_profile]
 	var prefix := String(_active_profile) + "/"
 	var now := Time.get_ticks_msec()
@@ -168,6 +191,51 @@ func is_pressed(action: StringName, profile := &"") -> bool:
 	return false
 
 
+## Continuous value of an action, in stick-like units (-1..1 for a full
+## stick). All sources mapped on the entry sum up, with the same deadzone
+## policy as the boolean reads:
+##   "stick"    → raw axis × stick_sign, deadzone applied
+##   "mouse_x"  → this frame's mouse motion X × MOUSE_SCALE (RS parity)
+##   "mouse_y"  → this frame's mouse motion Y × MOUSE_SCALE
+##   "triggers" → right minus left trigger (each deadzone applied)
+## Camera orbit/zoom consume this instead of polling devices directly.
+func analog(action: StringName, profile := &"") -> float:
+	var prof := String(profile)
+	if prof.is_empty():
+		prof = String(_active_profile)
+	var entries: Dictionary = PROFILES.get(prof, {})
+	if not entries.has(action):
+		return 0.0
+	var e: Dictionary = entries[action]
+	var out := 0.0
+	var stick := int(e.get("stick", JOY_AXIS_INVALID))
+	if stick != JOY_AXIS_INVALID:
+		out += _deadzone(
+			Input.get_joy_axis(DEVICE, stick) * float(e.get("stick_sign", 1.0))
+		)
+	if bool(e.get("mouse_x", false)):
+		out += _mouse_pub.x * MOUSE_SCALE
+	if bool(e.get("mouse_y", false)):
+		out += _mouse_pub.y * MOUSE_SCALE
+	if bool(e.get("triggers", false)):
+		out += triggers().y - triggers().x
+	return out
+
+
+## Signed wheel-notch count accumulated during this frame for an action mapped
+## with "wheel": true (up = +1, down = -1 per notch). Wheel is a per-frame
+## discrete feed, unlike the continuous analog() sources: the consumer applies
+## each notch as one step instead of scaling it by delta.
+func wheel_ticks(action: StringName, profile := &"") -> int:
+	var prof := String(profile)
+	if prof.is_empty():
+		prof = String(_active_profile)
+	var entries: Dictionary = PROFILES.get(prof, {})
+	if not entries.has(action) or not bool(entries[action].get("wheel", false)):
+		return 0
+	return int(_wheel_pub)
+
+
 ## Left stick, deadzone applied. (Editor: camera pan / edit translate.)
 func left_stick() -> Vector2:
 	return _deadzone_vec(
@@ -192,6 +260,16 @@ func triggers() -> Vector2:
 	)
 
 
+## Mouse motion is captured in _input, before GUI handling and SubViewports
+## consume it: the editor camera lives inside a SubViewport whose ViewportContainer
+## grabs motion (mouse_filter STOP), so _unhandled_input at the root would never
+## see it. _input sees every event no matter the consumer. Wheel and buttons stay
+## on _unhandled_input so UI consumption is respected.
+func _input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion:
+		_mouse_buf += (event as InputEventMouseMotion).relative
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventJoypadButton:
 		var button := event as InputEventJoypadButton
@@ -210,6 +288,14 @@ func _unhandled_input(event: InputEvent) -> void:
 					action_pressed.emit(action)
 				else:
 					action_released.emit(action)
+	elif event is InputEventMouseButton:
+		var mb := event as InputEventMouseButton
+		if not mb.pressed:
+			return
+		if mb.button_index == MOUSE_BUTTON_WHEEL_UP:
+			_wheel_buf += 1.0
+		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_wheel_buf -= 1.0
 
 
 func _resolve_joy_button(button_index: int) -> StringName:
