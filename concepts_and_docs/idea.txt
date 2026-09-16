@@ -1348,8 +1348,8 @@ Puisque tes anims sont retargetées, tous les bones ont des noms standard (via S
 func make_upper_body(src: Animation) -> Animation:
     var upper := Animation.new()
     upper.length = src.length
-    var bottom_bones = ["hips", "left_upleg", "left_leg", "left_foot",
-                        "right_upleg", "right_leg", "right_foot"]
+	var bottom_bones = ["hips", "left_upleg", "left_leg", "left_foot",
+						"right_upleg", "right_leg", "right_foot"]
     for t in src.get_track_count():
         var path := String(src.track_get_path(t))
         var skip := false
@@ -1770,86 +1770,86 @@ Avec plaisir. Voici un exemple concret d'un dialogue PNJ complet, tiré du conte
       "type": "choice",
       "options": [
         { "text": "Qui es-tu ?", "goto": "who" },
-        { "text": "J'ai entendu parler du pont de cendre.", "goto": "bridge", "conditions": [ { "type": "flag", "id": "heard_about_bridge" } ] },
-        { "text": "Montre-moi ce que tu vends.", "goto": "shop" },
-        { "text": "Prends cette clé. Retrouve-la en bon état.", "goto": "give_key", "conditions": [ { "type": "has_item", "id": "key_forgotten_vault" }, { "type": "item_not_full", "id": "key_forgotten_vault" } ] },
-        { "text": "Aucune importance. Adieu.", "goto": "exit" }
+		{ "text": "J'ai entendu parler du pont de cendre.", "goto": "bridge", "conditions": [ { "type": "flag", "id": "heard_about_bridge" } ] },
+		{ "text": "Montre-moi ce que tu vends.", "goto": "shop" },
+		{ "text": "Prends cette clé. Retrouve-la en bon état.", "goto": "give_key", "conditions": [ { "type": "has_item", "id": "key_forgotten_vault" }, { "type": "item_not_full", "id": "key_forgotten_vault" } ] },
+		{ "text": "Aucune importance. Adieu.", "goto": "exit" }
       ]
     },
 
-    "who": {
-      "type": "line",
-      "text": "Kael. Aujourd'hui forgeron, hier soldat de la Garde de Braises. Le reste ne regarde que les morts.",
+	"who": {
+	  "type": "line",
+	  "text": "Kael. Aujourd'hui forgeron, hier soldat de la Garde de Braises. Le reste ne regarde que les morts.",
       "next": "after_who"
     },
 
     "after_who": {
       "type": "line",
-      "text": "Si tu veux me rendre service : les braises du sanctuaire se meurent. Apporte-moi une Pierre d'Embrasement.",
-      "effects": [ { "type": "set_flag", "id": "kael_asked_stone" } ],
-      "next": "hub"
+	  "text": "Si tu veux me rendre service : les braises du sanctuaire se meurent. Apporte-moi une Pierre d'Embrasement.",
+	  "effects": [ { "type": "set_flag", "id": "kael_asked_stone" } ],
+	  "next": "hub"
     },
 
-    "bridge": {
-      "type": "conditional",
-      "branches": [
+	"bridge": {
+	  "type": "conditional",
+	  "branches": [
         {
-          "conditions": [ { "type": "has_item", "id": "emberstone" } ],
-          "goto": "bridge_with_stone"
+		  "conditions": [ { "type": "has_item", "id": "emberstone" } ],
+		  "goto": "bridge_with_stone"
         },
         {
-          "conditions": [],
-          "goto": "bridge_no_stone"
+		  "conditions": [],
+		  "goto": "bridge_no_stone"
         }
       ]
     },
 
-    "bridge_no_stone": {
-      "type": "line",
-      "text": "Tu es fou. Personne ne revient de la gorge avec ce qu'il y faut.",
+	"bridge_no_stone": {
+	  "type": "line",
+	  "text": "Tu es fou. Personne ne revient de la gorge avec ce qu'il y faut.",
       "next": "hub"
     },
 
     "bridge_with_stone": {
       "type": "line",
-      "text": "Une vraie Pierre d'Embrasement ! Donne. Ce vieux brasier respirera encore.",
-      "effects": [
-        { "type": "remove_item", "id": "emberstone", "count": 1 },
-        { "type": "set_flag", "id": "kael_stone_done" },
-        { "type": "unlock_shortcut", "id": "door_kael_workshop" }
+	  "text": "Une vraie Pierre d'Embrasement ! Donne. Ce vieux brasier respirera encore.",
+	  "effects": [
+		{ "type": "remove_item", "id": "emberstone", "count": 1 },
+		{ "type": "set_flag", "id": "kael_stone_done" },
+		{ "type": "unlock_shortcut", "id": "door_kael_workshop" }
       ],
-      "next": "reward"
+	  "next": "reward"
     },
 
-    "reward": {
-      "type": "line",
-      "text": "Tiens. Une lame forgée dans le feu que tu m'as ramené. Elle te hantera, ou l'inverse.",
-      "effects": [ { "type": "give_item", "id": "sword_ember", "count": 1 } ],
-      "next": "exit"
+	"reward": {
+	  "type": "line",
+	  "text": "Tiens. Une lame forgée dans le feu que tu m'as ramené. Elle te hantera, ou l'inverse.",
+	  "effects": [ { "type": "give_item", "id": "sword_ember", "count": 1 } ],
+	  "next": "exit"
     },
 
-    "give_key": {
-      "type": "line",
-      "text": "La clé du coffre oublié ? Bien gardée, je parie. Laisse-moi admirer son couvert.",
-      "effects": [
-        { "type": "remove_item", "id": "key_forgotten_vault", "count": 1 },
-        { "type": "set_flag", "id": "kael_took_key" },
-        { "type": "trigger_event", "id": "event_kael_betrayal" }
+	"give_key": {
+	  "type": "line",
+	  "text": "La clé du coffre oublié ? Bien gardée, je parie. Laisse-moi admirer son couvert.",
+	  "effects": [
+		{ "type": "remove_item", "id": "key_forgotten_vault", "count": 1 },
+		{ "type": "set_flag", "id": "kael_took_key" },
+		{ "type": "trigger_event", "id": "event_kael_betrayal" }
       ],
-      "next": "exit"
+	  "next": "exit"
     },
 
-    "shop": {
-      "type": "line",
-      "text": "Ce que j'ai. Le prix de la survie.",
+	"shop": {
+	  "type": "line",
+	  "text": "Ce que j'ai. Le prix de la survie.",
       "effects": [ { "type": "open_shop", "id": "kael_inventory" } ],
       "next": "exit"
     },
 
     "exit": {
       "type": "line",
-      "text": "Va. Et dors avec l'oeil ouvert.",
-      "next": null
+	  "text": "Va. Et dors avec l'oeil ouvert.",
+	  "next": null
     }
   }
 }
@@ -1888,9 +1888,9 @@ Concrètement, quand le joueur sauvegarde, tu sérialises un seul objet du genre
 
 {
   "flags": {
-    "heard_about_bridge": true,
-    "kael_stone_done": true,
-    "kael_asked_stone": true
+	"heard_about_bridge": true,
+	"kael_stone_done": true,
+	"kael_asked_stone": true
   }
 }
 
@@ -1929,7 +1929,7 @@ Concrètement, dans ton format de monde :
 {
   "world_version": 1,
   "flags": [
-    { "id": "kael_asked_stone", "description": "Kael a demandé la Pierre d'Embrasement" },
+	{ "id": "kael_asked_stone", "description": "Kael a demandé la Pierre d'Embrasement" },
     { "id": "kael_stone_done", "description": "La pierre a été remise à Kael" },
     { "id": "heard_about_bridge", "description": "Le joueur a entendu parler du pont de cendre" }
   ],
@@ -1957,23 +1957,23 @@ Conséquence pour le loader
 Avec ce modèle, ta validation au chargement devient stricte et complète :
 
 func validate_world(world: Dictionary) -> Array[String]:
-    var errors: Array[String] = []
-    var known_flags := {}
-    for f in world.get("flags", []):
-        known_flags[f["id"]] = true
+	var errors: Array[String] = []
+	var known_flags := {}
+	for f in world.get("flags", []):
+		known_flags[f["id"]] = true
 
-    for node_id in world.get("nodes", {}):
-        var node: Dictionary = world.nodes[node_id]
-        for cond in node.get("conditions", []) + _collect_option_conditions(node):
-            if not known_flags.has(cond.get("id")):
-                errors.append("Node '%s': flag inconnu '%s'" % [node_id, cond.get("id")])
-        for fx in node.get("effects", []):
-            if fx.get("type") == "set_flag" and not known_flags.has(fx.get("id")):
-                errors.append("Node '%s': effet sur flag inconnu '%s'" % [node_id, fx.get("id")])
-        var goto := node.get("next", node.get("goto"))
-        if goto != null and not world.nodes.has(goto):
-            errors.append("Node '%s': référence cassée vers '%s'" % [node_id, goto])
-    return errors
+	for node_id in world.get("nodes", {}):
+		var node: Dictionary = world.nodes[node_id]
+		for cond in node.get("conditions", []) + _collect_option_conditions(node):
+			if not known_flags.has(cond.get("id")):
+				errors.append("Node '%s': flag inconnu '%s'" % [node_id, cond.get("id")])
+		for fx in node.get("effects", []):
+			if fx.get("type") == "set_flag" and not known_flags.has(fx.get("id")):
+				errors.append("Node '%s': effet sur flag inconnu '%s'" % [node_id, fx.get("id")])
+		var goto := node.get("next", node.get("goto"))
+		if goto != null and not world.nodes.has(goto):
+			errors.append("Node '%s': référence cassée vers '%s'" % [node_id, goto])
+	return errors
 
 (Note : ce snippet suppose que les conditions ne portent que sur des flags ; tu auras aussi has_item, dont les ids pointent vers un registre d'items — même logique, même liste déroulante.)
 
@@ -2755,8 +2755,3 @@ Note ce que ça déplace comme fardeau : puisque la liberté de tes créateurs p
 Un point de vigilance malgré tout : même avec des paramètres bornés, les combinaisons restent libres, et c'est là que des monnes douteux peuvent naître (un donjon peint en rose fluo avec 300 ennemis). Ce n'est plus un problème de sécurité, juste de qualité — et ça se règle à un autre niveau : des quotas doux, des presets d'ambiance, ou simplement rien du tout si tu assumes le joyeux chaos communautaire.
 
 Au bilan, ta pile est remarquablement verrouillée : JSON strict → catalogue de prefabs officiels → paramètres énumérés → reconstruction déterministe → impostors et backdrops issus du même catalogue. Tout tient dans une boîte que tu contrôles entièrement. Bonne base pour une V1 sereine.
-
-
-
-
-

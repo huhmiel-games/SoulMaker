@@ -6,7 +6,7 @@
 - Local executable: `~/App/Godot/Godot_v4.7.2-stable_linux.x86_64`
 - Renderer: Forward+ (only — no Compatibility fallback, see `concepts_and_docs/decisions.md` ADR-002)
 - 3D physics: Jolt Physics
-- Project still in its initial state (no scenes or scripts yet).
+- P0 state (tracked in `WORKLOG.md`): spikes done/redirected, schemas v0.1 + `decisions.md` in place, autoload `GameState` + test scenes live in `scenes/tests/`; remaining P0 = none (GameState + conventions delivered).
 
 ## Languages
 
@@ -18,7 +18,9 @@
 
 - Official 4.7 docs: https://docs.godotengine.org/en/4.7/
 - Stable docs (more recent): https://docs.godotengine.org/en/stable/
-- Language: GDScript (follow engine conventions).
+- GDScript (follow engine conventions).
+- **`concepts_and_docs/naming_conventions.md`** — file/node/script conventions (P0 deliverable); AGENTS.md rules override it on conflict.
+- **Local 4.7.2 class-reference cache**: `reference/godot47_docs/` (gitignored, added on demand) — answer class-API questions from it (Read/Grep) before webfetch; see `concepts_and_docs/godot47_api_notes.md` for the regeneration command and the 4.7 API deltas.
 - **`concepts_and_docs/features.md` is the master feature list** (completeness net): a new feature lands there first (with a status), then an ADR/roadmap entry may implement it.
 - **V1 = the public launch build**; post-V1 additions live in the vault. The V1 ships a **1st-party starter catalog** (CC0 + re-targeted animations, ADR-017) — the community pipeline is augmentative post-V1, never a V1 dependency.
 
@@ -30,6 +32,7 @@
 - `src/` — GDScript organized by concept: `autoloads/`, `runtime/` (combat, bonfire, camera, streaming), `editors/`, `ui/`, `dataio/` (JSON load/validate), `tools/` (headless: `import_check.gd`, `build_pck`, data validation).
 - `scenes/` — `.tscn` (main, prefabs, UI screens, humanoid template).
 - `creator_docs/` — short creator-facing docs (decision I).
+- `reference/` — read-only reference snippets salvaged from the sibling project `rpg-base` (toon shaders, state-machine pattern) plus the gitignored `godot47_docs/` class-ref cache; never imported by the game, see `reference/README.md`.
 - `assets/` — 1st-party local sources (CC0 + re-targeted), **gitignored** (ADR-017): packed into the PCK at P10; never versioned.
 - `catalog/cache/` — community Drive download cache, gitignored (ADR-010).
 - `addons/` — editor-only personal tools (`godotty/`, gitignored).
@@ -42,8 +45,66 @@
 - Run a given script without launching the game:
   `~/App/Godot/Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script <path>`
 
+## Workflow: division of labor
+
+Single-dev team; the human runs the visual/interactive parts. Cost of full
+headless validation is high, so:
+
+- **AI (writing)**: verify every API from `reference/godot47_docs/` before
+  writing; self-check parse errors only with
+  `~/App/Godot/Godot_v4.7.2-stable_linux.x86_64 --headless --check-only --script <file>`
+  (fast, no game launch). Headless auto-runs stay limited to *deterministic*
+  validations (JSON/schema, data pipeline, track coverage) where "feel" does
+  not exist. Scripts referencing an autoload singleton cannot be compile-checked
+  that way (autoloads are unknown in standalone `--script`); validate them by a
+  headless run of their scene: `... --headless --path . <scene>.tscn`.
+- **Human (testing)**: when code is ready, AI provides a short test recipe —
+  exact scene/command, actions (keys/settings), expected result, and what to
+  report back (logs + visual impression). Human launches, AI iterates.
+- No pose-diff "eyeball" proofs by the AI: visual confirmation is the human's
+  job (faster and better). If a specific inspector/frame inspection is needed,
+  the AI may request it explicitly.
+- Important changes land in AGENTS.md only when they affect future sessions.
+- Scene structure rules and the debug-overlay contract live in **Shared
+  artifacts & visual bridge** below.
+
+## Shared artifacts & visual bridge
+
+The AI and the human have complementary senses: the AI cannot see the editor
+or the running game, and the human cannot read code at AI speed. Two artifacts
+bridge the gap; a third expected bridge was tested and does NOT work (2026-09-15),
+see below.
+
+1. **Scene files (`.tscn` / `.tres`) are the shared language** — a text file
+   for the AI, a rendered graph for the human in the editor. Rule: push the
+   visible scaffold into the `.tscn` (roots, named attach points, exported
+   vars); a script resolves the data-driven parts, it does not hide the
+   structure. A scene in which the human has zero visual anchor in the editor
+   is a defect.
+2. **Runtime debug overlay + logs are the primary measurement bridge** — every
+   test scene carries a state `Label` (current animation, blend amount, hit
+   status, frame), matching `print()` lines, and optional visible markers
+   (wireframes / colored gizmos). One run therefore produces both a visual
+   signal (human) and a parseable signal (AI) from the same data.
+3. **Screenshots are NOT readable by the AI (tested 2026-09-15)** — the model
+   has no image input; reading a PNG returns "cannot read image". The human
+   may capture screenshots for their own records, but visual feedback reaches
+   the AI only through descriptions + instrumentation. Re-test this if the
+   model or tier changes.
+
+| Artifact | AI reads | AI writes | Human reads | Human decides |
+|---|---|---|---|---|
+| `.tscn` / `.tres` | ✓ (text) | ✓ | ✓ (editor) | visual |
+| Scripts / validators | ✓ | ✓ | – | functional |
+| Logs + prints + overlay | ✓ | ✓ | ✓ | – |
+| JSON data / schemas | ✓ | ✓ | ✓ | content |
+| Screenshots | ✗ (no image input) | – | ✓ | visual / feel |
+
 ## Notes
 
+- **Session resume**: read `WORKLOG.md` (repo root) **first** — it holds the current objective, expected mode, next step and open items. Do not ask to re-explain or re-read the whole `roadmap.md`; update `WORKLOG.md` at each meaningful step (objective, mode, next), not only at session end.
+- **Search scope**: stay inside this repo by default — never search the parent directory. `~/Projets_3D/rpg-base` is a sibling reference project (old code, pre-IK, Godot 4.5/4.6-era converted to 4.7): inspect it only on explicit request.
 - Check the docs version before using a feature (use 4.7 docs over stable when they differ).
+- **Class API**: answer from `reference/godot47_docs/` (Read/Grep), never webfetch. Add a class to the cache on demand (see `concepts_and_docs/godot47_api_notes.md`).
 - Do not add files inside `.godot/` (editor cache).
 - **godotty** (terminal inside the editor, to run opencode) is an editor-only personal tool: it lives in `addons/godotty/`, is gitignored, and never appears in the game or the build (its `*.editor.*` GDExtension tags only load in the editor binary). Install manually; a fresh clone does not have it.

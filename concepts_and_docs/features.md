@@ -27,12 +27,12 @@ Legend per column: *Phase* refers to the roadmap phase (P0-P13); *Ref* points to
 | Dodge + i-frames | 🔒 | P2 | roadmap P2 | |
 | Stamina economy | 🔒 | P2 | roadmap P2 | Endurance-based |
 | Combat feel: windup/attack/release markers | 🔒 | P2 | roadmap P2, idea.txt | |
-| Upper/lower body layers (combos) | 🔒 | P2 | roadmap P2 | |
+| Upper/lower body layers (combos) | 🔒 | P2 | roadmap P2 | P0 spike FAIL 15/09/2026 — Blend2 somme des poids = 1, pas de superposition bas/haut ; à retester en P2 |
 | Hitstop, screen shake, hit reactions | 🔒 | P2 | roadmap P2 | |
 | Blade rebound, easing, variation | 🔒 | P2 | roadmap P2 | |
-| Swept `ShapeCast3D` hitbox, masked off-attack | 🔒 | P2 | roadmap P2 | |
+| Swept `ShapeCast3D` hitbox, masked off-attack | 🔒 | P2 | roadmap P2 | spike P0 REPORTED — technique déjà choisie, validation en amont de P2 |
 | Controller rumble (haptics) | 🔒 | P2 | roadmap P2 | On/off + intensity in Options (P2) |
-| Foot IK | 🔒 | P0 | roadmap P0 spike | |
+| Foot IK | 🔒 | P0 | roadmap P0 spike | spike FAIL 15/09/2026, abandonné — à retester en V1 |
 | Block / guard (stability, stamina drain, guard break) | 🔒 | P3 | features/17 | Guard via shield or weapon (shared stat block — every item carries guard values); two-handing keeps guard (weapon values), cancels parry |
 | Criticals: parry / backstab / riposte (stance break + critical animation) | 🔒 | P3 | features/17 | Parry = shield only (light 8-12 f / medium 6-8 f / great none); backstab ±30° rear cone / 0.6 s; riposte ×1.5-×2; feel validated at P3 |
 | Ranged weapons (bow/crossbow): draw/hold, ranged lock-on, ammo economy | 🔒 | P3 | features/17 | Ammo = base item (`§3`, P8); feel settled at P3 |
@@ -288,6 +288,7 @@ Captured in `roadmap.md` → Open questions; mirrored here as status ❔/🟡 ro
 - Animation/source selection per licenses.
 - Post-V1 vault items (shops, spells, arts, audio — ADR-014, cinematics — ADR-014, emotes, elevators, weather, respec, fast travel, NG+, CI).
 - ~~Full gamepad mapping detail (options: preset rows vs per-button)~~ — **resolved 13/09/2026**: gamepad = bounded layout rows (Souls default + alternates, physical button ids), keyboard = full per-key remap; per-button gamepad remap joins the post-V1 accessibility group.
+- ~~Editor gamepad ergonomics (🟡 §16 "keyboard/gamepad both usable")~~ — **resolved 16/09/2026**: data-driven `InputManager` autoload, R1 shift/gesture set, no modal modes; keyboard follows the same action set. See `concepts_and_docs/editor_input_mapping.md`.
 - ~~Damage numbers vs bars-only for hosts (souls convention = bars)~~ — **resolved 13/09/2026**: bars-only in V1 — no flying damage numbers, no souls pop-text.
 - ~~Equip-load roll-tier thresholds (🟡 `§1` — P3)~~ — **resolved 13/09/2026**: <30% / <70% / ≥70% (fast/mid/fat).
 - ~~Backstep i-frames (🟡 `§1` — P3)~~ — **resolved 13/09/2026**: none — spacing only, the dodge stays the unique invuln tool.

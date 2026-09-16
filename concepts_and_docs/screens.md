@@ -189,12 +189,12 @@ Each entry: *Purpose · Content · Actions · Transitions · Roadmap phase*.
 
 ```
 Boot → Home (Play door)
-      → World library (/ import a shared world file, drag & drop)
-      → New game → choose a world → create player → spawn → play
-      → HUD (HP/stamina/souls/quickbar)
-      → kill enemies → collect souls → bonfire (level-up) → explore
-      → bonfire hub (save/level-up/options) / inventory & equipment / death-respawn (soul orb recovery) / socket transitions
-      → back to Home
+	  → World library (/ import a shared world file, drag & drop)
+	  → New game → choose a world → create player → spawn → play
+	  → HUD (HP/stamina/souls/quickbar)
+	  → kill enemies → collect souls → bonfire (level-up) → explore
+	  → bonfire hub (save/level-up/options) / inventory & equipment / death-respawn (soul orb recovery) / socket transitions
+	  → back to Home
 ```
 
 ### Creator journey (produce & share)
@@ -204,7 +204,7 @@ Boot → Home (Create door)
 Prefab editor  → group assets → save a prefab
 Map editor     → assemble prefabs/assets → playtest the map alone → save/export map
 World editor   → connect maps via sockets → set ambiance (+ per-map override)
-              → playtest the world → export the world (the shared file)
+			  → playtest the world → export the world (the shared file)
 Consume check  → back to Home → Play door → World library (/ import the exported file) → play
 ```
 

@@ -6,74 +6,74 @@
   "type": "object",
   "required": ["format_version"],
   "properties": {
-    "format_version": { "const": "0.1" },
-    "profile": { "type": "string", "description": "Display name / label." },
-    "skeleton_profile": { "const": "humanoid", "description": "Standard humanoid skeleton (ADR-006), shared animation ecosystem." },
-    "animation_speed": { "type": "number", "exclusiveMinimum": 0, "description": "Per-character AnimationPlayer speed scale (bounded)." },
-    "morphs": {
-      "type": "object",
-      "description": "Morph map {shape: value} — bounded blend shapes, linked slider groups enforced at editor + import.",
-      "properties": {
-        "values": {
-          "type": "object",
-          "additionalProperties": { "type": "number" }
-        }
-      },
-      "additionalProperties": true
-    },
-    "attachments": {
-      "type": "array",
-      "description": "3D overlays bound to canonical rig sockets (features/02): armor pieces (helmet/chest/gauntlets/leggings — the armor overlay layer), hair, ears, cape, held items; runtime equipment references the same slots.",
-      "items": {
-        "type": "object",
-        "required": ["slot", "asset_id"],
-        "properties": {
-          "slot": { "type": "string", "enum": ["hair", "ears", "weapon", "offhand", "helmet", "chest", "gauntlets", "leggings", "cape", "held_torch"] },
-          "asset_id": { "type": "string", "pattern": "^[a-z0-9_]+$" }
-        },
-        "additionalProperties": true
-      }
-    },
-    "face": {
-      "type": "object",
-      "description": "2D anime face: texture-based detail over geometry morphs (features/02, ADR-019).",
-      "properties": {
-        "layers": { "type": "array", "items": { "type": "string" } },
-        "atlas_offsets": { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "number" } } },
-        "blink_set": { "type": "string" },
-        "talk_poses": { "type": "integer", "minimum": 1, "description": "Bounded talk-loop pose set (features/02; speech is text-only, no visemes — 13/09/2026)." },
-        "head_shadow": { "type": "boolean", "description": "SDF-style head shadow (ADR-019, P4)." }
-      },
-      "additionalProperties": true
-    },
-    "outfit": {
-      "type": "object",
-      "description": "Clothing layer (features/02): the painted, fitted base look — texture set on the body mesh. Cosmetic (0 stats, 0 weight); default for the run's clothing slot, swappable in-game.",
-      "properties": {
-        "texture_set": { "type": "string", "description": "Catalog clothing id (texture set sharing the frozen base UV layout)." }
-      },
-      "additionalProperties": true
-    },
-    "role": {
-      "type": "object",
-      "description": "Optional per-role extension. Same base mesh/morphs; only the role block differs.",
-      "properties": {
-        "enemy": {
-          "type": "object",
-          "description": "Enemy config (features/05): archetype + boss marker + bounded stat multipliers + resist table.",
-          "properties": {
-            "archetype_id": { "type": "string", "pattern": "^[a-z0-9_]+$" },
-            "boss_level": { "type": "boolean", "description": "V1 boss marker: bounded stat multipliers only, no phases." },
-            "stat_multipliers": { "type": "object", "additionalProperties": { "type": "number", "minimum": 0 } },
-            "resist_table": { "type": "object", "description": "Bounded resist multipliers for the 7 damage types (features/17).", "additionalProperties": { "type": "number" } },
-            "status_susceptibility": { "type": "object", "description": "Bleed/poison/frost build-up multipliers (features/17).", "additionalProperties": { "type": "number" } }
-          },
-          "additionalProperties": true
-        },
-        "npc": { "type": "object", "description": "Dialogue link handled by the narrative layer (features/08).", "additionalProperties": true }
-      },
-      "additionalProperties": true
-    }
+	"format_version": { "const": "0.1" },
+	"profile": { "type": "string", "description": "Display name / label." },
+	"skeleton_profile": { "const": "humanoid", "description": "Standard humanoid skeleton (ADR-006), shared animation ecosystem." },
+	"animation_speed": { "type": "number", "exclusiveMinimum": 0, "description": "Per-character AnimationPlayer speed scale (bounded)." },
+	"morphs": {
+	  "type": "object",
+	  "description": "Morph map {shape: value} — bounded blend shapes, linked slider groups enforced at editor + import.",
+	  "properties": {
+		"values": {
+		  "type": "object",
+		  "additionalProperties": { "type": "number" }
+		}
+	  },
+	  "additionalProperties": true
+	},
+	"attachments": {
+	  "type": "array",
+	  "description": "3D overlays bound to canonical rig sockets (features/02): armor pieces (helmet/chest/gauntlets/leggings — the armor overlay layer), hair, ears, cape, held items; runtime equipment references the same slots.",
+	  "items": {
+		"type": "object",
+		"required": ["slot", "asset_id"],
+		"properties": {
+		  "slot": { "type": "string", "enum": ["hair", "ears", "weapon", "offhand", "helmet", "chest", "gauntlets", "leggings", "cape", "held_torch"] },
+		  "asset_id": { "type": "string", "pattern": "^[a-z0-9_]+$" }
+		},
+		"additionalProperties": true
+	  }
+	},
+	"face": {
+	  "type": "object",
+	  "description": "2D anime face: texture-based detail over geometry morphs (features/02, ADR-019).",
+	  "properties": {
+		"layers": { "type": "array", "items": { "type": "string" } },
+		"atlas_offsets": { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "number" } } },
+		"blink_set": { "type": "string" },
+		"talk_poses": { "type": "integer", "minimum": 1, "description": "Bounded talk-loop pose set (features/02; speech is text-only, no visemes — 13/09/2026)." },
+		"head_shadow": { "type": "boolean", "description": "SDF-style head shadow (ADR-019, P4)." }
+	  },
+	  "additionalProperties": true
+	},
+	"outfit": {
+	  "type": "object",
+	  "description": "Clothing layer (features/02): the painted, fitted base look — texture set on the body mesh. Cosmetic (0 stats, 0 weight); default for the run's clothing slot, swappable in-game.",
+	  "properties": {
+		"texture_set": { "type": "string", "description": "Catalog clothing id (texture set sharing the frozen base UV layout)." }
+	  },
+	  "additionalProperties": true
+	},
+	"role": {
+	  "type": "object",
+	  "description": "Optional per-role extension. Same base mesh/morphs; only the role block differs.",
+	  "properties": {
+		"enemy": {
+		  "type": "object",
+		  "description": "Enemy config (features/05): archetype + boss marker + bounded stat multipliers + resist table.",
+		  "properties": {
+			"archetype_id": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+			"boss_level": { "type": "boolean", "description": "V1 boss marker: bounded stat multipliers only, no phases." },
+			"stat_multipliers": { "type": "object", "additionalProperties": { "type": "number", "minimum": 0 } },
+			"resist_table": { "type": "object", "description": "Bounded resist multipliers for the 7 damage types (features/17).", "additionalProperties": { "type": "number" } },
+			"status_susceptibility": { "type": "object", "description": "Bleed/poison/frost build-up multipliers (features/17).", "additionalProperties": { "type": "number" } }
+		  },
+		  "additionalProperties": true
+		},
+		"npc": { "type": "object", "description": "Dialogue link handled by the narrative layer (features/08).", "additionalProperties": true }
+	  },
+	  "additionalProperties": true
+	}
   },
   "additionalProperties": true
 }

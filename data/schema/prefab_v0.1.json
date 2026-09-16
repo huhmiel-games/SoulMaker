@@ -6,33 +6,33 @@
   "type": "object",
   "required": ["format_version", "name", "assets"],
   "properties": {
-    "format_version": { "const": "0.1" },
-    "name": { "type": "string", "pattern": "^[a-z0-9_]+$" },
-    "assets": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["asset_id"],
-        "properties": {
-          "asset_id": { "type": "string", "pattern": "^[a-z0-9_]+$" },
-          "transform": { "$ref": "#/$defs/transform" }
-        },
-        "additionalProperties": true
-      }
-    }
+	"format_version": { "const": "0.1" },
+	"name": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+	"assets": {
+	  "type": "array",
+	  "items": {
+		"type": "object",
+		"required": ["asset_id"],
+		"properties": {
+		  "asset_id": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+		  "transform": { "$ref": "#/$defs/transform" }
+		},
+		"additionalProperties": true
+	  }
+	}
   },
   "additionalProperties": true,
   "$defs": {
-    "transform": {
-      "type": "object",
-      "description": "Position + orientation + scale; free placement, overlaps allowed (anti-grid identity).",
-      "properties": {
-        "position": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
-        "rotation": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
-        "scale": { "type": "array", "items": { "type": "number", "exclusiveMinimum": 0 }, "minItems": 3, "maxItems": 3 }
-      },
-      "required": ["position"],
-      "additionalProperties": true
-    }
+	"transform": {
+	  "type": "object",
+	  "description": "Position + orientation + scale; free placement, overlaps allowed (anti-grid identity).",
+	  "properties": {
+		"position": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+		"rotation": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+		"scale": { "type": "array", "items": { "type": "number", "exclusiveMinimum": 0 }, "minItems": 3, "maxItems": 3 }
+	  },
+	  "required": ["position"],
+	  "additionalProperties": true
+	}
   }
 }

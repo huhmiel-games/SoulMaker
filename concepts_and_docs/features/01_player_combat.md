@@ -112,6 +112,8 @@
 **Open questions** — none (the technique is chosen).
 **Sources** — idea.txt 2154-2286, 2294-2316, 2318-2340.
 
+**Status** : spike P0 **REPORTED** 15/09/2026 — pas indispensable au démarrage ; la technique est déjà choisie, la validation est décalée en amont de P2.
+
 ## Upper/lower body layers
 
 **Goal** — attacks without interrupting locomotion: enemy can move legs while upper body swings.
@@ -123,7 +125,11 @@
 **Open questions** — whether weapon-swing state also freezes lower (usually yes in souls).
 **Sources** — idea.txt 1337-1401.
 
+**Status** : spike FAIL 15/09/2026 — section conservée comme intent ; l'option « blend upper body nodes onto lower locomotion, masked by bone sets » via `AnimationNodeBlend2` est écartée (somme des poids = 1 → pas de superposition bas/haut à pleine intensité). Rework de topologie (additive / masques par os) à réévaluer en P2.
+
 ## Foot IK (SkeletonModifier3D)
+
+**Status** : spike FAIL 15/09/2026 — section conservée comme intent, pas implémentée en V1.
 
 **Goal** — feet land on terrain, not floating on sloped geometry.
 **Behaviors** — two-bone IK / FABRIK (`SkeletonModifier3D`) per leg, raycast target for ground height; influence blending to avoid pops; polish needed (~half day expected).

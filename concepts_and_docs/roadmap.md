@@ -29,15 +29,15 @@ A game that is not a game: a base that lets anyone create their own souls-like w
 - Technical spikes verified on the local binary, documented:
   - Retargeting `SkeletonProfileHumanoid` + import of third-party animations (Mixamo/Quaternius/etc. per licenses)
   - Animation markers windup/attack/release (`play_section_with_markers`)
-  - Foot IK `SkeletonModifier3D` (two-bone / FABRIK)
-  - Upper/lower body filtering in the `AnimationTree` (excluded bones + translation tracks)
-  - `ShapeCast3D` following a bone (swept hitbox) + `callback_mode_process = Physics`
+  - ~~Foot IK `SkeletonModifier3D` (two-bone / FABRIK)~~ — **FAIL 15/09/2026** : spike abandonné (orientation perso + rig non inspectable dans l'éditeur) — voir `footik_model.md`
+  - ~~Upper/lower body filtering in the `AnimationTree` (excluded bones + translation tracks)~~ — **FAIL 15/09/2026** : spike abandonné — le `AnimationNodeBlend2` pondère les branches à somme 1 (lerp) : impossible de superposer « bas = walk » et « haut = attack » à pleine intensité simultanément ; rework de topologie (additive / masques par os) reporté en P2
+  - ~~`ShapeCast3D` following a bone (swept hitbox) + `callback_mode_process = Physics`~~ — **REPORTED (15/09/2026)** : pas indispensable au démarrage ; la technique est déjà choisie (`features/01` §Swept hitbox), validation reportée en amont de P2 (ligne 74)
 - Repo structure (folders `scenes/`, `scripts/`, `data/`, `assets/`), naming conventions
 - Base autoloads (`GameState`)
 - **JSON schema v0.1** (world, character config, versioning) — format debt is the debt that kills
 - `decisions.md` filled in (ADR)
 
-**Done** : spikes work, schema exists, ADR filled in.
+**Done** : spikes work (except Foot IK & Upper/lower — FAIL, et ShapeCast3D — REPORTED, voir spike 15/09), schema exists, ADR filled in.
 
 ---
 

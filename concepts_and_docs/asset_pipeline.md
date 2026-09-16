@@ -17,11 +17,11 @@ Extra content added after launch: artists submit via Discord, maintainers valida
 ```
 STREAM A (V1):  CC0 packs + Mixamo round-trip ──validate──▶ PCK (local source)
 STREAM B (post-V1):  Artist ──Discord──▶ Maintainer ──validate──▶ Drive (approved/)
-                       (validate + hash + manifest)                 │
-                                                                  build script
-                                                                     │ id + sha256 + cache
-                                                                     ▼
-                                                                 Game PCK
+					   (validate + hash + manifest)                 │
+																  build script
+																	 │ id + sha256 + cache
+																	 ▼
+																 Game PCK
 ```
 
 - Artists: submit `.glb` + textures via Discord. No git, no Drive access.
@@ -87,7 +87,7 @@ The catalog manifest is a JSON file in git (schema v0.1, defined in P0 — `data
   "author": "ArtistName",
   "bounds": {"triangles_max": 4000, "texture_size_max": 1024},
   "files": [
-    {"path": "approved/prop_torch_01/prop_torch_01.glb", "sha256": "…"}
+	{"path": "approved/prop_torch_01/prop_torch_01.glb", "sha256": "…"}
   ]
 }
 ```
