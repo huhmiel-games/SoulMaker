@@ -2,7 +2,7 @@ class_name MapEditor
 extends Control
 
 ## P1 map editor controller (unit 1): the minimal maker loop.
-## Place an asset (catalog click) → move it (arrow keys + transform fields) →
+## Place an asset (catalog click) → move it (arrow keys) →
 ## save/reload a versioned JSON map → one-key playtest (free-fly camera).
 ## The DebugLabel mirrors every state change with a matching print() line.
 
@@ -27,30 +27,19 @@ const MOVE_FINE := 0.05
 @onready var selection_box: MeshInstance3D = get_node("ViewportContainer/WorldViewport/SelectionBox")
 @onready var catalog_panel: CatalogPanel = get_node("CatalogPanel")
 @onready var debug_label: Label = get_node("DebugLabel")
-@onready var toolbar: Control = get_node("ToolBar")
-@onready var transform_panel: Control = get_node("TransformPanel")
-
-# Toolbar widgets.
-@onready var map_name_edit: LineEdit = get_node("ToolBar/MapName")
-@onready var save_button: Button = get_node("ToolBar/SaveButton")
-@onready var load_button: Button = get_node("ToolBar/LoadButton")
-@onready var load_selector: OptionButton = get_node("ToolBar/LoadSelector")
-@onready var delete_button: Button = get_node("ToolBar/DeleteButton")
-@onready var play_button: Button = get_node("ToolBar/PlayButton")
-
-# Transform panel rows (each HBox holds 3 SpinBoxes: X, Y, Z).
-@onready var position_row: HBoxContainer = get_node("TransformPanel/PositionRow")
-@onready var rotation_row: HBoxContainer = get_node("TransformPanel/RotationRow")
-@onready var scale_row: HBoxContainer = get_node("TransformPanel/ScaleRow")
 
 var catalog := Catalog.new()
 var _placements: Array[Dictionary] = []
 var _selected: Node3D = null
-var _updating_fields := false
 var _playtest_active := false
+var current_map_name := "corridor_01"
 
 
 func _ready() -> void:
+	# The editor cursor is never shown: orbit is drag-free (motion always feeds
+	# the camera), but clicks must still reach the catalog/placement, so HIDDEN
+	# (invisible yet functional) rather than CAPTURED (locked to center).
+	Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
 	var load_err := catalog.load()
 	if load_err != OK:
 		_set_status("FATAL: catalog not readable")
@@ -59,21 +48,11 @@ func _ready() -> void:
 	refill_catalog()
 	for issue in issues:
 		_set_status("catalog issue: %s" % issue)
-	_refresh_saved_maps()
 	_set_status("editor ready — click an asset to place it")
 
 	catalog_panel.asset_selected.connect(_on_asset_selected)
 	InputManager.action_pressed.connect(_on_input_action)
 	InputManager.set_profile(&"editor")
-	save_button.pressed.connect(save_map)
-	load_button.pressed.connect(_on_load)
-	delete_button.pressed.connect(_delete_selection)
-	play_button.pressed.connect(toggle_playtest)
-
-	for row in [position_row, rotation_row, scale_row]:
-		for spin in row.get_children():
-			if spin is SpinBox:
-				spin.value_changed.connect(func(_v: float) -> void: _on_field_changed())
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -216,7 +195,6 @@ func _pick_placement_at_screen(screen_pos: Vector2) -> Node3D:
 
 func _select(placement: Node3D) -> void:
 	_selected = placement
-	_sync_fields_from_selection()
 	_update_selection_visual()
 
 
@@ -244,46 +222,6 @@ func _nudge_selection(delta: Vector3) -> void:
 	_apply_placement_transform(_selected)
 
 
-func _on_field_changed() -> void:
-	if _updating_fields or _selected == null:
-		return
-	var pos := _spin_values(position_row)
-	var rot := _spin_values(rotation_row)
-	var scl := _spin_values(scale_row)
-	_selected.position = Vector3(pos)
-	_selected.rotation_degrees = Vector3(rot)
-	_selected.scale = Vector3(scl)
-	_apply_placement_transform(_selected)
-
-
-func _sync_fields_from_selection() -> void:
-	_updating_fields = true
-	if _selected == null:
-		return
-	_set_spin_values(position_row, _selected.position)
-	_set_spin_values(rotation_row, _selected.rotation_degrees)
-	_set_spin_values(scale_row, _selected.scale)
-	_updating_fields = false
-
-
-func _spin_values(row: HBoxContainer) -> Vector3:
-	var i: int = 0
-	var out := Vector3.ZERO
-	for child in row.get_children():
-		if child is SpinBox and i < 3:
-			out[i] = (child as SpinBox).value
-			i += 1
-	return out
-
-
-func _set_spin_values(row: HBoxContainer, v: Vector3) -> void:
-	var i: int = 0
-	for child in row.get_children():
-		if child is SpinBox and i < 3:
-			(child as SpinBox).value = v[i]
-			i += 1
-
-
 func _apply_placement_transform(placement: Node3D) -> void:
 	_update_selection_visual()
 	_set_placement_data(placement)
@@ -303,7 +241,6 @@ func _delete_selection() -> void:
 	_selected.queue_free()
 	_selected = null
 	_update_selection_visual()
-	_sync_fields_from_selection()
 	_set_status("deleted %s — placed: %d" % [iid, _placements.size()])
 
 
@@ -322,7 +259,7 @@ func _map_path(name: String) -> String:
 
 
 func save_map() -> void:
-	var name := map_name_edit.text.strip_edges()
+	var name := current_map_name.strip_edges()
 	if name.is_empty():
 		_set_status("save aborted: empty map name")
 		return
@@ -337,16 +274,7 @@ func save_map() -> void:
 		_set_status("save FAILED (%d)" % err)
 		return
 	map_saved.emit(_map_path(name))
-	_refresh_saved_maps()
 	_set_status("saved %s (%d placements)" % [name, _placements.size()])
-
-
-func _on_load() -> void:
-	var name := load_selector.get_item_text(load_selector.selected)
-	if name.is_empty():
-		_set_status("load aborted: no map chosen")
-		return
-	load_map(name)
 
 
 func load_map(name: String) -> void:
@@ -354,7 +282,6 @@ func load_map(name: String) -> void:
 	var data := JsonFile.load_object(path)
 	if data.is_empty():
 		_set_status("cannot load %s (missing or corrupt)" % path)
-		_refresh_saved_maps()
 		return
 	var issues := MapIO.validate_map(data)
 	issues.append_array(MapIO.validate_refs(data, catalog))
@@ -365,7 +292,7 @@ func load_map(name: String) -> void:
 		for issue in issues:
 			_set_status("LOAD ISSUE: %s" % issue)
 	map_loaded.emit(path)
-	map_name_edit.text = name
+	current_map_name = name
 	_set_status("loaded %s — placed: %d %s" % [name, _placements.size(), "(issues above)" if not issues.is_empty() else ""])
 
 
@@ -387,21 +314,6 @@ func _instance_from_data(placement: Dictionary) -> void:
 	_apply_placement_transform(node)
 
 
-func _refresh_saved_maps() -> void:
-	var dir := DirAccess.open(MAPS_DIR)
-	var names: PackedStringArray = []
-	if dir != null:
-		for f in dir.get_files():
-			if f.ends_with(".json"):
-				names.append(f.get_basename())
-	names.sort()
-	load_selector.clear()
-	for n in names:
-		load_selector.add_item(n)
-	load_selector.disabled = names.is_empty()
-	load_button.disabled = names.is_empty()
-
-
 ## ── playtest ───────────────────────────────────────────────────────────
 
 func toggle_playtest() -> void:
@@ -413,10 +325,9 @@ func toggle_playtest() -> void:
 	editor_camera.current = not _playtest_active
 	play_camera.current = _playtest_active
 	play_camera.set_capture(_playtest_active)
-	toolbar.visible = not _playtest_active
-	transform_panel.visible = not _playtest_active
+	if not _playtest_active:
+		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
 	catalog_panel.visible = not _playtest_active
-	play_button.text = "Stop" if _playtest_active else "Play"
 	_selected = null
 	_update_selection_visual()
 	_set_status("PLAYTEST %s — WASD to move, mouse to look, P to leave" % ("ON" if _playtest_active else "OFF"))
@@ -431,9 +342,6 @@ func _on_input_action(action: StringName) -> void:
 		&"quick_save":
 			if not _playtest_active:
 				save_map()
-		&"load_map":
-			if not _playtest_active:
-				_on_load()
 		&"delete":
 			if not _playtest_active:
 				_delete_selection()
