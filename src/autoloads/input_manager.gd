@@ -5,59 +5,61 @@ extends Node
 ## matter of editing this mapping (future: JSON override from the Options
 ## screen), never scattered across editor scripts.
 ##
-## Gamepad convention (Souls gesture pattern): R1 acts as a shift modifier —
-## while held, the face buttons / d-pad switch to the "shifted" action set
-## (transform ops). On keyboard the shifted actions simply carry their own
-## dedicated keys, so no keyboard modifier is needed.
+## Souls-mirror convention (see concepts_and_docs/editor_input_mapping.md):
+## the gamepad and the keyboard are the same device, mirroring the Elden Ring
+## PC defaults as the shared layout:
+##   gamepad    ──  keyboard
+##   left stick ──  WASD        (editor: camera pan / edit translate)
+##   right stick──  mouse       (editor: camera orbit / edit rotate)
+##   triggers   ──  mouse wheel (zoom)
+##   d-pad      ──  arrows      (panel: tab + list navigation)
+##   R1 (shift) ──  E held      (shifted actions; Souls pouch parity)
+##   A          ──  E           (place / confirm / select)
+##   B          ──  Q           (back / deselect)
+##   Y          ──  P           (playtest)
+##   X          ──  Delete      (delete)
+##   Start      ──  S           (quick-save)
+##   R1+Start   ──  F2          (rename — dedicated key, no chord)
+##   Guide      ──  Esc         (menu)
 ##
-## Profiles let one action name mean different things per context
-## (editor vs playtest vs menu later).
+## Profiles let one action mean different things per context (editor vs
+## playtest). The shift parity (R1 <> E) applies to gamepad buttons only;
+## keyboard shifted actions carry their own dedicated keys, so no chord is
+## ever needed on the keyboard.
 
 signal action_pressed(action: StringName)
 signal action_released(action: StringName)
 
 const DEVICE := 0
 const DEADZONE := 0.2
+## Gamepad shift: Right Shoulder (R1).
 const SHIFT_BUTTON := JOY_BUTTON_RIGHT_SHOULDER
+## Keyboard shift mirror: E held, the Souls event-action / quick-pouch.
+const KEY_SHIFT_MOD := KEY_E
 
 const PROFILES := {
 	"editor": {
-		# Default set (gamepad: R1 released, keyboard: direct keys).
-		"place_select": {"btn": JOY_BUTTON_A, "key": KEY_NONE},
-		"deselect": {"btn": JOY_BUTTON_B, "key": KEY_NONE},
-		"delete": {"btn": JOY_BUTTON_X, "key": KEY_DELETE},
+		"cam_pan_left": {"key": KEY_A, "stick": JOY_AXIS_LEFT_X, "stick_sign": -1.0},
+		"cam_pan_right": {"key": KEY_D, "stick": JOY_AXIS_LEFT_X, "stick_sign": 1.0},
+		"cam_pan_fwd": {"key": KEY_W, "stick": JOY_AXIS_LEFT_Y, "stick_sign": -1.0},
+		"cam_pan_back": {"key": KEY_S, "stick": JOY_AXIS_LEFT_Y, "stick_sign": 1.0},
+		"panel_left": {"btn": JOY_BUTTON_DPAD_LEFT, "key": KEY_LEFT},
+		"panel_right": {"btn": JOY_BUTTON_DPAD_RIGHT, "key": KEY_RIGHT},
+		"panel_up": {"btn": JOY_BUTTON_DPAD_UP, "key": KEY_UP},
+		"panel_down": {"btn": JOY_BUTTON_DPAD_DOWN, "key": KEY_DOWN},
+		"place_select": {"btn": JOY_BUTTON_A, "key": KEY_E},
+		"deselect": {"btn": JOY_BUTTON_B, "key": KEY_Q},
 		"playtest": {"btn": JOY_BUTTON_Y, "key": KEY_P},
-		"catalog_next": {"btn": JOY_BUTTON_RIGHT_SHOULDER, "key": KEY_NONE},
-		"catalog_prev": {"btn": JOY_BUTTON_LEFT_SHOULDER, "key": KEY_NONE},
-		# Camera pan (keyboard == gamepad left stick; the object nudge is
-		# gamepad-only until the keyboard move workflow is reworked).
-		"cam_pan_left": {"key": KEY_LEFT},
-		"cam_pan_right": {"key": KEY_RIGHT},
-		"cam_pan_fwd": {"key": KEY_UP},
-		"cam_pan_back": {"key": KEY_DOWN},
-		# Object nudge — gamepad D-pad only for now.
-		"nudge_x_neg": {"btn": JOY_BUTTON_DPAD_LEFT},
-		"nudge_x_pos": {"btn": JOY_BUTTON_DPAD_RIGHT},
-		"nudge_z_neg": {"btn": JOY_BUTTON_DPAD_UP},
-		"nudge_z_pos": {"btn": JOY_BUTTON_DPAD_DOWN},
-		"fine_mode": {"btn": JOY_BUTTON_LEFT_STICK, "key": KEY_SHIFT},
+		"delete": {"btn": JOY_BUTTON_X, "key": KEY_DELETE},
 		"quick_save": {"btn": JOY_BUTTON_START, "key": KEY_S},
-		"load_map": {"btn": JOY_BUTTON_BACK, "key": KEY_L},
+		"rename": {"btn": JOY_BUTTON_START, "shifted": true, "key": KEY_F2},
 		"menu": {"btn": JOY_BUTTON_GUIDE, "key": KEY_ESCAPE},
-		# Shifted set (gamepad: R1 held, keyboard: dedicated keys).
-		"nudge_y_pos": {"btn": JOY_BUTTON_DPAD_UP, "shifted": true},
-		"nudge_y_neg": {"btn": JOY_BUTTON_DPAD_DOWN, "shifted": true},
-		"cycle_xform": {"btn": JOY_BUTTON_A, "shifted": true, "key": KEY_TAB},
-		"reset_xform": {"btn": JOY_BUTTON_B, "shifted": true, "key": KEY_NONE},
-		"toggle_snap": {"btn": JOY_BUTTON_Y, "shifted": true, "key": KEY_NONE},
-		"duplicate": {"btn": JOY_BUTTON_X, "shifted": true, "key": KEY_NONE},
-		"delete_all": {"btn": JOY_BUTTON_BACK, "shifted": true, "key": KEY_NONE},
 	},
 	"playtest": {
-		"move_forward": {"axis": JOY_AXIS_LEFT_Y, "axis_sign": -1.0, "key": KEY_W},
-		"move_back": {"axis": JOY_AXIS_LEFT_Y, "axis_sign": 1.0, "key": KEY_S},
-		"move_left": {"axis": JOY_AXIS_LEFT_X, "axis_sign": -1.0, "key": KEY_A},
-		"move_right": {"axis": JOY_AXIS_LEFT_X, "axis_sign": 1.0, "key": KEY_D},
+		"move_forward": {"key": KEY_W, "stick": JOY_AXIS_LEFT_Y, "stick_sign": -1.0},
+		"move_back": {"key": KEY_S, "stick": JOY_AXIS_LEFT_Y, "stick_sign": 1.0},
+		"move_left": {"key": KEY_A, "stick": JOY_AXIS_LEFT_X, "stick_sign": -1.0},
+		"move_right": {"key": KEY_D, "stick": JOY_AXIS_LEFT_X, "stick_sign": 1.0},
 		"move_up": {"key": KEY_SPACE},
 		"move_down": {"key": KEY_SHIFT},
 		"playtest": {"btn": JOY_BUTTON_Y, "key": KEY_P},
@@ -65,6 +67,11 @@ const PROFILES := {
 }
 
 var _active_profile := &"editor"
+
+## Per-action edge/timing state, rebuilt every rendered frame from the active
+## profile (see _process). Keyed by "<profile>/<action>" so switching profiles
+## never leaks stale edges between them.
+var _action_track: Dictionary = {}
 
 
 func set_profile(profile: StringName) -> void:
@@ -78,14 +85,67 @@ func get_profile() -> StringName:
 	return _active_profile
 
 
-## True while the gamepad shift modifier (R1) is held.
+## Updates the per-action track once per rendered frame, before downstream
+## nodes run their own _process. Read with is_just_pressed / is_just_released
+## / time_held within the same frame.
+func _process(_delta: float) -> void:
+	var entries: Dictionary = PROFILES[_active_profile]
+	var prefix := String(_active_profile) + "/"
+	var now := Time.get_ticks_msec()
+	for action_name in entries:
+		var key := prefix + String(action_name)
+		var track: Dictionary = _action_track.get(key, {})
+		var was_pressed: bool = bool(track.get("pressed", false))
+		var is_now_pressed := is_pressed(action_name)
+		track["pressed"] = is_now_pressed
+		track["just_pressed"] = is_now_pressed and not was_pressed
+		track["just_released"] = not is_now_pressed and was_pressed
+		if is_now_pressed and not was_pressed:
+			track["t0"] = now
+		_action_track[key] = track
+
+
+## True only during the single frame in which an action became pressed
+## (keyboard, gamepad button or bone-stick crossing the deadzone).
+func is_just_pressed(action: StringName, profile := &"") -> bool:
+	var t := _track_for(action, profile)
+	return bool(t.get("just_pressed", false))
+
+
+## True only during the single frame in which an action became unpressed.
+func is_just_released(action: StringName, profile := &"") -> bool:
+	var t := _track_for(action, profile)
+	return bool(t.get("just_released", false))
+
+
+## Seconds an action has been held down since its press frame; 0.0 while up.
+func time_held(action: StringName, profile := &"") -> float:
+	var t := _track_for(action, profile)
+	if not bool(t.get("pressed", false)):
+		return 0.0
+	return float(Time.get_ticks_msec() - int(t.get("t0", 0))) / 1000.0
+
+
+func _track_for(action: StringName, profile := &"") -> Dictionary:
+	var prof := String(profile)
+	if prof.is_empty():
+		prof = String(_active_profile)
+	return _action_track.get("%s/%s" % [prof, String(action)], {})
+
+
+## True while the shift parity is active: R1 held on the gamepad, or E held
+## on the keyboard (Souls pouch). Gamepad shifted actions resolve only when
+## this is true and R1 matches.
 func is_shifted() -> bool:
-	return Input.is_joy_button_pressed(DEVICE, SHIFT_BUTTON)
+	return (
+		Input.is_joy_button_pressed(DEVICE, SHIFT_BUTTON)
+		or Input.is_physical_key_pressed(KEY_SHIFT_MOD)
+	)
 
 
 ## Polled check whether an action is currently down (keyboard, gamepad button
-## or analog axis, honouring the shift modifier). Used for continuous actions
-## (nudge, movement, fine mode).
+## or analog stick). Continuous actions (camera pan/orbit, playtest movement)
+## are read with this.
 func is_pressed(action: StringName, profile := &"") -> bool:
 	var prof := String(profile)
 	if prof.is_empty():
@@ -96,9 +156,9 @@ func is_pressed(action: StringName, profile := &"") -> bool:
 	var e: Dictionary = entries[action]
 	if int(e.get("key", KEY_NONE)) != KEY_NONE and Input.is_physical_key_pressed(int(e["key"])):
 		return true
-	if int(e.get("axis", JOY_AXIS_INVALID)) != JOY_AXIS_INVALID:
-		var sign: float = float(e.get("axis_sign", 1.0))
-		if Input.get_joy_axis(DEVICE, int(e["axis"])) * sign > DEADZONE:
+	if int(e.get("stick", JOY_AXIS_INVALID)) != JOY_AXIS_INVALID:
+		var sign: float = float(e.get("stick_sign", 1.0))
+		if Input.get_joy_axis(DEVICE, int(e["stick"])) * sign > DEADZONE:
 			return true
 	var btn: int = int(e.get("btn", JOY_BUTTON_INVALID))
 	if btn != JOY_BUTTON_INVALID:
@@ -108,7 +168,7 @@ func is_pressed(action: StringName, profile := &"") -> bool:
 	return false
 
 
-## Left stick, deadzone applied. (Unshifted: camera pan.)
+## Left stick, deadzone applied. (Editor: camera pan / edit translate.)
 func left_stick() -> Vector2:
 	return _deadzone_vec(
 		Input.get_joy_axis(DEVICE, JOY_AXIS_LEFT_X),
@@ -116,7 +176,7 @@ func left_stick() -> Vector2:
 	)
 
 
-## Right stick, deadzone applied. (Unshifted: camera orbit.)
+## Right stick, deadzone applied. (Editor: camera orbit / edit rotate.)
 func right_stick() -> Vector2:
 	return _deadzone_vec(
 		Input.get_joy_axis(DEVICE, JOY_AXIS_RIGHT_X),
@@ -164,6 +224,9 @@ func _resolve_joy_button(button_index: int) -> StringName:
 	return &""
 
 
+## Keyboard keys map straight to their action. Because shifted actions carry
+## their own dedicated keys on the keyboard (rename = F2), no shift chord is
+## consulted here — parity lives on the gamepad buttons only.
 func _resolve_key(keycode: int) -> StringName:
 	var entries: Dictionary = PROFILES[_active_profile]
 	for action in entries:
