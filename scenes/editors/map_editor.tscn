@@ -1,0 +1,254 @@
+[gd_scene load_steps=11 format=3]
+
+[ext_resource type="Script" path="res://src/editors/map_editor.gd" id="1"]
+[ext_resource type="Script" path="res://src/editors/orbit_camera.gd" id="2"]
+[ext_resource type="Script" path="res://src/editors/fly_camera.gd" id="3"]
+[ext_resource type="Script" path="res://src/editors/catalog_panel.gd" id="4"]
+[ext_resource type="Environment" path="res://scenes/editors/env_default.tres" id="5"]
+
+[sub_resource type="StandardMaterial3D" id="ground_mat"]
+albedo_color = Color(0.22, 0.23, 0.26, 1)
+roughness = 1.0
+
+[sub_resource type="PlaneMesh" id="ground_mesh"]
+size = Vector2(100, 100)
+material = SubResource("ground_mat")
+
+[sub_resource type="WorldBoundaryShape3D" id="ground_shape"]
+
+[sub_resource type="StandardMaterial3D" id="selection_mat"]
+transparency = 1
+shading_mode = 0
+albedo_color = Color(1, 0.82, 0.2, 0.3)
+
+[sub_resource type="BoxMesh" id="selection_mesh"]
+size = Vector3(1, 1, 1)
+material = SubResource("selection_mat")
+
+[node name="MapEditor" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1")
+
+[node name="CatalogPanel" type="ScrollContainer" parent="."]
+custom_minimum_size = Vector2(220, 0)
+layout_mode = 1
+anchor_bottom = 1.0
+offset_right = 220.0
+grow_horizontal = 1
+grow_vertical = 2
+script = ExtResource("4")
+
+[node name="EntryList" type="VBoxContainer" parent="CatalogPanel"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ToolBar" type="HBoxContainer" parent="."]
+layout_mode = 1
+anchor_right = 1.0
+offset_left = 230.0
+offset_bottom = 40.0
+grow_horizontal = 2
+
+[node name="MapName" type="LineEdit" parent="ToolBar"]
+custom_minimum_size = Vector2(180, 0)
+layout_mode = 2
+text = "corridor_01"
+placeholder_text = "map name"
+
+[node name="SaveButton" type="Button" parent="ToolBar"]
+custom_minimum_size = Vector2(80, 0)
+layout_mode = 2
+text = "Save (S)"
+
+[node name="LoadButton" type="Button" parent="ToolBar"]
+custom_minimum_size = Vector2(80, 0)
+layout_mode = 2
+text = "Load (L)"
+
+[node name="LoadSelector" type="OptionButton" parent="ToolBar"]
+custom_minimum_size = Vector2(160, 0)
+layout_mode = 2
+disabled = true
+
+[node name="DeleteButton" type="Button" parent="ToolBar"]
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+text = "Delete (Del)"
+
+[node name="PlayButton" type="Button" parent="ToolBar"]
+custom_minimum_size = Vector2(80, 0)
+layout_mode = 2
+text = "Play (P)"
+
+[node name="ViewportContainer" type="SubViewportContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 230.0
+offset_top = 44.0
+grow_horizontal = 2
+grow_vertical = 2
+stretch = true
+mouse_filter = 0
+
+[node name="WorldViewport" type="SubViewport" parent="ViewportContainer"]
+own_world_3d = true
+msaa_3d = 2
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="ViewportContainer/WorldViewport"]
+environment = ExtResource("5")
+
+[node name="Sun" type="DirectionalLight3D" parent="ViewportContainer/WorldViewport"]
+rotation_degrees = Vector3(-40, 35, 0)
+light_energy = 1.1
+shadow_enabled = true
+directional_shadow_mode = 2
+
+[node name="Ground" type="StaticBody3D" parent="ViewportContainer/WorldViewport" groups=["ground"]]
+collision_layer = 1
+
+[node name="GroundMesh" type="MeshInstance3D" parent="ViewportContainer/WorldViewport/Ground"]
+mesh = SubResource("ground_mesh")
+
+[node name="GroundShape" type="CollisionShape3D" parent="ViewportContainer/WorldViewport/Ground"]
+shape = SubResource("ground_shape")
+
+[node name="Placements" type="Node3D" parent="ViewportContainer/WorldViewport"]
+
+[node name="EditorCamera" type="Camera3D" parent="ViewportContainer/WorldViewport"]
+current = true
+script = ExtResource("2")
+
+[node name="PlayCamera" type="Camera3D" parent="ViewportContainer/WorldViewport"]
+script = ExtResource("3")
+
+[node name="SelectionBox" type="MeshInstance3D" parent="ViewportContainer/WorldViewport"]
+visible = false
+mesh = SubResource("selection_mesh")
+
+[node name="TransformPanel" type="VBoxContainer" parent="."]
+custom_minimum_size = Vector2(210, 0)
+layout_mode = 1
+anchor_right = 1.0
+offset_top = 44.0
+offset_left = -220.0
+offset_right = -8.0
+grow_horizontal = 0
+theme_override_constants/separation = 2
+
+[node name="TransformTitle" type="Label" parent="TransformPanel"]
+layout_mode = 2
+text = "Transform (step 0.1)"
+
+[node name="PositionRow" type="HBoxContainer" parent="TransformPanel"]
+layout_mode = 2
+
+[node name="PosLabel" type="Label" parent="TransformPanel/PositionRow"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "Pos"
+
+[node name="PosX" type="SpinBox" parent="TransformPanel/PositionRow"]
+custom_minimum_size = Vector2(52, 0)
+layout_mode = 2
+min_value = -1000.0
+max_value = 1000.0
+step = 0.1
+
+[node name="PosY" type="SpinBox" parent="TransformPanel/PositionRow"]
+custom_minimum_size = Vector2(52, 0)
+layout_mode = 2
+min_value = -1000.0
+max_value = 1000.0
+step = 0.1
+
+[node name="PosZ" type="SpinBox" parent="TransformPanel/PositionRow"]
+custom_minimum_size = Vector2(52, 0)
+layout_mode = 2
+min_value = -1000.0
+max_value = 1000.0
+step = 0.1
+
+[node name="RotationRow" type="HBoxContainer" parent="TransformPanel"]
+layout_mode = 2
+
+[node name="RotLabel" type="Label" parent="TransformPanel/RotationRow"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "Rot"
+
+[node name="RotX" type="SpinBox" parent="TransformPanel/RotationRow"]
+custom_minimum_size = Vector2(52, 0)
+layout_mode = 2
+min_value = -360.0
+max_value = 360.0
+step = 0.1
+
+[node name="RotY" type="SpinBox" parent="TransformPanel/RotationRow"]
+custom_minimum_size = Vector2(52, 0)
+layout_mode = 2
+min_value = -360.0
+max_value = 360.0
+step = 0.1
+
+[node name="RotZ" type="SpinBox" parent="TransformPanel/RotationRow"]
+custom_minimum_size = Vector2(52, 0)
+layout_mode = 2
+min_value = -360.0
+max_value = 360.0
+step = 0.1
+
+[node name="ScaleRow" type="HBoxContainer" parent="TransformPanel"]
+layout_mode = 2
+
+[node name="ScaleLabel" type="Label" parent="TransformPanel/ScaleRow"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "Scl"
+
+[node name="ScaleX" type="SpinBox" parent="TransformPanel/ScaleRow"]
+custom_minimum_size = Vector2(52, 0)
+layout_mode = 2
+min_value = 0.05
+max_value = 10.0
+value = 1.0
+step = 0.1
+
+[node name="ScaleY" type="SpinBox" parent="TransformPanel/ScaleRow"]
+custom_minimum_size = Vector2(52, 0)
+layout_mode = 2
+min_value = 0.05
+max_value = 10.0
+value = 1.0
+step = 0.1
+
+[node name="ScaleZ" type="SpinBox" parent="TransformPanel/ScaleRow"]
+custom_minimum_size = Vector2(52, 0)
+layout_mode = 2
+min_value = 0.05
+max_value = 10.0
+value = 1.0
+step = 0.1
+
+[node name="DebugLabel" type="Label" parent="."]
+layout_mode = 1
+anchors_preset = 3
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 238.0
+offset_top = -120.0
+offset_right = 700.0
+offset_bottom = -10.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
+theme_override_constants/shadow_offset_x = 2
+theme_override_constants/shadow_offset_y = 2
+text = "starting..."

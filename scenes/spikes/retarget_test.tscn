@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://boiy70kci5cn3"]
+
+[ext_resource type="Script" uid="uid://dn1tky4r1ew7g" path="res://scenes/spikes/retarget_test.gd" id="1_script"]
+
+[node name="RetargetTest" type="Node3D" unique_id=484282562]
+script = ExtResource("1_script")

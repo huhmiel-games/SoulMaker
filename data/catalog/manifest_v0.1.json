@@ -1,0 +1,89 @@
+{
+  "format_version": "0.1",
+  "entries": [
+	{
+	  "id": "dungeon_floor_small_01",
+	  "name": "Floor Small",
+	  "category": "architecture",
+	  "license": "CC0",
+	  "author": "Kevin Barany (SigilsVault)",
+	  "source": "Modular Dungeon Kit v1.0",
+	  "files": [
+		{
+		  "path": "assets/meshes/dongeon/floor_small_01.glb",
+		  "sha256": "cc0aee718e78c1823c47e3affa56f212d8aa44c07ee3e601c6f29b83f0774e1b"
+		}
+	  ]
+	},
+	{
+	  "id": "dungeon_wall_small_01",
+	  "name": "Wall Small",
+	  "category": "architecture",
+	  "license": "CC0",
+	  "author": "Kevin Barany (SigilsVault)",
+	  "source": "Modular Dungeon Kit v1.0",
+	  "files": [
+		{
+		  "path": "assets/meshes/dongeon/wall_small_01.glb",
+		  "sha256": "a8ed808f70c52655841ae1cfcf258741687c2c3cddbc0a4eceb6ac81a97a05ec"
+		}
+	  ]
+	},
+	{
+	  "id": "dungeon_pillar_01",
+	  "name": "Pillar",
+	  "category": "architecture",
+	  "license": "CC0",
+	  "author": "Kevin Barany (SigilsVault)",
+	  "source": "Modular Dungeon Kit v1.0",
+	  "files": [
+		{
+		  "path": "assets/meshes/dongeon/pillar_01.glb",
+		  "sha256": "19862abdff539e6e89a505861072fd10beccb99d74b036a154699d00a8feb654"
+		}
+	  ]
+	},
+	{
+	  "id": "dungeon_door_01",
+	  "name": "Door",
+	  "category": "architecture",
+	  "license": "CC0",
+	  "author": "Kevin Barany (SigilsVault)",
+	  "source": "Modular Dungeon Kit v1.0",
+	  "files": [
+		{
+		  "path": "assets/meshes/dongeon/door_01.glb",
+		  "sha256": "62ac6494ca02a3191168b458b8d5cd74fd9c9944411e3f34b81c7682e3a5f0dc"
+		}
+	  ]
+	},
+	{
+	  "id": "dungeon_stairs_short_small_01",
+	  "name": "Stairs Short",
+	  "category": "architecture",
+	  "license": "CC0",
+	  "author": "Kevin Barany (SigilsVault)",
+	  "source": "Modular Dungeon Kit v1.0",
+	  "files": [
+		{
+		  "path": "assets/meshes/dongeon/stairs_short_small_01.glb",
+		  "sha256": "7226dfa3a8c3d71372cf9f82097e0ef643477191367ee84dbce4b3f7a984a7ba"
+		}
+	  ]
+	},
+	{
+	  "id": "dungeon_block_short_small_01",
+	  "name": "Block Short",
+	  "category": "architecture",
+	  "license": "CC0",
+	  "author": "Kevin Barany (SigilsVault)",
+	  "source": "Modular Dungeon Kit v1.0",
+	  "files": [
+		{
+		  "path": "assets/meshes/dongeon/block_short_small_01.glb",
+		  "sha256": "7c836f6e19fd8de23e2cefb3a650be47d53c1e11f5018a5dcbf69c43f8a64e27"
+		}
+	  ]
+	}
+  ]
+}

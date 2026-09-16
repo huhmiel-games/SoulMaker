@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://b8svp3q7mhx2n"]
+
+[ext_resource type="Script" uid="uid://e4cbvitx6hke" path="res://scenes/spikes/footik_test.gd" id="1_footik"]
+
+[node name="FootIkTest" type="Node3D" unique_id=348325751]
+script = ExtResource("1_footik")

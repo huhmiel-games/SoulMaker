@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://cxp0tvkd3kxgq"]
+
+[ext_resource type="Script" path="res://scenes/spikes/markers_test.gd" id="1_markers"]
+
+[node name="MarkersTest" type="Node3D"]
+script = ExtResource("1_markers")
