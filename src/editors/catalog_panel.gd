@@ -38,6 +38,7 @@ func populate(catalog: Catalog) -> void:
 		button.tooltip_text = "%s — %s" % [str(entry.get("category", "?")), str(entry.get("source", ""))]
 		button.custom_minimum_size = Vector2(0.0, 54.0)
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		button.focus_mode = Control.FOCUS_NONE
 		button.pressed.connect(func() -> void: asset_selected.emit(id))
 		_buttons[id] = button
 		entry_list.add_child(button)

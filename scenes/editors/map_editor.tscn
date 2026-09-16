@@ -62,26 +62,31 @@ placeholder_text = "map name"
 
 [node name="SaveButton" type="Button" parent="ToolBar"]
 custom_minimum_size = Vector2(80, 0)
+focus_mode = 0
 layout_mode = 2
 text = "Save (S)"
 
 [node name="LoadButton" type="Button" parent="ToolBar"]
 custom_minimum_size = Vector2(80, 0)
+focus_mode = 0
 layout_mode = 2
 text = "Load (L)"
 
 [node name="LoadSelector" type="OptionButton" parent="ToolBar"]
 custom_minimum_size = Vector2(160, 0)
+focus_mode = 0
 layout_mode = 2
 disabled = true
 
 [node name="DeleteButton" type="Button" parent="ToolBar"]
 custom_minimum_size = Vector2(90, 0)
+focus_mode = 0
 layout_mode = 2
 text = "Delete (Del)"
 
 [node name="PlayButton" type="Button" parent="ToolBar"]
 custom_minimum_size = Vector2(80, 0)
+focus_mode = 0
 layout_mode = 2
 text = "Play (P)"
 

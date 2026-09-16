@@ -56,12 +56,19 @@ Shifted set (R1 held) — transform & utilities:
 
 ## Keyboard mapping (editor profile)
 
-Same logical actions, dedicated keys — no modifier needed:
+The keyboard mirrors the gamepad action set 1:1 with **no click or drag**: **arrows
+pan the camera** like the LS (pitch included), **mouse motion orbits** like the RS
+(in place, RS direction), and the **wheel zooms** like the triggers. UI buttons
+are deliberately **not keyboard-focusable** so arrow keys never fight the focus
+ring; the `MapName` LineEdit keeps normal text focus. The keyboard object-nudge
+workflow is **deferred** pending the object-move rework — nudge remains gamepad
+D-pad only.
 
 | Action | Key |
 |---|---|
-| nudge X / Z | arrows |
-| nudge Y | PageUp / PageDown |
+| camera pan (LS) | arrows |
+| camera orbit (RS) | mouse motion (no click) |
+| camera zoom (triggers) | mouse wheel |
 | fine mode | Shift |
 | place / select | left click (mouse) / catalog buttons |
 | delete | Delete |
@@ -69,6 +76,7 @@ Same logical actions, dedicated keys — no modifier needed:
 | save | S |
 | load | L |
 | menu | Escape |
+| nudge X / Z / Y | *(deferred — gamepad D-pad)* |
 
 ## Playtest profile
 
