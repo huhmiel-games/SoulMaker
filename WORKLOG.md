@@ -6,16 +6,16 @@
 
 - **Objective**: P1 map editor — continue building the maker loop (post-input-layer)
 - **Expected mode**: edit
-- **Next step**: human live test of the shift remap (recipe below).
-- **Last step done**: grab remap — shift switches both sticks to job 2: R1+LS / Shift+WASD = height only (Y, up lifts, X dead), R1+RS / Shift+mouse = roll alone (Y dead); triggers/Space/R freed (bindings pruned: obj_height, height_up/down, roll_key deleted). E paradox fixed: `is_shifted()` = R1-pad OR Shift-key gated on editor profile (E = pure confirm; playtest Shift=descend pristine); AGENTS.md doctrine hardened (gamepad set is source of truth, keyboard mirrors 1:1 chords included, no keyboard-only actions). Shift+Q = delete (keyboard mirror of R1+B). Earlier: grab & move base. Headless import passes. Deferred: snap toggle, scale (LT/RT freed candidates), menu scene, ESC release, reload key, spawn-fallback sign, first-AABB ground snap.
+- **Next step**: user retests snap at 0.1 m / 15° (precision feel on small assets).
+- **Last step done**: move speed 4.0 → 2.5 m/s (too twitchy; turn speed kept, snap 0.1 m/15° earlier). Headless import passes. Deferred: face-link snap (phase 2, AABB proximity), scale (LT/RT candidates), menu scene, ESC release, reload key, spawn-fallback sign, first-AABB ground snap.
 
-## Test recipe (human) — shift remap
+## Test recipe (human) — snap + mini corridor
 
-1. Launch `scenes/editors/map_editor.tscn`. Grab an asset (red + A).
-2. Gamepad: R1+LS up/down lifts (X dead); R1+RS X rolls alone (RS Y dead); plain LS/RS unchanged (XZ / yaw+pitch). R1+B deletes; plain B cancels.
-3. Keyboard: Shift+WASD W/S height (A/D dead); Shift+mouse X rolls alone; Shift+Q deletes. E pure confirm (no shift weirdness).
-4. Playtest: Shift still descends, gamepad buttons all alive while Shift held (no profile leakage).
-5. Report: height/roll directions, anything dead, DebugLabel HUD text.
+1. Launch `scenes/editors/map_editor.tscn`. L1/Tab → "snap ON" print + HUD badge (toggle twice to feel it).
+2. Grab a floor tile, snap ON: move it — position sticks to 1.0 grid, base never buries. Rotate — yaw/pitch/roll click at 90°.
+3. Toggle mid-grab (small pop expected between snapped/unsnapped — report if violent).
+4. Mini corridor: 2 floors edge-aligned + 1 wall yawed 90° against them. Then S save, reload via… (no reload UI yet — report save line only).
+5. Report: grid feel (sticky? jumpy?), angle clicks, pop on toggle, knobs (1.0/90° fit the 2 m tiles?).
 
 ## Open items / waiting on you
 

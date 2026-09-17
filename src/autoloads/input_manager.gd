@@ -59,6 +59,7 @@ const PROFILES := {
 		"place_select": {"btn": JOY_BUTTON_A, "key": KEY_E},
 		"deselect": {"btn": JOY_BUTTON_B, "key": KEY_Q},
 		"delete_shifted": {"btn": JOY_BUTTON_B, "shifted": true},
+		"snap_toggle": {"btn": JOY_BUTTON_LEFT_SHOULDER, "key": KEY_TAB},
 		"playtest": {"btn": JOY_BUTTON_Y, "key": KEY_P},
 		"delete": {"btn": JOY_BUTTON_X, "key": KEY_DELETE},
 		"quick_save": {"btn": JOY_BUTTON_START, "key": KEY_S},

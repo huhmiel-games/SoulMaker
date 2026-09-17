@@ -23,9 +23,15 @@ const MOVE_STEP := 0.25
 const MOVE_FINE := 0.05
 ## Grab feel knobs (tune live): object move/height speed (m/s at full
 ## deflection) and turn speed (rad/s).
-const OBJ_MOVE_SPEED := 4.0
+const OBJ_MOVE_SPEED := 2.5
 const OBJ_HEIGHT_SPEED := 3.0
 const OBJ_TURN_SPEED := 1.8
+## Snap knobs (tune live): position grid step (m, all axes) and angle step
+## (rad) applied while _snap_on (L1/Tab toggle). 0.1 m / 15° align any asset
+## size (every usual multiple divides evenly); the accumulators make fine
+## steps safe (no freeze).
+const SNAP_STEP := 0.1
+const SNAP_ANGLE := PI / 12.0
 
 ## Attach points (must exist in the scene scaffold).
 @onready var world_viewport: SubViewport = get_node("ViewportContainer/WorldViewport")
@@ -50,6 +56,16 @@ var _next_iid: int = 0
 var _grabbed := false
 ## Pre-grab transform, restored by cancel (B/Q).
 var _grab_from := Transform3D.IDENTITY
+## Snap toggle (L1/Tab): grid position + stepped angles while grabbed.
+var _snap_on := false
+## Grabbed rotation accumulator (yaw/pitch/roll): applied ABSOLUTE each frame
+## (snapped or not) so stepping never drifts — incremental rotate_* calls
+## would oscillate under snap.
+var _grab_rot := Vector3.ZERO
+## Grabbed position accumulator (unsnapped logical pose): deltas apply here,
+## the node shows the snapped (or raw) copy. Rounding the live node position
+## in place would erase sub-half-step progress every frame and freeze motion.
+var _grab_pos := Vector3.ZERO
 
 
 func _ready() -> void:
@@ -197,6 +213,8 @@ func _grab(placement: Node3D) -> void:
 	_selected = placement
 	_grabbed = true
 	_grab_from = placement.global_transform
+	_grab_rot = placement.rotation
+	_grab_pos = placement.position
 	editor_camera.frozen = true
 	_update_selection_visual()
 	var iid := String(placement.get_meta("instance_id", "?"))
@@ -234,7 +252,10 @@ func _cancel_grab() -> void:
 ## Drives the grabbed placement with the camera sticks (the camera is frozen,
 ## so its inputs are inert on the view). Shift (R1-pad / Shift-key) switches
 ## both sticks to their second job — translation stick does Y only, rotation
-## stick does roll only. All sources sum, no device branches.
+## stick does roll only. Position AND rotation accumulate unsnapped (_grab_pos
+## / _grab_rot) and apply absolute, snapped or not — rounding the live node
+## in place would erase sub-half-step progress and freeze motion. All sources
+## sum, no device branches.
 func _move_grabbed(delta: float) -> void:
 	if _selected == null:
 		return
@@ -261,9 +282,9 @@ func _move_grabbed(delta: float) -> void:
 			var fwd := -cbasis.z
 			fwd.y = 0.0
 			fwd = fwd.normalized() if fwd.length() > 0.001 else Vector3.FORWARD
-			node.position += (right * mv.x + fwd * -mv.y) * OBJ_MOVE_SPEED * delta
+			_grab_pos += (right * mv.x + fwd * -mv.y) * OBJ_MOVE_SPEED * delta
 	# Height, shifted only: LS Y / W-S, push up lifts. Base clamped above
-	# the ground.
+	# the ground (on the accumulator).
 	if shifted:
 		var ls := InputManager.left_stick()
 		var h := -ls.y
@@ -272,24 +293,47 @@ func _move_grabbed(delta: float) -> void:
 		if InputManager.is_pressed(&"cam_pan_back"):
 			h -= 1.0
 		if h != 0.0:
-			node.position.y += h * OBJ_HEIGHT_SPEED * delta
+			_grab_pos.y += h * OBJ_HEIGHT_SPEED * delta
 			var box := _find_mesh_aabb(node)
-			node.position.y = maxf(node.position.y, -box.position.y)
-	# Turn: RS/mouse summed by InputManager. Unshifted = yaw + pitch;
-	# shifted = roll alone (Y dead).
+			_grab_pos.y = maxf(_grab_pos.y, -box.position.y)
+	# Display pose: raw accumulator, or base-snapped to the grid (the base
+	# lands exactly on-grid and never below ground — rounding the origin
+	# instead would bury it up to half a step).
+	if _snap_on:
+		var sbox := _find_mesh_aabb(node)
+		var base_y := maxf(roundf((_grab_pos.y + sbox.position.y) / SNAP_STEP) * SNAP_STEP, 0.0)
+		node.position = Vector3(
+			roundf(_grab_pos.x / SNAP_STEP) * SNAP_STEP,
+			base_y - sbox.position.y,
+			roundf(_grab_pos.z / SNAP_STEP) * SNAP_STEP,
+		)
+	else:
+		node.position = _grab_pos
+	# Turn: RS/mouse summed by InputManager. Unshifted = yaw (X) + pitch (Y);
+	# shifted = roll alone (Y dead). Accumulated, applied absolute.
 	var tx := InputManager.analog(&"cam_orbit_x")
 	var ty := InputManager.analog(&"cam_orbit_y")
 	if shifted:
-		if tx != 0.0:
-			node.rotate_object_local(Vector3.BACK, -tx * OBJ_TURN_SPEED * delta)
+		_grab_rot.z += -tx * OBJ_TURN_SPEED * delta
 	else:
-		if tx != 0.0:
-			node.rotate_y(-tx * OBJ_TURN_SPEED * delta)
-		if ty != 0.0:
-			node.rotate_object_local(Vector3.RIGHT, -ty * OBJ_TURN_SPEED * delta)
+		_grab_rot.y += -tx * OBJ_TURN_SPEED * delta
+		_grab_rot.x += -ty * OBJ_TURN_SPEED * delta
+	if _snap_on:
+		node.rotation = _snap_vec(_grab_rot, SNAP_ANGLE)
+	else:
+		node.rotation = _grab_rot
 	_set_placement_data(node)
 	_update_selection_visual()
 	_refresh_grab_label()
+
+
+## Rounds each component to the grid step (position) or angle step.
+func _snap_vec(v: Vector3, step: float) -> Vector3:
+	return Vector3(
+		roundf(v.x / step) * step,
+		roundf(v.y / step) * step,
+		roundf(v.z / step) * step,
+	)
 
 
 ## Grab HUD text (shared builder). Per-frame refresh is label-only (no
@@ -300,7 +344,11 @@ func _grab_label_text() -> String:
 		return "MODE: EDIT"
 	var iid := String(_selected.get_meta("instance_id", "?"))
 	var pid := String(_selected.get_meta("prefab_id", "?"))
-	return "MODE: EDIT (grabbed)\n%s (%s) pos=%s\nLS/WASD move · R1+LS/Shift+WASD height · RS/mouse turn · R1+RS/Shift+mouse roll · A drop · B cancel · R1+B delete" % [pid, iid, _selected.position]
+	return "MODE: EDIT (grabbed)%s SH%d\n%s (%s) pos=%s\nLS/WASD move · R1+LS/Shift+WASD height · RS/mouse turn · R1+RS/Shift+mouse roll · A drop · B cancel · R1+B delete" % [
+		" · SNAP %.1f/%d°" % [SNAP_STEP, int(roundf(rad_to_deg(SNAP_ANGLE)))] if _snap_on else "",
+		1 if InputManager.is_shifted() else 0,
+		pid, iid, _selected.position,
+	]
 
 
 func _refresh_grab_label() -> void:
@@ -541,6 +589,14 @@ func _on_input_action(action: StringName) -> void:
 			# R1+B: delete, grabbed or not (the shifted face of B/cancel).
 			if not _playtest_active:
 				_delete_selection()
+		&"snap_toggle":
+			# L1/Tab: grid+angle snap on/off, grabbed or not (applies next
+			# transform while grabbed).
+			if not _playtest_active:
+				_snap_on = not _snap_on
+				_set_status("snap %s (grid %.1f m, angles %d°)" % ["ON" if _snap_on else "OFF", SNAP_STEP, int(roundf(rad_to_deg(SNAP_ANGLE)))])
+				_refresh_grab_label()
+				_refresh_debug()
 		&"catalog_next":
 			if not _playtest_active:
 				catalog_panel.cycle_next()

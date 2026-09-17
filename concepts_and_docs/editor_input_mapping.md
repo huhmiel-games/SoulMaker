@@ -35,6 +35,7 @@ Default set (R1 released) — viewport & placement:
 | A | confirm at the crosshair: grab the aimed asset (red, camera freezes), else place the current catalog entry (green) |
 | B | cancel grab (restores pre-grab transform) / deselect |
 | R1 + B | delete selection (grabbed or not) |
+| L1 | snap toggle: grid position (0.1 m, base on grid) + angles (15°) while grabbed |
 | X | delete selection |
 | Y | toggle playtest |
 | Start | quick save |
@@ -86,6 +87,7 @@ LineEdit keeps normal text focus.
 | grabbed: move object (LS) | WASD (Shift+WASD = height, W up) |
 | grabbed: yaw + pitch object (RS) | mouse motion (Shift+mouse X = roll alone) |
 | grabbed: drop (A) / cancel (B) / delete (R1+B) | E / Q / Shift+Q |
+| snap toggle (L1) | Tab |
 | aim feedback | crosshair, centered on the viewport (green = empty space, red = placed asset) |
 | mouse click (panel or viewport) | *(nothing — parity: the mouse only orbits, selection is arrows/D-pad + A/E)* |
 | delete | Delete |
