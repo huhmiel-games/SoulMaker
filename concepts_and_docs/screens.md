@@ -74,7 +74,7 @@ Each entry: *Purpose · Content · Actions · Transitions · Roadmap phase*.
 ### Hub / World library
 
 - **Purpose** : the local library of worlds — the Play door's destination for installed content.
-- **Content** : list/cards of installed worlds (title, preview thumbnails, creator info when available), import zone (drag & drop of a shared file).
+- **Content** : list/cards of installed worlds (title, preview thumbnails, creator info when available), import zone (file-picker, no OS file-drop).
 - **Actions** : open world → New game / Load (lists the world's runs, ADR-015); import a world; Delete (with confirm); (later) Workshop browse.
 - **Transitions** : world card → New game flow or Load list → gameplay.
 - **Phase** : P12 (MVP local) — but the world selection entry exists as soon as multiple worlds can be imported.
@@ -105,7 +105,7 @@ Each entry: *Purpose · Content · Actions · Transitions · Roadmap phase*.
 
 - **Purpose** : build a map from prefabs and/or raw assets. The core of the product.
 - **Content** : 3D view (orbit/zoom camera), asset catalog panel, map structure of prefabs, ambiance override per map.
-- **Actions** : place/drag & drop, free transform (no snap by default, fine snap 0.1), select/move/copy/delete, **undo/redo**, save/load (JSON), **instant playtest** (one key: editor ↔ player), export map as shared file.
+- **Actions** : place (arrows/D-pad + A/E), free transform (no snap by default, fine snap 0.1), select/move/copy/delete, **undo/redo**, save/load (JSON), **instant playtest** (one key: editor ↔ player), export map as shared file.
 - **Phase** : P1 (core). Ambiance override confirmed in P6 but the UI hook is laid out here.
 
 #### World editor
@@ -189,7 +189,7 @@ Each entry: *Purpose · Content · Actions · Transitions · Roadmap phase*.
 
 ```
 Boot → Home (Play door)
-	  → World library (/ import a shared world file, drag & drop)
+	  → World library (/ import a shared world file via file-picker)
 	  → New game → choose a world → create player → spawn → play
 	  → HUD (HP/stamina/souls/quickbar)
 	  → kill enemies → collect souls → bonfire (level-up) → explore

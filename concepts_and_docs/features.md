@@ -140,7 +140,7 @@ Legend per column: *Phase* refers to the roadmap phase (P0-P13); *Ref* points to
 | Home = two-door hub (Play / Create) | 🔒 | P1 | screens* home | Contextual Continue per door |
 | Map editor: fluid camera, orbit/zoom | 🔒 | P1 | roadmap P1 | |
 | Free transform gizmos, no snap by default (0.1 fine) | 🔒 | P1 | roadmap P1 | Anti-grid identity |
-| Catalog panel + drag & drop | 🔒 | P1 | roadmap P1 | 5-6 test assets |
+| Catalog panel (arrows/D-pad browse + A/E place, no drag & drop) | 🔒 | P1 | roadmap P1 | 5-6 test assets |
 | Floor + ambiance presets (fog + tonemapping) | 🔒 | P1 | roadmap P1 | |
 | Bounded directional sun + embedded lights | 🔒 | P1 | roadmap P1 | Torches, fireplaces |
 | One-key instant playtest (editor ↔ player) | 🔒 | P1 | roadmap P1 | |
@@ -213,7 +213,7 @@ Legend per column: *Phase* refers to the roadmap phase (P0-P13); *Ref* points to
 
 | Feature | Status | Phase | Ref | Notes |
 |---|---|---|---|---|
-| Local hub + drag & drop import | 🔒 | P12 | roadmap P12 | |
+| Local hub + file-picker import (no OS file-drop) | 🔒 | P12 | roadmap P12 | |
 | Robust export/import + exhaustive validation | 🔒 | P12 | ADR-009 | Strict schema, whitelists, bounds |
 | Catalog built into the game PCK | 🔵 | P12 | ADR-010 | Community assets via updates (1st-party ships at P10) |
 | "Vulkan required" notice + requirements display | 🔒 | P12 | ADR-002 | No OpenGL fallback |

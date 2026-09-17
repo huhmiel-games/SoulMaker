@@ -5,7 +5,7 @@
 ## Shared editor shell
 
 **Goal** — one coherent editing language across map/prefab/world/character/dialogue.
-**Behaviors** — shared left/top toolbars; catalog panel (drag & drop); world/selection views; undo/redo; validation banner; in-editor help; consistent shortcuts; instant **playtest toggle** (editor ↔ player in one key).
+**Behaviors** — shared left/top toolbars; catalog panel (arrows/D-pad browse + A/E place, no drag & drop); world/selection views; undo/redo; validation banner; in-editor help; consistent shortcuts; instant **playtest toggle** (editor ↔ player in one key).
 **Parameters / bounds** — toolbar/undoredo uniform across editors.
 **Data / JSON** — editor state separate from game data (auto-save edits vs run saves).
 **Interactions** — individual editor specs below.
@@ -22,7 +22,7 @@
 ## Map editor
 
 **Goal** — build a map from prefabs/raw assets, anti-grid.
-**Behaviors** — orbit/zoom editing camera; **free transform gizmos** (translate/rotate/scale, snap off by default, fine snap 0.1); drag & drop from catalog; selection/move/copy/delete; **undo/redo**; save/load (JSON); **instant playtest** (one key); ambiance override per map; floor + ambiance presets; bounded directional sun with elevation bounds; embedded lights; ground-attach hint; live **light-count counter**.
+**Behaviors** — orbit/zoom editing camera; **free transform gizmos** (translate/rotate/scale, snap off by default, fine snap 0.1); catalog browse + place (arrows/D-pad + A/E, no drag & drop); selection/move/copy/delete; **undo/redo**; save/load (JSON); **instant playtest** (one key); ambiance override per map; floor + ambiance presets; bounded directional sun with elevation bounds; embedded lights; ground-attach hint; live **light-count counter**.
 **Data / JSON** — map placements + world refs.
 **Interactions** — `06`, `10` catalog, `07` objects.
 **Edge cases** — snapshot/auto-recover on crash (editor state).

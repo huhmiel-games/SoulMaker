@@ -7,7 +7,7 @@
 - **Objective**: P1 map editor — continue building the maker loop (post-input-layer)
 - **Expected mode**: edit
 - **Next step**: pick the next slice (gizmos transform? reload key? parity doc cleanup?).
-- **Last step done**: VERDICT world_3d saga — probes removed, quirk documented in code. Facts: `world_3d` member null despite `own_world_3d=true` (+`using_own=true`); `find`/`cam` resolve the real own world, ≠ main window world (so never query `root.world_3d`); pick via `editor_camera.get_world_3d()` + guard; crosshair red-on-asset confirmed live; SelectionBox fixed to world space. Crosshair recipe: PASSED. Headless import passes. Deferred: free transform (gizmo/move rework), reload key, spawn-fallback sign, first-AABB ground snap, menu scene, ESC cursor release, parity doc cleanup (roadmap l.52/l.246, features.md l.143/l.216, features/09 l.8/l.25, features/11 l.24/l.121, features/14 l.14/l.17, screens.md l.77/l.108/l.192, versioning.md l.20 — idea.txt untouched).
+- **Last step done**: parity doc cleanup DONE — drag & drop purged from roadmap (P1 catalog, P12 file-drop), features.md, features/09/11/14, screens.md, versioning.md, editor_input_mapping.md (re-grep: zero prescriptive mention left; idea.txt archive untouched). Earlier: world_3d verdict (pick via camera effective world + guard, red confirmed live, SelectionBox world-space). Headless import passes. Deferred: free transform (gizmo/move rework), reload key, spawn-fallback sign, first-AABB ground snap, menu scene, ESC cursor release.
 
 ## Test recipe (human) — effective world
 

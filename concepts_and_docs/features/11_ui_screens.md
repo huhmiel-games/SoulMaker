@@ -21,7 +21,7 @@
 ## World library (Play destination)
 
 **Goal** — local installed/imported worlds.
-**Behaviors** — list/cards with title, thumbnail, creator info; import zone (drag & drop of a shared file or file-picker — frictionless, "like opening an image"); open → New game / Load (run list per world, ADR-015); delete with confirm; (later) Workshop browse.
+**Behaviors** — list/cards with title, thumbnail, creator info; import zone (file-picker only, no OS file-drop — frictionless, "like opening an image"); open → New game / Load (run list per world, ADR-015); delete with confirm; (later) Workshop browse.
 **Data / JSON** — installed-world index.
 **Interactions** — `14` import, `03` runs.
 **Sources** — screens Hub/World library, idea.txt 1675-1677.
@@ -118,7 +118,7 @@
 ## Import/export flows (with disclaimer)
 
 **Goal** — frictionless sharing; visible "user content" trust model.
-**Behaviors** — drag & drop file anywhere-importable (Play library / Create); "user-created content, not verified" banner on imported worlds; export as a single shareable JSON file from each editor; stale-format notice ("created with version X — some new features missing").
+**Behaviors** — file-picker import (Play library / Create, no OS file-drop); "user-created content, not verified" banner on imported worlds; export as a single shareable JSON file from each editor; stale-format notice ("created with version X — some new features missing").
 **Interactions** — `14` distribution, `09` editors.
 **Sources** — idea.txt 1671-1677, screens.
 

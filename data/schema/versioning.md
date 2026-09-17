@@ -17,7 +17,7 @@ The `data/` schemas and the files that validate against them share one versionin
 
 6. **Format debt is the debt that kills (roadmap P0).** A schema added later forces a `format_version` bump: bumping must be rare, documented (this file), and conservative — forward-compatible by rule 2.
 
-7. **Data is untrusted.** All imported JSON (drag & drop, world via Play, prefab/character via Create) passes the same validation. Errors carry precise file/line diagnostics (features/14, features/09).
+7. **Data is untrusted.** All imported JSON (file-picker, world via Play, prefab/character via Create) passes the same validation. Errors carry precise file/line diagnostics (features/14, features/09).
 
 ## Where the schemas live
 

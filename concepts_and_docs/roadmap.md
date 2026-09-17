@@ -49,7 +49,7 @@ A game that is not a game: a base that lets anyone create their own souls-like w
 - Home shell: **two-door hub (Play / Create)** — transverse actions (Options, Credits, Quit) in a corner, contextual Continue per door (resume run / resume editing). Details in `screens.md`.
 - Fluid camera editing (orbit, zoom)
 - Translation/rotation/scale gizmos **free, no snap by default** (fine adjustable snap 0.1)
-- Asset catalog panel (**starter catalog proto** — 5-6 seeded CC0 assets first week, grown through P2→P9; 1st-party, ADR-017), drag & drop into the scene
+- Asset catalog panel (**starter catalog proto** — 5-6 seeded CC0 assets first week, grown through P2→P9; 1st-party, ADR-017), keyboard/gamepad browsing (arrows/D-pad + A/E place, no drag & drop per device-parity rule)
 - Floor + ambiance presets (fog depth/height + tonemapping)
 - Bounded directional sun (minimum elevation), lights embedded in assets (torches, fireplaces)
 - **Base toon shader (`diffuse_toon` + shadow ramps) + imposed palette** (ADR-019) — the 3D look is locked from the first visible asset
@@ -243,7 +243,7 @@ A game that is not a game: a base that lets anyone create their own souls-like w
 **Goal** : the full create → share → play cycle.
 
 **Deliverables**
-- Local hub: list of imported/exported worlds (file drag & drop accepted)
+- Local hub: list of imported/exported worlds (file-picker import only, no OS file-drop per device-parity rule)
 - Robust export/import + **exhaustive validation** (strict schema, ID whitelist, bounds, complexity limits)
 - **Catalog build from the Drive** (ADR-010): shipped **capable-but-empty** — the pipeline (download per id, `sha256` verify, local cache, pack into PCK) exists, but community content travels to players **only through game updates**, never from the Drive (augmentative post-V1, ADR-010); the 1st-party catalog already shipped in PCK at P10
 - Mention system requirements on distro pages: **Vulkan required** (no OpenGL fallback)

@@ -8,8 +8,8 @@ mapping is **data-driven**: rebinding edits one dictionary
 
 - **Keyboard constraint from the gamepad**, not the reverse: the keyboard
   follows the same logical action set as the gamepad, with dedicated extra
-  keys for the actions a gamepad cannot express (precise SpinBox editing,
-  drag & drop). The mouse selects nothing — it only orbits.
+  keys for the actions a gamepad cannot express (precise SpinBox editing).
+  The mouse selects nothing — it only orbits.
 - **No modal modes.** The gamepad uses a single **shift modifier** (R1) —
   the Souls gesture pattern — to double the button set instead of switching
   explicit modes. Confirm (A/E) is contextual on the crosshair — select red,

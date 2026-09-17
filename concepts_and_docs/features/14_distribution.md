@@ -11,10 +11,10 @@
 **Edge cases** — handmade/hostile JSON (validation rejects), exotic encodings.
 **Sources** — ADR-009, idea.txt 1671-1677, 2648-2670.
 
-## Local hub + drag & drop import
+## Local hub + file-picker import
 
 **Goal** — "import a world like opening an image".
-**Behaviors** — local folder of installed worlds; drag & drop file OR file-picker; world appears in list; friction-less; per-world cards (title, thumbnail, creator, version).
+**Behaviors** — local folder of installed worlds; file-picker import (no OS file-drop); world appears in list; friction-less; per-world cards (title, thumbnail, creator, version).
 **Data / JSON** — installed-world index.
 **Interactions** — `11` World library, `09` export, `10` whitelist.
 **Sources** — idea.txt 244-254, 1675, 284-286, 665-667.
