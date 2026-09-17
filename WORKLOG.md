@@ -6,15 +6,16 @@
 
 - **Objective**: P1 map editor — continue building the maker loop (post-input-layer)
 - **Expected mode**: edit
-- **Next step**: pick the next slice (gizmos transform? reload key? parity doc cleanup?).
-- **Last step done**: parity doc cleanup DONE — drag & drop purged from roadmap (P1 catalog, P12 file-drop), features.md, features/09/11/14, screens.md, versioning.md, editor_input_mapping.md (re-grep: zero prescriptive mention left; idea.txt archive untouched). Earlier: world_3d verdict (pick via camera effective world + guard, red confirmed live, SelectionBox world-space). Headless import passes. Deferred: free transform (gizmo/move rework), reload key, spawn-fallback sign, first-AABB ground snap, menu scene, ESC cursor release.
+- **Next step**: human live test of the shift remap (recipe below).
+- **Last step done**: grab remap — shift switches both sticks to job 2: R1+LS / Shift+WASD = height only (Y, up lifts, X dead), R1+RS / Shift+mouse = roll alone (Y dead); triggers/Space/R freed (bindings pruned: obj_height, height_up/down, roll_key deleted). E paradox fixed: `is_shifted()` = R1-pad OR Shift-key gated on editor profile (E = pure confirm; playtest Shift=descend pristine); AGENTS.md doctrine hardened (gamepad set is source of truth, keyboard mirrors 1:1 chords included, no keyboard-only actions). Shift+Q = delete (keyboard mirror of R1+B). Earlier: grab & move base. Headless import passes. Deferred: snap toggle, scale (LT/RT freed candidates), menu scene, ESC release, reload key, spawn-fallback sign, first-AABB ground snap.
 
-## Test recipe (human) — effective world
+## Test recipe (human) — shift remap
 
-1. Launch `scenes/editors/map_editor.tscn`. Copy the `probe worlds:` line (own / find / cam / root / using_own) + any `probe pick` line.
-2. Place an asset → SelectionBox on the asset (not center).
-3. Aim at the placed asset → red expected. A/E on red selects, on green places.
-4. Report: probe worlds line, red/green, SelectionBox, any debugger break.
+1. Launch `scenes/editors/map_editor.tscn`. Grab an asset (red + A).
+2. Gamepad: R1+LS up/down lifts (X dead); R1+RS X rolls alone (RS Y dead); plain LS/RS unchanged (XZ / yaw+pitch). R1+B deletes; plain B cancels.
+3. Keyboard: Shift+WASD W/S height (A/D dead); Shift+mouse X rolls alone; Shift+Q deletes. E pure confirm (no shift weirdness).
+4. Playtest: Shift still descends, gamepad buttons all alive while Shift held (no profile leakage).
+5. Report: height/roll directions, anything dead, DebugLabel HUD text.
 
 ## Open items / waiting on you
 

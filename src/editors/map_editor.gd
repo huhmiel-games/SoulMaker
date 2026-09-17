@@ -21,6 +21,11 @@ const CROSSHAIR_HIT: Texture2D = preload("res://assets/textures/ui/crosshair_red
 
 const MOVE_STEP := 0.25
 const MOVE_FINE := 0.05
+## Grab feel knobs (tune live): object move/height speed (m/s at full
+## deflection) and turn speed (rad/s).
+const OBJ_MOVE_SPEED := 4.0
+const OBJ_HEIGHT_SPEED := 3.0
+const OBJ_TURN_SPEED := 1.8
 
 ## Attach points (must exist in the scene scaffold).
 @onready var world_viewport: SubViewport = get_node("ViewportContainer/WorldViewport")
@@ -40,6 +45,11 @@ var current_map_name := "corridor_01"
 ## Monotonic placement counter — instance ids must stay unique even after
 ## deletions, so they are never derived from _placements.size().
 var _next_iid: int = 0
+## Grab state (Minecraft-style direct manipulation): while true the camera is
+## frozen and the sticks drive the selected placement instead of the view.
+var _grabbed := false
+## Pre-grab transform, restored by cancel (B/Q).
+var _grab_from := Transform3D.IDENTITY
 
 
 func _ready() -> void:
@@ -67,9 +77,14 @@ func _ready() -> void:
 	InputManager.set_profile(&"editor")
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	_refresh_crosshair()
-	if _playtest_active or _selected == null:
+	if _playtest_active:
+		return
+	if _grabbed:
+		_move_grabbed(delta)
+		return
+	if _selected == null:
 		return
 	var step: float = MOVE_FINE if InputManager.is_pressed(&"fine_mode") else MOVE_STEP
 	if InputManager.is_pressed(&"nudge_x_neg"):
@@ -146,30 +161,150 @@ func _instance_placement(packed: PackedScene, id: String, iid: String) -> Node3D
 	return placement
 
 
-## ── selection ──────────────────────────────────────────────────────────
-## A/E is contextual on the crosshair, identically on every device (parity):
-## aiming at a placed asset (red) selects it for edition, aiming at empty
-## space (green) places the current catalog entry. There is no mouse-click
-## path — the crosshair is the only aim.
+## ── selection & grab ─────────────────────────────────────────────────
+## A/E is contextual on the crosshair, identically on every device (parity).
+## IDLE: red grabs the aimed placement (camera freezes, sticks drive it),
+## green places the current catalog entry. GRABBED: A/E drops (applies +
+## deselects + unfreezes), B/Q cancels (restores pre-grab transform),
+## R1+B/X/Delete deletes. There is no mouse-click path.
 
 ## Last crosshair pick result (drives the red/green texture, assigned only
 ## on change by _refresh_crosshair).
 var _crosshair_hit := false
 
 
-## A/E confirm at the crosshair: selects the aimed placement, otherwise
-## places the current catalog entry at the spawn point.
+## A/E confirm at the crosshair: grabs the aimed placement, otherwise places
+## the current catalog entry at the spawn point. While grabbed, confirms the
+## drop instead.
 func _place_or_select() -> void:
+	if _grabbed:
+		_drop_grab()
+		return
 	var aimed := _pick_placement_at_screen(_viewport_center())
 	if aimed != null:
-		_select(aimed)
-		_refresh_debug()
+		_grab(aimed)
 		return
 	var id := catalog_panel.current_id
 	if id.is_empty():
 		_set_status("no catalog entry to place")
 		return
 	_on_asset_selected(id)
+
+
+## Grabs a placement: the camera freezes and the sticks drive the object
+## (see _move_grabbed) until drop/cancel/delete.
+func _grab(placement: Node3D) -> void:
+	_selected = placement
+	_grabbed = true
+	_grab_from = placement.global_transform
+	editor_camera.frozen = true
+	_update_selection_visual()
+	var iid := String(placement.get_meta("instance_id", "?"))
+	var pid := String(placement.get_meta("prefab_id", "?"))
+	_set_status("grabbed %s (%s) — sticks drive it, camera frozen" % [pid, iid])
+	_refresh_grab_label()
+
+
+## Drops the grab: keeps the live transform, deselects, unfreezes.
+func _drop_grab() -> void:
+	if _selected == null:
+		return
+	var iid := String(_selected.get_meta("instance_id", "?"))
+	_grabbed = false
+	_selected = null
+	editor_camera.frozen = false
+	_update_selection_visual()
+	_set_status("dropped %s" % iid)
+
+
+## Cancels the grab: restores the pre-grab transform, deselects, unfreezes.
+func _cancel_grab() -> void:
+	if _selected == null:
+		return
+	_selected.global_transform = _grab_from
+	_apply_placement_transform(_selected)
+	var iid := String(_selected.get_meta("instance_id", "?"))
+	_grabbed = false
+	_selected = null
+	editor_camera.frozen = false
+	_update_selection_visual()
+	_set_status("grab cancelled %s (restored)" % iid)
+
+
+## Drives the grabbed placement with the camera sticks (the camera is frozen,
+## so its inputs are inert on the view). Shift (R1-pad / Shift-key) switches
+## both sticks to their second job — translation stick does Y only, rotation
+## stick does roll only. All sources sum, no device branches.
+func _move_grabbed(delta: float) -> void:
+	if _selected == null:
+		return
+	var node := _selected
+	var shifted := InputManager.is_shifted()
+	# XZ move, unshifted only (keyboard steps scaled like the camera pan +
+	# stick on top).
+	if not shifted:
+		var mv := Vector2.ZERO
+		if InputManager.is_pressed(&"cam_pan_right"):
+			mv.x += 1.0
+		if InputManager.is_pressed(&"cam_pan_left"):
+			mv.x -= 1.0
+		if InputManager.is_pressed(&"cam_pan_back"):
+			mv.y += 1.0
+		if InputManager.is_pressed(&"cam_pan_fwd"):
+			mv.y -= 1.0
+		mv = mv * 0.5 + InputManager.left_stick()
+		if mv != Vector2.ZERO:
+			var cbasis := editor_camera.global_basis
+			var right := cbasis.x
+			right.y = 0.0
+			right = right.normalized() if right.length() > 0.001 else Vector3.RIGHT
+			var fwd := -cbasis.z
+			fwd.y = 0.0
+			fwd = fwd.normalized() if fwd.length() > 0.001 else Vector3.FORWARD
+			node.position += (right * mv.x + fwd * -mv.y) * OBJ_MOVE_SPEED * delta
+	# Height, shifted only: LS Y / W-S, push up lifts. Base clamped above
+	# the ground.
+	if shifted:
+		var ls := InputManager.left_stick()
+		var h := -ls.y
+		if InputManager.is_pressed(&"cam_pan_fwd"):
+			h += 1.0
+		if InputManager.is_pressed(&"cam_pan_back"):
+			h -= 1.0
+		if h != 0.0:
+			node.position.y += h * OBJ_HEIGHT_SPEED * delta
+			var box := _find_mesh_aabb(node)
+			node.position.y = maxf(node.position.y, -box.position.y)
+	# Turn: RS/mouse summed by InputManager. Unshifted = yaw + pitch;
+	# shifted = roll alone (Y dead).
+	var tx := InputManager.analog(&"cam_orbit_x")
+	var ty := InputManager.analog(&"cam_orbit_y")
+	if shifted:
+		if tx != 0.0:
+			node.rotate_object_local(Vector3.BACK, -tx * OBJ_TURN_SPEED * delta)
+	else:
+		if tx != 0.0:
+			node.rotate_y(-tx * OBJ_TURN_SPEED * delta)
+		if ty != 0.0:
+			node.rotate_object_local(Vector3.RIGHT, -ty * OBJ_TURN_SPEED * delta)
+	_set_placement_data(node)
+	_update_selection_visual()
+	_refresh_grab_label()
+
+
+## Grab HUD text (shared builder). Per-frame refresh is label-only (no
+## print — _set_status prints, which would spam the console every frame);
+## grab/drop/cancel events use _set_status for their one-shot print.
+func _grab_label_text() -> String:
+	if _selected == null:
+		return "MODE: EDIT"
+	var iid := String(_selected.get_meta("instance_id", "?"))
+	var pid := String(_selected.get_meta("prefab_id", "?"))
+	return "MODE: EDIT (grabbed)\n%s (%s) pos=%s\nLS/WASD move · R1+LS/Shift+WASD height · RS/mouse turn · R1+RS/Shift+mouse roll · A drop · B cancel · R1+B delete" % [pid, iid, _selected.position]
+
+
+func _refresh_grab_label() -> void:
+	debug_label.text = _grab_label_text()
 
 
 func _viewport_center() -> Vector2:
@@ -201,11 +336,11 @@ func _pick_placement_at_screen(screen_pos: Vector2) -> Node3D:
 	return null
 
 
-## Crosshair upkeep (runs before the _process gate): hidden in playtest,
-## otherwise green = empty space (A/E places), red = aiming at a placed
-## asset (A/E selects it for edition).
+## Crosshair upkeep (runs before the _process gate): hidden in playtest and
+## while grabbed (the SelectionBox takes over), otherwise green = empty space
+## (A/E places), red = aiming at a placed asset (A/E grabs it).
 func _refresh_crosshair() -> void:
-	if _playtest_active:
+	if _playtest_active or _grabbed:
 		if crosshair.visible:
 			crosshair.hide()
 		return
@@ -270,6 +405,8 @@ func _delete_selection() -> void:
 			_placements.remove_at(i)
 	_selected.queue_free()
 	_selected = null
+	_grabbed = false
+	editor_camera.frozen = false
 	_update_selection_visual()
 	_set_status("deleted %s — placed: %d" % [iid, _placements.size()])
 
@@ -279,6 +416,8 @@ func _clear_all() -> void:
 		child.queue_free()
 	_placements.clear()
 	_selected = null
+	_grabbed = false
+	editor_camera.frozen = false
 	_next_iid = 0
 	_update_selection_visual()
 
@@ -368,6 +507,9 @@ func toggle_playtest() -> void:
 	_playtest_active = not _playtest_active
 	InputManager.set_profile(&"playtest" if _playtest_active else &"editor")
 	if _playtest_active:
+		# Entering playtest force-drops any grab (live transform kept).
+		_grabbed = false
+		editor_camera.frozen = false
 		play_camera.global_position = editor_camera.global_position
 		play_camera.rotation = editor_camera.rotation
 	editor_camera.current = not _playtest_active
@@ -395,6 +537,10 @@ func _on_input_action(action: StringName) -> void:
 		&"delete":
 			if not _playtest_active:
 				_delete_selection()
+		&"delete_shifted":
+			# R1+B: delete, grabbed or not (the shifted face of B/cancel).
+			if not _playtest_active:
+				_delete_selection()
 		&"catalog_next":
 			if not _playtest_active:
 				catalog_panel.cycle_next()
@@ -412,8 +558,15 @@ func _on_input_action(action: StringName) -> void:
 				_place_or_select()
 		&"deselect":
 			if not _playtest_active:
-				_select(null)
-				_refresh_debug()
+				if _grabbed:
+					_cancel_grab()
+				elif InputManager.is_shifted():
+					# Shift+Q: the shifted face of cancel (R1+B's keyboard
+					# mirror — _resolve_key is shift-blind, so it lands here).
+					_delete_selection()
+				else:
+					_select(null)
+					_refresh_debug()
 
 
 func _placement_entry(placement: Node3D) -> Dictionary:

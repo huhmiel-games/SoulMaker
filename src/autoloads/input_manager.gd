@@ -12,7 +12,7 @@ extends Node
 ##   left stick ──  WASD        (editor: camera pan / edit translate)
 ##   right stick──  mouse       (editor: camera orbit / edit rotate)
 ##   d-pad      ──  arrows      (panel: tab + list navigation)
-##   R1 (shift) ──  E held      (shifted actions; Souls pouch parity)
+##   R1 (shift) ──  Shift held   (shifted chords; editor only)
 ##   A          ──  E           (place / confirm / select)
 ##   B          ──  Q           (back / deselect)
 ##   Y          ──  P           (playtest)
@@ -22,9 +22,9 @@ extends Node
 ##   Guide      ──  Esc         (menu)
 ##
 ## Profiles let one action mean different things per context (editor vs
-## playtest). The shift parity (R1 <> E) applies to gamepad buttons only;
-## keyboard shifted actions carry their own dedicated keys, so no chord is
-## ever needed on the keyboard.
+## playtest). Shift chords exist on both devices (R1-pad, Shift-key in the
+## editor); the gamepad's limited set is the source of truth, the keyboard
+## mirrors it 1:1 — no keyboard-only actions.
 
 signal action_pressed(action: StringName)
 signal action_released(action: StringName)
@@ -38,8 +38,11 @@ const DEADZONE := 0.2
 const MOUSE_SCALE := 0.14
 ## Gamepad shift: Right Shoulder (R1).
 const SHIFT_BUTTON := JOY_BUTTON_RIGHT_SHOULDER
-## Keyboard shift mirror: E held, the Souls event-action / quick-pouch.
-const KEY_SHIFT_MOD := KEY_E
+## Keyboard shift mirror: physical Shift, editor profile only (playtest uses
+## Shift to descend — profile-gating keeps that pristine). E is NOT a shift:
+## E is the A-equivalent (pure confirm); doubling it as a modifier made it
+## unusable (press confirms before hold can shift).
+const KEYBOARD_SHIFT_MOD := KEY_SHIFT
 
 const PROFILES := {
 	"editor": {
@@ -55,6 +58,7 @@ const PROFILES := {
 		"tab_prev": {"btn": JOY_BUTTON_DPAD_LEFT, "key": KEY_LEFT},
 		"place_select": {"btn": JOY_BUTTON_A, "key": KEY_E},
 		"deselect": {"btn": JOY_BUTTON_B, "key": KEY_Q},
+		"delete_shifted": {"btn": JOY_BUTTON_B, "shifted": true},
 		"playtest": {"btn": JOY_BUTTON_Y, "key": KEY_P},
 		"delete": {"btn": JOY_BUTTON_X, "key": KEY_DELETE},
 		"quick_save": {"btn": JOY_BUTTON_START, "key": KEY_S},
@@ -154,14 +158,14 @@ func _track_for(action: StringName, profile := &"") -> Dictionary:
 	return _action_track.get("%s/%s" % [prof, String(action)], {})
 
 
-## True while the shift parity is active: R1 held on the gamepad, or E held
-## on the keyboard (Souls pouch). Gamepad shifted actions resolve only when
-## this is true and R1 matches.
+## True while the shift parity is active: R1 held on the gamepad, or Shift
+## held on the keyboard in the editor profile. Gamepad shifted actions
+## resolve only when this is true and R1 matches. The keyboard Shift is
+## profile-gated so playtest (Shift = descend) stays pristine.
 func is_shifted() -> bool:
-	return (
-		Input.is_joy_button_pressed(DEVICE, SHIFT_BUTTON)
-		or Input.is_physical_key_pressed(KEY_SHIFT_MOD)
-	)
+	if Input.is_joy_button_pressed(DEVICE, SHIFT_BUTTON):
+		return true
+	return _active_profile == &"editor" and Input.is_physical_key_pressed(KEYBOARD_SHIFT_MOD)
 
 
 ## Polled check whether an action is currently down (keyboard, gamepad button

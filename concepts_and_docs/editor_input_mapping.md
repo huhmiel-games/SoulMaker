@@ -32,36 +32,49 @@ Default set (R1 released) — viewport & placement:
 | RS | orbit camera **in place** (turret: rotates around itself, focus re-glued ahead) |
 | D-pad U / D | catalog prev / next entry (within the selected category tab) |
 | D-pad L / R | catalog category tab prev / next |
-| A | confirm at the crosshair: select the aimed asset (red), else place the current catalog entry (green) |
-| B | deselect |
+| A | confirm at the crosshair: grab the aimed asset (red, camera freezes), else place the current catalog entry (green) |
+| B | cancel grab (restores pre-grab transform) / deselect |
+| R1 + B | delete selection (grabbed or not) |
 | X | delete selection |
 | Y | toggle playtest |
 | Start | quick save |
 | Back | load map |
 | Guide | menu (reserved) |
 
-Shifted set (R1 held) — transform & utilities:
+Shifted set (R1 held) — grab & utilities (grab = camera frozen, sticks drive the object; shift switches both sticks to their second job):
 
 | Input | Action |
 |---|---|
-| LS / RS | move / rotate object (analog, reserved for gizmos) |
-| LT / RT | scale (reserved for gizmos) |
-| D-pad | catalog panel (unchanged under R1 — object nudge deferred to the move rework) |
-| A | cycle translate → rotate → scale |
-| B | reset transform |
-| X | duplicate |
-| Y | toggle snap |
-| Back | delete all |
+| LS | grabbed object height (Y only — push up lifts, X dead) |
+| RS X | roll the grabbed object (alone — Y dead) |
+| RS Y | (nothing while shifted) |
+| D-pad | catalog panel (unchanged — browse while grabbed) |
+| A | drop grab (keeps transform, deselects, unfreezes) |
+| B | cancel grab (restores pre-grab transform) — R1+B deletes instead |
+| X | delete selection (grabbed or not) |
+| Y | toggle snap (reserved) |
+
+### Grabbed object, unshifted (camera frozen — the sticks drive the object)
+
+| Gamepad | Keyboard | Action |
+|---|---|---|
+| LS | WASD | move on the ground plane (camera-relative) |
+| RS | mouse motion | yaw (X) + pitch (Y) |
+| A | E | drop grab (keeps transform, deselects, unfreezes) |
+| B | Q | cancel grab (restores pre-grab transform) |
+| R1+B | Shift+Q | delete selection (grabbed or not) |
 
 ## Keyboard mapping (editor profile)
 
 The keyboard mirrors the gamepad action set 1:1 with **no click or drag**:
 **WASD pans the camera** like the LS (pitch included), **mouse motion orbits**
 like the RS (in place, RS direction), **arrows browse the catalog panel** like
-the D-pad, **E places** like A. UI buttons are deliberately **not
-mouse-clickable** (and not keyboard-focusable) so panel input never fights the
-mouse; the `MapName` LineEdit keeps normal text focus. The keyboard
-object-nudge workflow is **deferred** pending the object-move rework.
+the D-pad, **E confirms** like A. While grabbed (camera frozen) the same inputs
+drive the object: WASD moves, mouse turns, Shift+WASD sets the height
+(W up), Shift+mouse rolls. Shift is the keyboard R1 (editor only); E is pure
+confirm, never a modifier. UI buttons are deliberately **not mouse-clickable** (and not
+keyboard-focusable) so panel input never fights the mouse; the `MapName`
+LineEdit keeps normal text focus.
 
 | Action | Key |
 |---|---|
@@ -69,7 +82,10 @@ object-nudge workflow is **deferred** pending the object-move rework.
 | camera orbit (RS) | mouse motion (no click) |
 | catalog prev / next | Up / Down arrows |
 | category tab prev / next | Left / Right arrows |
-| confirm at the crosshair (select red / place green) | E |
+| confirm at the crosshair (grab red / place green) | E |
+| grabbed: move object (LS) | WASD (Shift+WASD = height, W up) |
+| grabbed: yaw + pitch object (RS) | mouse motion (Shift+mouse X = roll alone) |
+| grabbed: drop (A) / cancel (B) / delete (R1+B) | E / Q / Shift+Q |
 | aim feedback | crosshair, centered on the viewport (green = empty space, red = placed asset) |
 | mouse click (panel or viewport) | *(nothing — parity: the mouse only orbits, selection is arrows/D-pad + A/E)* |
 | delete | Delete |
