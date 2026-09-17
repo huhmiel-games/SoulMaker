@@ -11,7 +11,6 @@ extends Node
 ##   gamepad    ──  keyboard
 ##   left stick ──  WASD        (editor: camera pan / edit translate)
 ##   right stick──  mouse       (editor: camera orbit / edit rotate)
-##   triggers   ──  mouse wheel (zoom)
 ##   d-pad      ──  arrows      (panel: tab + list navigation)
 ##   R1 (shift) ──  E held      (shifted actions; Souls pouch parity)
 ##   A          ──  E           (place / confirm / select)
@@ -50,7 +49,6 @@ const PROFILES := {
 		"cam_pan_back": {"key": KEY_S, "stick": JOY_AXIS_LEFT_Y, "stick_sign": 1.0},
 		"cam_orbit_x": {"stick": JOY_AXIS_RIGHT_X, "mouse_x": true},
 		"cam_orbit_y": {"stick": JOY_AXIS_RIGHT_Y, "mouse_y": true},
-		"cam_zoom": {"triggers": true, "wheel": true},
 		"panel_left": {"btn": JOY_BUTTON_DPAD_LEFT, "key": KEY_LEFT},
 		"panel_right": {"btn": JOY_BUTTON_DPAD_RIGHT, "key": KEY_RIGHT},
 		"panel_up": {"btn": JOY_BUTTON_DPAD_UP, "key": KEY_UP},
@@ -198,7 +196,7 @@ func is_pressed(action: StringName, profile := &"") -> bool:
 ##   "mouse_x"  → this frame's mouse motion X × MOUSE_SCALE (RS parity)
 ##   "mouse_y"  → this frame's mouse motion Y × MOUSE_SCALE
 ##   "triggers" → right minus left trigger (each deadzone applied)
-## Camera orbit/zoom consume this instead of polling devices directly.
+## Camera orbit consumes this instead of polling devices directly.
 func analog(action: StringName, profile := &"") -> float:
 	var prof := String(profile)
 	if prof.is_empty():
