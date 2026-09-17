@@ -1,13 +1,10 @@
 class_name CatalogPanel
 extends VBoxContainer
 
-## Editor catalog panel (P1 map editor): category tabs at the top, one button
-## per catalog entry in the selected category. The `asset_selected` signal
-## carries the catalog id. `current_id` tracks the focused entry so the gamepad
-## can cycle (D-pad up/down within tab, left/right across tabs) and place (A)
-## without a mouse.
-
-signal asset_selected(id: String)
+## Editor catalog panel (P1 map editor): category tabs at the top, one row
+## per catalog entry in the selected category. Rows are display-only
+## (MOUSE_FILTER_IGNORE) — selection is keyboard/gamepad only (arrows/D-pad),
+## placement is A/E. `current_id` tracks the focused entry.
 
 ## Attach points — must exist in the scene scaffold.
 @onready var tab_bar: HBoxContainer = get_node("TabBar")
@@ -75,7 +72,8 @@ func populate(catalog: Catalog) -> void:
 		button.custom_minimum_size = Vector2(0.0, 54.0)
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.focus_mode = Control.FOCUS_NONE
-		button.pressed.connect(func() -> void: asset_selected.emit(id))
+		# Display-only row: the mouse never selects (keyboard/gamepad parity).
+		button.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		_buttons[id] = button
 		_entry_data[id] = entry
 		entry_list.add_child(button)
@@ -108,8 +106,8 @@ func _build_tabs() -> void:
 		btn.toggle_mode = true
 		btn.focus_mode = Control.FOCUS_NONE
 		btn.custom_minimum_size = Vector2(0.0, 28.0)
-		var cat_copy: String = cat
-		btn.pressed.connect(func() -> void: _select_tab(cat_copy))
+		# Display-only tab: the mouse never switches (keyboard/gamepad parity).
+		btn.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		_tab_buttons[cat] = btn
 		tab_bar.add_child(btn)
 

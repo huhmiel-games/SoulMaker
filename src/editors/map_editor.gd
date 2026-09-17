@@ -12,14 +12,14 @@ signal map_loaded(path: String)
 const PLACEMENT_GROUP := "placement"
 const SELECTOR_GROUP := "placement_selector"
 const SELECTOR_LAYER := 2
-const GROUND_LAYER := 1
-const SELECT_MASK := GROUND_LAYER | SELECTOR_LAYER
 const MAPS_DIR := "user://maps"
 
 const MOVE_STEP := 0.25
 const MOVE_FINE := 0.05
 
 ## Attach points (must exist in the scene scaffold).
+## world_viewport is currently unused (no picking) — kept for the gizmo/move
+## rework which will need viewport queries again.
 @onready var world_viewport: SubViewport = get_node("ViewportContainer/WorldViewport")
 @onready var placement_root: Node3D = get_node("ViewportContainer/WorldViewport/Placements")
 @onready var editor_camera: OrbitCamera = get_node("ViewportContainer/WorldViewport/EditorCamera")
@@ -33,12 +33,16 @@ var _placements: Array[Dictionary] = []
 var _selected: Node3D = null
 var _playtest_active := false
 var current_map_name := "corridor_01"
+## Monotonic placement counter — instance ids must stay unique even after
+## deletions, so they are never derived from _placements.size().
+var _next_iid: int = 0
 
 
 func _ready() -> void:
 	# The editor cursor is never shown: orbit is drag-free (motion always feeds
-	# the camera), but clicks must still reach the catalog/placement, so HIDDEN
-	# (invisible yet functional) rather than CAPTURED (locked to center).
+	# the camera) and the mouse selects nothing — panel browsing is arrows /
+	# D-pad only, placement is A/E. HIDDEN (invisible yet functional) rather
+	# than CAPTURED (locked to center).
 	Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
 	var load_err := catalog.load()
 	if load_err != OK:
@@ -48,18 +52,10 @@ func _ready() -> void:
 	refill_catalog()
 	for issue in issues:
 		_set_status("catalog issue: %s" % issue)
-	_set_status("editor ready — click an asset to place it")
+	_set_status("editor ready — arrows browse the catalog, E places")
 
-	catalog_panel.asset_selected.connect(_on_asset_selected)
 	InputManager.action_pressed.connect(_on_input_action)
 	InputManager.set_profile(&"editor")
-
-
-func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton:
-		var mb := event as InputEventMouseButton
-		if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed and not _playtest_active:
-			_pick_at_screen(world_viewport.get_mouse_position())
 
 
 func _process(_delta: float) -> void:
@@ -97,7 +93,8 @@ func _on_asset_selected(id: String) -> void:
 	if packed == null:
 		_set_status("cannot load %s" % scene_path)
 		return
-	var iid := "inst_%04d" % _placements.size()
+	var iid := "inst_%04d" % _next_iid
+	_next_iid += 1
 	var placement := _instance_placement(packed, id, iid)
 	var spot := _spawn_point()
 	placement.position = spot
@@ -140,57 +137,18 @@ func _instance_placement(packed: PackedScene, id: String, iid: String) -> Node3D
 
 
 ## ── selection ──────────────────────────────────────────────────────────
+## NOTE: picking existing placements (mouse or center-crosshair) is removed
+## for keyboard/gamepad parity — the mouse selects nothing, A/E always
+## places. Selection of placed objects returns with the gizmo/move rework;
+## the Selector bodies are still created per placement for that future use.
 
-func _pick_at_screen(screen_pos: Vector2) -> void:
-	var placement := _pick_placement_at_screen(screen_pos)
-	if placement != null:
-		_select(placement)
-		_refresh_debug()
-		return
-	var origin := editor_camera.project_ray_origin(screen_pos)
-	var dir := editor_camera.project_ray_normal(screen_pos)
-	var space := world_viewport.world_3d.direct_space_state
-	var query := PhysicsRayQueryParameters3D.create(origin, origin + dir * 1000.0, SELECT_MASK)
-	var hit := space.intersect_ray(query)
-	if not hit.is_empty():
-		var collider: Node = hit.get("collider")
-		if collider != null and collider.is_in_group("ground"):
-			_select(null)
-			_refresh_debug()
-			return
-	_set_status("miss (empty space)")
-
-
-## Gamepad (A) fallback: selects whichever placement the camera center hits,
-## otherwise places the current catalog entry at the spawn point.
-func _place_or_select() -> void:
-	var center := world_viewport.get_visible_rect().size * 0.5
-	var placement := _pick_placement_at_screen(center)
-	if placement != null:
-		_select(placement)
-		_refresh_debug()
-		return
+## A/E: always places the current catalog entry at the spawn point.
+func _place_current() -> void:
 	var id := catalog_panel.current_id
 	if id.is_empty():
 		_set_status("no catalog entry to place")
 		return
 	_on_asset_selected(id)
-
-
-func _pick_placement_at_screen(screen_pos: Vector2) -> Node3D:
-	var origin := editor_camera.project_ray_origin(screen_pos)
-	var dir := editor_camera.project_ray_normal(screen_pos)
-	var space := world_viewport.world_3d.direct_space_state
-	var query := PhysicsRayQueryParameters3D.create(origin, origin + dir * 1000.0, SELECT_MASK)
-	var hit := space.intersect_ray(query)
-	if hit.is_empty():
-		return null
-	var collider: Node = hit.get("collider")
-	if collider != null and collider.is_in_group(SELECTOR_GROUP):
-		var placement := collider.get_parent() as Node3D
-		if placement != null and placement.is_in_group(PLACEMENT_GROUP):
-			return placement
-	return null
 
 
 func _select(placement: Node3D) -> void:
@@ -249,6 +207,7 @@ func _clear_all() -> void:
 		child.queue_free()
 	_placements.clear()
 	_selected = null
+	_next_iid = 0
 	_update_selection_visual()
 
 
@@ -288,12 +247,29 @@ func load_map(name: String) -> void:
 	_clear_all()
 	for placement in MapIO.deserialize(data):
 		_instance_from_data(placement)
+	_sync_iid_counter()
 	if not issues.is_empty():
 		for issue in issues:
 			_set_status("LOAD ISSUE: %s" % issue)
 	map_loaded.emit(path)
 	current_map_name = name
 	_set_status("loaded %s — placed: %d %s" % [name, _placements.size(), "(issues above)" if not issues.is_empty() else ""])
+
+
+## Re-anchors the monotonic iid counter past the highest loaded suffix, so
+## placements created after a load never collide with loaded ids.
+## Only "inst_NNNN" ids participate; anything else is ignored.
+func _sync_iid_counter() -> void:
+	var top := -1
+	for p in _placements:
+		var iid: String = str(p.get("instance_id", ""))
+		if not iid.begins_with("inst_"):
+			continue
+		var tail: String = iid.trim_prefix("inst_")
+		if not tail.is_valid_int():
+			continue
+		top = maxi(top, int(tail))
+	_next_iid = top + 1
 
 
 func _instance_from_data(placement: Dictionary) -> void:
@@ -359,7 +335,7 @@ func _on_input_action(action: StringName) -> void:
 				catalog_panel.prev_tab()
 		&"place_select":
 			if not _playtest_active:
-				_place_or_select()
+				_place_current()
 		&"deselect":
 			if not _playtest_active:
 				_select(null)
