@@ -6,17 +6,15 @@
 
 - **Objective**: P1 map editor — continue building the maker loop (post-input-layer)
 - **Expected mode**: edit
-- **Next step**: human live test of the parity pass (recipe below).
-- **Last step done**: AGENTS.md gained a standing **device-parity rule** (new `## Input` section, project-wide: editors + game — no device branching, no catalog drag & drop, no OS file-drop import, file-picker only). Pending doc cleanup from that decision: roadmap l.52/l.246, features.md l.143/l.216, features/09 l.8/l.25, features/11 l.24/l.121, features/14 l.14/l.17, screens.md l.77/l.108/l.192, versioning.md l.20, editor_input_mapping.md l.12 (idea.txt untouched, archive). Earlier: parity pass (panel display-only, A/E always places, click-select removed — Jolt crash gone by construction) + monotonic `_next_iid`. Headless import passes. Deferred: selection of placed objects (gizmo/move rework), reload key, spawn-fallback sign, first-AABB ground snap, menu scene.
+- **Next step**: pick the next slice (gizmos transform? reload key? parity doc cleanup?).
+- **Last step done**: VERDICT world_3d saga — probes removed, quirk documented in code. Facts: `world_3d` member null despite `own_world_3d=true` (+`using_own=true`); `find`/`cam` resolve the real own world, ≠ main window world (so never query `root.world_3d`); pick via `editor_camera.get_world_3d()` + guard; crosshair red-on-asset confirmed live; SelectionBox fixed to world space. Crosshair recipe: PASSED. Headless import passes. Deferred: free transform (gizmo/move rework), reload key, spawn-fallback sign, first-AABB ground snap, menu scene, ESC cursor release, parity doc cleanup (roadmap l.52/l.246, features.md l.143/l.216, features/09 l.8/l.25, features/11 l.24/l.121, features/14 l.14/l.17, screens.md l.77/l.108/l.192, versioning.md l.20 — idea.txt untouched).
 
-## Test recipe (human) — parity + iid
+## Test recipe (human) — effective world
 
-1. Launch `scenes/editors/map_editor.tscn`.
-2. Clicks do nothing: clicking panel asset rows, tab buttons, or the 3D viewport must NOT place, switch tabs, or select. No debugger break on any click.
-3. Keyboard only: arrows ←/→ switch tabs, ↑/↓ cycle assets, E places at the spawn point. B/Q = no-op.
-4. Gamepad only: D-pad ←/→ tabs, ↑/↓ cycle, A places. Same behavior as keyboard, 1:1.
-5. iid check: place 3 assets (`inst_0000…0002`), Delete one, place again → new id never reused. S saves without SAVE ISSUES.
-6. Report: any click having an effect, any debugger break (esp. `direct_space_state`), the spawned ids, DebugLabel state.
+1. Launch `scenes/editors/map_editor.tscn`. Copy the `probe worlds:` line (own / find / cam / root / using_own) + any `probe pick` line.
+2. Place an asset → SelectionBox on the asset (not center).
+3. Aim at the placed asset → red expected. A/E on red selects, on green places.
+4. Report: probe worlds line, red/green, SelectionBox, any debugger break.
 
 ## Open items / waiting on you
 

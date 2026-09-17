@@ -12,14 +12,17 @@ signal map_loaded(path: String)
 const PLACEMENT_GROUP := "placement"
 const SELECTOR_GROUP := "placement_selector"
 const SELECTOR_LAYER := 2
+const GROUND_LAYER := 1
+const SELECT_MASK := GROUND_LAYER | SELECTOR_LAYER
 const MAPS_DIR := "user://maps"
+
+const CROSSHAIR_OK: Texture2D = preload("res://assets/textures/ui/crosshair_green.png")
+const CROSSHAIR_HIT: Texture2D = preload("res://assets/textures/ui/crosshair_red.png")
 
 const MOVE_STEP := 0.25
 const MOVE_FINE := 0.05
 
 ## Attach points (must exist in the scene scaffold).
-## world_viewport is currently unused (no picking) — kept for the gizmo/move
-## rework which will need viewport queries again.
 @onready var world_viewport: SubViewport = get_node("ViewportContainer/WorldViewport")
 @onready var placement_root: Node3D = get_node("ViewportContainer/WorldViewport/Placements")
 @onready var editor_camera: OrbitCamera = get_node("ViewportContainer/WorldViewport/EditorCamera")
@@ -27,6 +30,7 @@ const MOVE_FINE := 0.05
 @onready var selection_box: MeshInstance3D = get_node("ViewportContainer/WorldViewport/SelectionBox")
 @onready var catalog_panel: CatalogPanel = get_node("CatalogPanel")
 @onready var debug_label: Label = get_node("DebugLabel")
+@onready var crosshair: TextureRect = get_node("Crosshair")
 
 var catalog := Catalog.new()
 var _placements: Array[Dictionary] = []
@@ -39,26 +43,32 @@ var _next_iid: int = 0
 
 
 func _ready() -> void:
-	# The editor cursor is never shown: orbit is drag-free (motion always feeds
-	# the camera) and the mouse selects nothing — panel browsing is arrows /
-	# D-pad only, placement is A/E. HIDDEN (invisible yet functional) rather
-	# than CAPTURED (locked to center).
-	Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
+	# CAPTURED at all times in the editor: orbit must behave like the right
+	# stick (unbounded relative motion — the cursor must never hit a window
+	# edge), and no UI needs a visible cursor (panel is arrows/D-pad only).
+	# Cursor release arrives with the menu scene; Alt-Tab still works at OS
+	# level. Playtest manages its own capture via FlyCamera.
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	var load_err := catalog.load()
 	if load_err != OK:
 		_set_status("FATAL: catalog not readable")
 		return
 	var issues := catalog.validate()
 	refill_catalog()
+	# Initial crosshair texture: _refresh_crosshair() only assigns on change,
+	# so without this the crosshair stays invisible while aiming at empty
+	# space from launch (hit == _crosshair_hit == false).
+	crosshair.texture = CROSSHAIR_OK
 	for issue in issues:
 		_set_status("catalog issue: %s" % issue)
-	_set_status("editor ready — arrows browse the catalog, E places")
+	_set_status("editor ready — arrows browse the catalog, E confirms at the crosshair")
 
 	InputManager.action_pressed.connect(_on_input_action)
 	InputManager.set_profile(&"editor")
 
 
 func _process(_delta: float) -> void:
+	_refresh_crosshair()
 	if _playtest_active or _selected == null:
 		return
 	var step: float = MOVE_FINE if InputManager.is_pressed(&"fine_mode") else MOVE_STEP
@@ -137,18 +147,74 @@ func _instance_placement(packed: PackedScene, id: String, iid: String) -> Node3D
 
 
 ## ── selection ──────────────────────────────────────────────────────────
-## NOTE: picking existing placements (mouse or center-crosshair) is removed
-## for keyboard/gamepad parity — the mouse selects nothing, A/E always
-## places. Selection of placed objects returns with the gizmo/move rework;
-## the Selector bodies are still created per placement for that future use.
+## A/E is contextual on the crosshair, identically on every device (parity):
+## aiming at a placed asset (red) selects it for edition, aiming at empty
+## space (green) places the current catalog entry. There is no mouse-click
+## path — the crosshair is the only aim.
 
-## A/E: always places the current catalog entry at the spawn point.
-func _place_current() -> void:
+## Last crosshair pick result (drives the red/green texture, assigned only
+## on change by _refresh_crosshair).
+var _crosshair_hit := false
+
+
+## A/E confirm at the crosshair: selects the aimed placement, otherwise
+## places the current catalog entry at the spawn point.
+func _place_or_select() -> void:
+	var aimed := _pick_placement_at_screen(_viewport_center())
+	if aimed != null:
+		_select(aimed)
+		_refresh_debug()
+		return
 	var id := catalog_panel.current_id
 	if id.is_empty():
 		_set_status("no catalog entry to place")
 		return
 	_on_asset_selected(id)
+
+
+func _viewport_center() -> Vector2:
+	return world_viewport.get_visible_rect().size * 0.5
+
+
+## Center-crosshair pick, guarded: queries the EFFECTIVE world (the one the
+## camera sees). 4.7 quirk, verified 2026-09-17: SubViewport.world_3d stays
+## null despite own_world_3d=true (using_own=true, own scenario renders), but
+## find_world_3d()/camera world resolve the real own world — which differs
+## from the main window world, so root.world_3d must NOT be used. A null
+## effective world degrades to "no hit": green crosshair, A/E places.
+func _pick_placement_at_screen(screen_pos: Vector2) -> Node3D:
+	var world := editor_camera.get_world_3d()
+	if world == null:
+		return null
+	var origin := editor_camera.project_ray_origin(screen_pos)
+	var dir := editor_camera.project_ray_normal(screen_pos)
+	var space := world.direct_space_state
+	var query := PhysicsRayQueryParameters3D.create(origin, origin + dir * 1000.0, SELECT_MASK)
+	var hit := space.intersect_ray(query)
+	if hit.is_empty():
+		return null
+	var collider: Node = hit.get("collider")
+	if collider != null and collider.is_in_group(SELECTOR_GROUP):
+		var placement := collider.get_parent() as Node3D
+		if placement != null and placement.is_in_group(PLACEMENT_GROUP):
+			return placement
+	return null
+
+
+## Crosshair upkeep (runs before the _process gate): hidden in playtest,
+## otherwise green = empty space (A/E places), red = aiming at a placed
+## asset (A/E selects it for edition).
+func _refresh_crosshair() -> void:
+	if _playtest_active:
+		if crosshair.visible:
+			crosshair.hide()
+		return
+	if not crosshair.visible:
+		crosshair.show()
+	var hit := _pick_placement_at_screen(_viewport_center()) != null
+	if hit != _crosshair_hit:
+		_crosshair_hit = hit
+		crosshair.texture = CROSSHAIR_HIT if hit else CROSSHAIR_OK
 
 
 func _select(placement: Node3D) -> void:
@@ -160,15 +226,21 @@ func _update_selection_visual() -> void:
 	if _selected == null:
 		selection_box.visible = false
 		return
+	# _find_mesh_aabb returns the MESH-LOCAL box: transform both corners into
+	# world space (SelectionBox lives in the viewport, not in the placement).
+	# Corner-transform keeps working once rotation/scale editing lands.
 	var box: AABB = _find_mesh_aabb(_selected)
+	var xform := _selected.global_transform
+	var world_box := AABB(xform * box.position, Vector3.ZERO)
+	world_box = world_box.expand(xform * (box.position + box.size))
 	selection_box.visible = true
-	selection_box.position = box.position + box.size * 0.5
+	selection_box.position = world_box.position + world_box.size * 0.5
 	var mat := selection_box.material_override as StandardMaterial3D
 	if mat:
 		mat.albedo_color.a = 0.25
 	var mesh := selection_box.mesh as BoxMesh
 	if mesh:
-		mesh.size = box.size
+		mesh.size = world_box.size
 
 
 ## ── transform ──────────────────────────────────────────────────────────
@@ -302,7 +374,9 @@ func toggle_playtest() -> void:
 	play_camera.current = _playtest_active
 	play_camera.set_capture(_playtest_active)
 	if not _playtest_active:
-		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
+		# Back to editor: re-capture (see _ready — the editor is always
+		# CAPTURED, set_capture(false) above just released to VISIBLE).
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	catalog_panel.visible = not _playtest_active
 	_selected = null
 	_update_selection_visual()
@@ -335,7 +409,7 @@ func _on_input_action(action: StringName) -> void:
 				catalog_panel.prev_tab()
 		&"place_select":
 			if not _playtest_active:
-				_place_current()
+				_place_or_select()
 		&"deselect":
 			if not _playtest_active:
 				_select(null)

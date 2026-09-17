@@ -12,8 +12,9 @@ mapping is **data-driven**: rebinding edits one dictionary
   drag & drop). The mouse selects nothing — it only orbits.
 - **No modal modes.** The gamepad uses a single **shift modifier** (R1) —
   the Souls gesture pattern — to double the button set instead of switching
-  explicit modes. Selection of already-placed objects is deferred to the
-  gizmo/move rework (until then, A/E always places).
+  explicit modes. Confirm (A/E) is contextual on the crosshair — select red,
+  place green — identically on every device. Free transform of placed objects
+  (gizmos) arrives with the move rework.
 - Gamepad does the **fast loop** (camera + place + nudge + save); keyboard
   adds the **precision layer** (SpinBoxes, text fields, mouse selection).
 - The mapping lives in `InputManager.PROFILES`, one profile per context
@@ -31,7 +32,7 @@ Default set (R1 released) — viewport & placement:
 | RS | orbit camera **in place** (turret: rotates around itself, focus re-glued ahead) |
 | D-pad U / D | catalog prev / next entry (within the selected category tab) |
 | D-pad L / R | catalog category tab prev / next |
-| A | place current catalog entry (at the camera spawn point) |
+| A | confirm at the crosshair: select the aimed asset (red), else place the current catalog entry (green) |
 | B | deselect |
 | X | delete selection |
 | Y | toggle playtest |
@@ -68,7 +69,8 @@ object-nudge workflow is **deferred** pending the object-move rework.
 | camera orbit (RS) | mouse motion (no click) |
 | catalog prev / next | Up / Down arrows |
 | category tab prev / next | Left / Right arrows |
-| place current catalog entry | E |
+| confirm at the crosshair (select red / place green) | E |
+| aim feedback | crosshair, centered on the viewport (green = empty space, red = placed asset) |
 | mouse click (panel or viewport) | *(nothing — parity: the mouse only orbits, selection is arrows/D-pad + A/E)* |
 | delete | Delete |
 | playtest | P |

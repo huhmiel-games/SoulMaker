@@ -4,8 +4,8 @@ extends Camera3D
 ## Editor orbiting camera (P1 map editor). Camera input is device-identical and
 ## needs no click or drag: arrows / left-stick pan, mouse motion / right-stick
 ## orbit in place. The camera pivots around a focus point; vertical orbit is
-## clamped so the ground stays readable. Left click is left for
-## placement/selection (handled by the editor controller).
+## clamped so the ground stays readable. The mouse selects nothing (parity):
+## clicks are unhandled, A/E confirms at the editor crosshair instead.
 
 const DEFAULT_FOCUS := Vector3(0.0, 0.0, 0.0)
 ## Fixed orbit distance — no zoom: advancing toward the view direction serves
