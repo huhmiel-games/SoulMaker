@@ -351,6 +351,12 @@ func _on_input_action(action: StringName) -> void:
 		&"catalog_prev":
 			if not _playtest_active:
 				catalog_panel.cycle_prev()
+		&"tab_next":
+			if not _playtest_active:
+				catalog_panel.next_tab()
+		&"tab_prev":
+			if not _playtest_active:
+				catalog_panel.prev_tab()
 		&"place_select":
 			if not _playtest_active:
 				_place_or_select()

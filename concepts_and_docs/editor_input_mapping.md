@@ -29,14 +29,12 @@ Default set (R1 released) — viewport & placement:
 |---|---|
 | LS | move camera along its view vector (pitch included — LS up dives toward the ground when the camera looks down) |
 | RS | orbit camera **in place** (turret: rotates around itself, focus re-glued ahead) |
-| LT / RT | zoom out / in |
-| D-pad | nudge object (L/R = X, U/D = Z) |
-| L3 | fine mode (step ÷5) |
+| D-pad U / D | catalog prev / next entry (within the selected category tab) |
+| D-pad L / R | catalog category tab prev / next |
 | A | place catalog entry / select under center |
 | B | deselect |
 | X | delete selection |
 | Y | toggle playtest |
-| LB / RB | catalog prev / next entry |
 | Start | quick save |
 | Back | load map |
 | Guide | menu (reserved) |
@@ -47,7 +45,7 @@ Shifted set (R1 held) — transform & utilities:
 |---|---|
 | LS / RS | move / rotate object (analog, reserved for gizmos) |
 | LT / RT | scale (reserved for gizmos) |
-| D-pad U / D | nudge Y (up / down) |
+| D-pad | catalog panel (unchanged under R1 — object nudge deferred to the move rework) |
 | A | cycle translate → rotate → scale |
 | B | reset transform |
 | X | duplicate |
@@ -66,17 +64,17 @@ D-pad only.
 
 | Action | Key |
 |---|---|
-| camera pan (LS) | arrows |
+| camera pan (LS) | WASD |
 | camera orbit (RS) | mouse motion (no click) |
-| camera zoom (triggers) | mouse wheel |
-| fine mode | Shift |
+| catalog prev / next | Up / Down arrows |
+| category tab prev / next | Left / Right arrows |
 | place / select | left click (mouse) / catalog buttons |
 | delete | Delete |
 | playtest | P |
 | save | S |
 | load | L |
 | menu | Escape |
-| nudge X / Z / Y | *(deferred — gamepad D-pad)* |
+| nudge X / Z / Y | *(deferred — gamepad D-pad is the catalog panel; object nudge awaits the move rework)* |
 
 ## Playtest profile
 
