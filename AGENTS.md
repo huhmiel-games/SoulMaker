@@ -24,6 +24,10 @@
 - **`concepts_and_docs/features.md` is the master feature list** (completeness net): a new feature lands there first (with a status), then an ADR/roadmap entry may implement it.
 - **V1 = the public launch build**; post-V1 additions live in the vault. The V1 ships a **1st-party starter catalog** (CC0 + re-targeted animations, ADR-017) — the community pipeline is augmentative post-V1, never a V1 dependency.
 
+## Input
+
+- **Device parity (standing rule, editors + game)**: keyboard/mouse and gamepad are the same logical device. No code path may branch on which device drives it — every action resolves through a named `InputManager` action (arrows/D-pad share actions, A/E share actions, …); no raw `Input.*` polling and no device-specific paths in `src/`. Consequences: no catalog drag & drop (placement is arrows/D-pad + A/E), no OS file-drop import (file-picker only). Per-context device tables live in `concepts_and_docs/editor_input_mapping.md`.
+
 ## Folder structure
 
 - `concepts_and_docs/` — design docs (English); `features.md` is the master list.

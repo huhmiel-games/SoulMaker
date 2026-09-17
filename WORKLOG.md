@@ -6,16 +6,17 @@
 
 - **Objective**: P1 map editor — continue building the maker loop (post-input-layer)
 - **Expected mode**: edit
-- **Next step**: human live test of the tabbed catalog (recipe below); then continue the maker loop (floor/ambiance presets, toon shader ADR-019, drag & drop).
-- **Last step done**: catalog panel now tabbed by asset `category` — the tab bar shows the full schema taxonomy (empty categories included, so tab navigation is testable before the catalog is multi-category). D-pad/arrows Up/Down cycle assets within the active tab (`catalog_next/prev`), Left/Right switch tabs (`tab_next/prev`); the default tab is the first populated one. Camera zoom removed (molette/triggers redondants — commit `f91f94b`). Headless import passes.
+- **Next step**: human live test of the parity pass (recipe below).
+- **Last step done**: AGENTS.md gained a standing **device-parity rule** (new `## Input` section, project-wide: editors + game — no device branching, no catalog drag & drop, no OS file-drop import, file-picker only). Pending doc cleanup from that decision: roadmap l.52/l.246, features.md l.143/l.216, features/09 l.8/l.25, features/11 l.24/l.121, features/14 l.14/l.17, screens.md l.77/l.108/l.192, versioning.md l.20, editor_input_mapping.md l.12 (idea.txt untouched, archive). Earlier: parity pass (panel display-only, A/E always places, click-select removed — Jolt crash gone by construction) + monotonic `_next_iid`. Headless import passes. Deferred: selection of placed objects (gizmo/move rework), reload key, spawn-fallback sign, first-AABB ground snap, menu scene.
 
-## Test recipe (human)
+## Test recipe (human) — parity + iid
 
-1. Launch `scenes/editors/map_editor.tscn` (or `main.tscn`).
-2. Keyboard/mouse: WASD pans, plain mouse motion orbits, wheel does nothing (zoom removed). Left/Right arrows switch the category tab at the top of the panel, Up/Down cycle the highlighted asset within the tab, A/S (or click a tab button / asset button) selects. S save (current_map_name), P playtest, Delete; clicking any catalog/tab button must NOT change arrow behavior (no focus steal).
-3. Gamepad: LS pans, RS orbits; D-pad Up/Down cycle the highlighted catalog entry, Left/Right switch category tab; A places the current entry (or selects under crosshair); B deselect; Y playtest (LS moves, Y exits); Start quick-save.
-4. **Tab bar = the full schema taxonomy (9 tabs, empty ones included)** — ←/→ navigation can be tested immediately: Nature is empty, Arch has the 6 dungeon assets, the rest are empty. Switching to an empty tab clears the list and `current_id` (A then reports "no catalog entry to place"). The only populated working tab is Arch.
-5. Report: any action not responding, unexpected double-action (e.g. arrows panning + cycling), the DebugLabel state, tab-bar visual (buttons visible, active highlighted).
+1. Launch `scenes/editors/map_editor.tscn`.
+2. Clicks do nothing: clicking panel asset rows, tab buttons, or the 3D viewport must NOT place, switch tabs, or select. No debugger break on any click.
+3. Keyboard only: arrows ←/→ switch tabs, ↑/↓ cycle assets, E places at the spawn point. B/Q = no-op.
+4. Gamepad only: D-pad ←/→ tabs, ↑/↓ cycle, A places. Same behavior as keyboard, 1:1.
+5. iid check: place 3 assets (`inst_0000…0002`), Delete one, place again → new id never reused. S saves without SAVE ISSUES.
+6. Report: any click having an effect, any debugger break (esp. `direct_space_state`), the spawned ids, DebugLabel state.
 
 ## Open items / waiting on you
 

@@ -9,11 +9,11 @@ mapping is **data-driven**: rebinding edits one dictionary
 - **Keyboard constraint from the gamepad**, not the reverse: the keyboard
   follows the same logical action set as the gamepad, with dedicated extra
   keys for the actions a gamepad cannot express (precise SpinBox editing,
-  mouse picking, drag & drop).
-- **No modal modes.** Actions are contextual (what is selected / where the
-  viewport center points), and the gamepad uses a single **shift modifier**
-  (R1) — the Souls gesture pattern — to double the button set instead of
-  switching explicit modes.
+  drag & drop). The mouse selects nothing — it only orbits.
+- **No modal modes.** The gamepad uses a single **shift modifier** (R1) —
+  the Souls gesture pattern — to double the button set instead of switching
+  explicit modes. Selection of already-placed objects is deferred to the
+  gizmo/move rework (until then, A/E always places).
 - Gamepad does the **fast loop** (camera + place + nudge + save); keyboard
   adds the **precision layer** (SpinBoxes, text fields, mouse selection).
 - The mapping lives in `InputManager.PROFILES`, one profile per context
@@ -31,7 +31,7 @@ Default set (R1 released) — viewport & placement:
 | RS | orbit camera **in place** (turret: rotates around itself, focus re-glued ahead) |
 | D-pad U / D | catalog prev / next entry (within the selected category tab) |
 | D-pad L / R | catalog category tab prev / next |
-| A | place catalog entry / select under center |
+| A | place current catalog entry (at the camera spawn point) |
 | B | deselect |
 | X | delete selection |
 | Y | toggle playtest |
@@ -54,13 +54,13 @@ Shifted set (R1 held) — transform & utilities:
 
 ## Keyboard mapping (editor profile)
 
-The keyboard mirrors the gamepad action set 1:1 with **no click or drag**: **arrows
-pan the camera** like the LS (pitch included), **mouse motion orbits** like the RS
-(in place, RS direction), and the **wheel zooms** like the triggers. UI buttons
-are deliberately **not keyboard-focusable** so arrow keys never fight the focus
-ring; the `MapName` LineEdit keeps normal text focus. The keyboard object-nudge
-workflow is **deferred** pending the object-move rework — nudge remains gamepad
-D-pad only.
+The keyboard mirrors the gamepad action set 1:1 with **no click or drag**:
+**WASD pans the camera** like the LS (pitch included), **mouse motion orbits**
+like the RS (in place, RS direction), **arrows browse the catalog panel** like
+the D-pad, **E places** like A. UI buttons are deliberately **not
+mouse-clickable** (and not keyboard-focusable) so panel input never fights the
+mouse; the `MapName` LineEdit keeps normal text focus. The keyboard
+object-nudge workflow is **deferred** pending the object-move rework.
 
 | Action | Key |
 |---|---|
@@ -68,7 +68,8 @@ D-pad only.
 | camera orbit (RS) | mouse motion (no click) |
 | catalog prev / next | Up / Down arrows |
 | category tab prev / next | Left / Right arrows |
-| place / select | left click (mouse) / catalog buttons |
+| place current catalog entry | E |
+| mouse click (panel or viewport) | *(nothing — parity: the mouse only orbits, selection is arrows/D-pad + A/E)* |
 | delete | Delete |
 | playtest | P |
 | save | S |
