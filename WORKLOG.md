@@ -6,16 +6,16 @@
 
 - **Objective**: P1 map editor — continue building the maker loop (post-input-layer)
 - **Expected mode**: edit
-- **Next step**: user retests snap at 0.1 m / 15° (precision feel on small assets).
-- **Last step done**: move speed 4.0 → 2.5 m/s (too twitchy; turn speed kept, snap 0.1 m/15° earlier). Headless import passes. Deferred: face-link snap (phase 2, AABB proximity), scale (LT/RT candidates), menu scene, ESC release, reload key, spawn-fallback sign, first-AABB ground snap.
+- Next step: human check (import) + visual HUD recipe (below); map_menu HUD migration AFTER.
+- **Last step done**: EditorHUD v2 (persistent registry + toast + hint): `set/clear_persistent(key)` joined by " · " (future-proof for more permanent facts), `flash(msg, 5s)` with anti-stale seq, `set_status` removed. map_editor: snap = persistent "SNAP ON/OFF" (no angles); save 4 sites = log + toast (SNAP survives); GRAB_HINT drops values-prefix, gains "L1/Tab snap". tscn: ToastLabel above status (green tint), mouse_filter=2 restored on labels (were eating clicks). Deferred: map_menu migration, rename, face-link snap, scale, spawn-fallback sign, first-AABB ground snap, nudge dead-code cleanup.
 
-## Test recipe (human) — snap + mini corridor
+## Test recipe (human) — map menu round-trip
 
-1. Launch `scenes/editors/map_editor.tscn`. L1/Tab → "snap ON" print + HUD badge (toggle twice to feel it).
-2. Grab a floor tile, snap ON: move it — position sticks to 1.0 grid, base never buries. Rotate — yaw/pitch/roll click at 90°.
-3. Toggle mid-grab (small pop expected between snapped/unsnapped — report if violent).
-4. Mini corridor: 2 floors edge-aligned + 1 wall yawed 90° against them. Then S save, reload via… (no reload UI yet — report save line only).
-5. Report: grid feel (sticky? jumpy?), angle clicks, pop on toggle, knobs (1.0/90° fit the 2 m tiles?).
+1. Launch the project (boots the menu, not the editor). Arrows/D-pad move the highlight (first row = New).
+2. A/E on New → `untitled_01`, straight into the editor (empty map). Place 2 assets, S save, ESC → auto-saves + back to menu, map listed.
+3. A/E on the map row → editor reopens WITH the 2 assets (reload works!).
+4. X on the row → armed red text ("DELETE ? X / B") → B cancels → X, X deletes (row gone, neighbor selected).
+5. Gamepad only, then keyboard only: strict 1:1. Report: rows, highlight, prints, any break.
 
 ## Open items / waiting on you
 

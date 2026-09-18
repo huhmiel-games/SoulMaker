@@ -6,21 +6,25 @@ mapping is **data-driven**: rebinding edits one dictionary
 
 ## Principles
 
-- **Keyboard constraint from the gamepad**, not the reverse: the keyboard
-  follows the same logical action set as the gamepad, with dedicated extra
-  keys for the actions a gamepad cannot express (precise SpinBox editing).
-  The mouse selects nothing — it only orbits.
-- **No modal modes.** The gamepad uses a single **shift modifier** (R1) —
-  the Souls gesture pattern — to double the button set instead of switching
-  explicit modes. Confirm (A/E) is contextual on the crosshair — select red,
-  place green — identically on every device. Free transform of placed objects
-  (gizmos) arrives with the move rework.
-- Gamepad does the **fast loop** (camera + place + nudge + save); keyboard
-  adds the **precision layer** (SpinBoxes, text fields, mouse selection).
+- **Device parity is the standing rule** (see `AGENTS.md` `## Input`):
+  keyboard/mouse and gamepad are the same logical device. The gamepad's
+  limited set is the source of truth — the keyboard mirrors it 1:1, chords
+  included (R1-pad / Shift-key, editor only), no keyboard-only actions. Every
+  action resolves through a named `InputManager` action; the mouse selects
+  nothing, it only orbits.
+- **No modal modes.** The gamepad uses a single **shift modifier** (R1,
+  Shift-key in the editor) to double the button set instead of switching
+  explicit modes. E is pure confirm, never a modifier. Confirm (A/E) is
+  contextual on the crosshair — grab red, place green — identically on every
+  device. Free transform of placed objects is grab & move (Minecraft-style
+  direct manipulation), not gizmos, by decision.
+- Gamepad does the **fast loop** (camera + place + grab + save); the keyboard
+  mirrors it key for key.
 - The mapping lives in `InputManager.PROFILES`, one profile per context
-  (`editor`, `playtest`; menus join later). Editor scripts only reference
-  action names via `InputManager.is_pressed(...)`, `action_pressed` /
-  `action_released` signals, or the analog getters.
+  (`editor`, `playtest`; the map menu reuses the editor profile with
+  menu-local meanings). Editor scripts only reference action names via
+  `InputManager.is_pressed(...)`, `action_pressed` / `action_released`
+  signals, or the analog getters.
 
 ## Gamepad layout (editor profile)
 
@@ -34,13 +38,24 @@ Default set (R1 released) — viewport & placement:
 | D-pad L / R | catalog category tab prev / next |
 | A | confirm at the crosshair: grab the aimed asset (red, camera freezes), else place the current catalog entry (green) |
 | B | cancel grab (restores pre-grab transform) / deselect |
-| R1 + B | delete selection (grabbed or not) |
+| R1 + B | delete placement (grabbed or not) — the ONLY placement-delete path |
 | L1 | snap toggle: grid position (0.1 m, base on grid) + angles (15°) while grabbed |
-| X | delete selection |
+| X | (unbound in editor — future use) |
 | Y | toggle playtest |
 | Start | quick save |
-| Back | load map |
-| Guide | menu (reserved) |
+| R1 + Start | rename (mapped, not consumed yet — rename feature deferred) |
+| LT / RT | (unbound in editor — future scale candidate) |
+| Guide | back to map menu (auto-saves first) |
+
+### The 3 editor states (place ≠ hold)
+
+| State | Camera | Sticks | How to get there |
+|---|---|---|---|
+| IDLE | live | drive the camera | boot, or drop/cancel/delete |
+| SELECTED | live | drive the camera (object only highlighted) | place an asset, or aim red (SelectionBox shows, nothing held) |
+| GRABBED | **frozen** | drive the object (crosshair hidden, HUD mapping) | explicit 2nd A/E confirm on red |
+
+Out of GRABBED: A/E drops (keeps transform), B/Q cancels (restores), R1+B / Shift+Q deletes. Placing never grabs by itself — holding is always an explicit 2nd confirm.
 
 Shifted set (R1 held) — grab & utilities (grab = camera frozen, sticks drive the object; shift switches both sticks to their second job):
 
@@ -53,7 +68,7 @@ Shifted set (R1 held) — grab & utilities (grab = camera frozen, sticks drive t
 | A | drop grab (keeps transform, deselects, unfreezes) |
 | B | cancel grab (restores pre-grab transform) — R1+B deletes instead |
 | X | delete selection (grabbed or not) |
-| Y | toggle snap (reserved) |
+| Y | (nothing while R1 held) |
 
 ### Grabbed object, unshifted (camera frozen — the sticks drive the object)
 
@@ -73,9 +88,8 @@ like the RS (in place, RS direction), **arrows browse the catalog panel** like
 the D-pad, **E confirms** like A. While grabbed (camera frozen) the same inputs
 drive the object: WASD moves, mouse turns, Shift+WASD sets the height
 (W up), Shift+mouse rolls. Shift is the keyboard R1 (editor only); E is pure
-confirm, never a modifier. UI buttons are deliberately **not mouse-clickable** (and not
-keyboard-focusable) so panel input never fights the mouse; the `MapName`
-LineEdit keeps normal text focus.
+confirm, never a modifier. UI buttons are deliberately **not mouse-clickable**
+(and not keyboard-focusable) so panel input never fights the mouse.
 
 | Action | Key |
 |---|---|
@@ -90,12 +104,11 @@ LineEdit keeps normal text focus.
 | snap toggle (L1) | Tab |
 | aim feedback | crosshair, centered on the viewport (green = empty space, red = placed asset) |
 | mouse click (panel or viewport) | *(nothing — parity: the mouse only orbits, selection is arrows/D-pad + A/E)* |
-| delete | Delete |
+| delete placement | Shift+Q (the only path — no Delete-key shortcut) |
+| rename | F2 (mapped, not consumed yet) |
 | playtest | P |
 | save | S |
-| load | L |
-| menu | Escape |
-| nudge X / Z / Y | *(deferred — gamepad D-pad is the catalog panel; object nudge awaits the move rework)* |
+| menu | Escape (save + back to map menu) |
 
 ## Playtest profile
 
@@ -109,6 +122,29 @@ Fly-cam stand-in until the P2 player controller:
 | toggle playtest | Y | P |
 
 ESC still releases mouse capture in the fly-cam (unchanged).
+
+## Map menu (library: Load / New / Delete)
+
+Boot scene. Reuses the editor profile — arrows/D-pad drive the focused
+row list (same physical inputs as catalog browsing, menu-local meaning):
+
+| Action | Gamepad | Keyboard |
+|---|---|---|
+| move highlight (New row + maps) | D-pad U / D | Up / Down arrows |
+| Load highlighted / create (New row) | A | E |
+| delete: 1st press arms, 2nd executes | X (button) | Delete key |
+| cancel delete-arm | B | Q |
+| (B with no arm: inert — no hub yet) | — | — |
+| (ESC in menu: inert — nothing above the menu yet) | — | — |
+
+Editor returns here via ESC/GUIDE (`menu` action, auto-saves first).
+Rename deferred (needs text entry).
+
+Shared overlay: `scenes/ui/editor_hud.tscn` (`EditorHUD`) — persistent facts
+(`set/clear_persistent(key)`, e.g. snap, joined by " · "), temporary notes
+(`flash`, 5 s auto-clear, e.g. save), command help (hint); display-only,
+mouse ignored. The crosshair stays per-editor by decision. map_menu migrates
+to it after.
 
 ## Architecture notes
 

@@ -101,6 +101,46 @@ static func validate_refs(map: Dictionary, catalog: Catalog) -> PackedStringArra
 	return issues
 
 
+## Library helpers (map menu): file-level operations under a maps directory.
+## Names are bare (no extension); files are "<name>.json", sorted.
+
+
+## Sorted bare map names present in dir (empty if missing). Creates dir.
+static func list_map_names(dir: String) -> PackedStringArray:
+	DirAccess.make_dir_recursive_absolute(dir)
+	var out := PackedStringArray()
+	var da := DirAccess.open(dir)
+	if da == null:
+		return out
+	da.list_dir_begin()
+	var fname := da.get_next()
+	while fname != "":
+		if not da.current_is_dir() and fname.to_lower().ends_with(".json"):
+			out.append(fname.left(fname.length() - 5))
+		fname = da.get_next()
+	da.list_dir_end()
+	out.sort()
+	return out
+
+
+## Deletes one map file. Returns OK or the DirAccess error.
+static func delete_map_file(dir: String, name: String) -> Error:
+	var da := DirAccess.open(dir)
+	if da == null:
+		return ERR_CANT_OPEN
+	return da.remove("%s.json" % name)
+
+
+## First free "untitled_NN" name (NN from 01 up) given the existing names.
+static func first_free_name(existing: PackedStringArray, stem := "untitled") -> String:
+	var n := 1
+	var candidate := "%s_%02d" % [stem, n]
+	while candidate in existing:
+		n += 1
+		candidate = "%s_%02d" % [stem, n]
+	return candidate
+
+
 ## ── internal ──────────────────────────────────────────────────────────
 
 static func _vec3_to_array(v: Vector3) -> Array:

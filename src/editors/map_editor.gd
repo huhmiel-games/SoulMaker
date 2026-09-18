@@ -4,7 +4,9 @@ extends Control
 ## P1 map editor controller (unit 1): the minimal maker loop.
 ## Place an asset (catalog click) → move it (arrow keys) →
 ## save/reload a versioned JSON map → one-key playtest (free-fly camera).
-## The DebugLabel mirrors every state change with a matching print() line.
+## The shared EditorHUD shows persistent facts (snap state) + temporary
+## confirmations (save toast, 5 s) + command help (hint); every state change
+## also prints a matching log line.
 
 signal map_saved(path: String)
 signal map_loaded(path: String)
@@ -15,6 +17,10 @@ const SELECTOR_LAYER := 2
 const GROUND_LAYER := 1
 const SELECT_MASK := GROUND_LAYER | SELECTOR_LAYER
 const MAPS_DIR := "user://maps"
+## Menu scene (ESC returns here, auto-saving first) + the GameState key the
+## menu uses to hand over the map to open ("" = none, boot empty as usual).
+const MENU_SCENE := "res://scenes/editors/map_editor_menu.tscn"
+const PENDING_KEY := "editor/pending_map"
 
 const CROSSHAIR_OK: Texture2D = preload("res://assets/textures/ui/crosshair_green.png")
 const CROSSHAIR_HIT: Texture2D = preload("res://assets/textures/ui/crosshair_red.png")
@@ -40,7 +46,7 @@ const SNAP_ANGLE := PI / 12.0
 @onready var play_camera: FlyCamera = get_node("ViewportContainer/WorldViewport/PlayCamera")
 @onready var selection_box: MeshInstance3D = get_node("ViewportContainer/WorldViewport/SelectionBox")
 @onready var catalog_panel: CatalogPanel = get_node("CatalogPanel")
-@onready var debug_label: Label = get_node("DebugLabel")
+@onready var hud: EditorHUD = get_node("HUD")
 @onready var crosshair: TextureRect = get_node("Crosshair")
 
 var catalog := Catalog.new()
@@ -88,9 +94,18 @@ func _ready() -> void:
 	for issue in issues:
 		_set_status("catalog issue: %s" % issue)
 	_set_status("editor ready — arrows browse the catalog, E confirms at the crosshair")
+	if hud != null:
+		hud.set_persistent(&"snap", "SNAP ON" if _snap_on else "SNAP OFF")
 
 	InputManager.action_pressed.connect(_on_input_action)
 	InputManager.set_profile(&"editor")
+	# Menu handover: open the pending map if the menu set one, else boot
+	# empty as usual (direct scene runs).
+	var pending := str(GameState.get_value(PENDING_KEY, ""))
+	GameState.set_value(PENDING_KEY, "")
+	if not pending.is_empty():
+		current_map_name = pending
+		load_map(pending)
 
 
 func _process(delta: float) -> void:
@@ -143,6 +158,7 @@ func _on_asset_selected(id: String) -> void:
 	_select(placement)
 	_set_placement_data(placement)
 	_set_status("spawned %s (%s) — placed: %d" % [id, iid, _placements.size()])
+	_refresh_grab_label()
 
 
 ## Instances one catalog scene under a fresh placement node + a physics
@@ -233,6 +249,7 @@ func _drop_grab() -> void:
 	editor_camera.frozen = false
 	_update_selection_visual()
 	_set_status("dropped %s" % iid)
+	_refresh_grab_label()
 
 
 ## Cancels the grab: restores the pre-grab transform, deselects, unfreezes.
@@ -247,6 +264,7 @@ func _cancel_grab() -> void:
 	editor_camera.frozen = false
 	_update_selection_visual()
 	_set_status("grab cancelled %s (restored)" % iid)
+	_refresh_grab_label()
 
 
 ## Drives the grabbed placement with the camera sticks (the camera is frozen,
@@ -336,23 +354,30 @@ func _snap_vec(v: Vector3, step: float) -> Vector3:
 	)
 
 
-## Grab HUD text (shared builder). Per-frame refresh is label-only (no
-## print — _set_status prints, which would spam the console every frame);
-## grab/drop/cancel events use _set_status for their one-shot print.
-func _grab_label_text() -> String:
-	if _selected == null:
-		return "MODE: EDIT"
-	var iid := String(_selected.get_meta("instance_id", "?"))
-	var pid := String(_selected.get_meta("prefab_id", "?"))
-	return "MODE: EDIT (grabbed)%s SH%d\n%s (%s) pos=%s\nLS/WASD move · R1+LS/Shift+WASD height · RS/mouse turn · R1+RS/Shift+mouse roll · A drop · B cancel · R1+B delete" % [
-		" · SNAP %.1f/%d°" % [SNAP_STEP, int(roundf(rad_to_deg(SNAP_ANGLE)))] if _snap_on else "",
-		1 if InputManager.is_shifted() else 0,
-		pid, iid, _selected.position,
-	]
+## Shared HUD hint texts. SELECT_HINT is the missing link the mapping doc
+## audit surfaced: placing selects, it never grabs — the hint says the 2nd
+## confirm out loud. GRAB_HINT is the live mapping while held.
+const SELECT_HINT := "A/E on red grabs it — 2nd press holds (camera freezes)"
+const GRAB_HINT := "LS/WASD move · R1+LS/Shift+WASD height · RS/mouse turn · R1+RS/Shift+mouse roll · L1/Tab snap · A drop · B cancel · R1+B delete"
 
 
+## Refreshes the shared HUD from selection state (no print — one-shot events
+## use _set_status for their log line; _move_grabbed calls this per frame).
+## GRABBED: hint = live mapping (shift flag); status untouched (it
+## keeps the last snap/save state). SELECTED: hint = the 2nd-confirm prompt.
+## Neither: hint cleared.
 func _refresh_grab_label() -> void:
-	debug_label.text = _grab_label_text()
+	if hud == null:
+		return
+	if _grabbed and _selected != null:
+		var bits := GRAB_HINT
+		if InputManager.is_shifted():
+			bits = "SHIFTED · " + bits
+		hud.set_hint(bits)
+	elif _selected != null:
+		hud.set_hint(SELECT_HINT)
+	else:
+		hud.clear_hint()
 
 
 func _viewport_center() -> Vector2:
@@ -457,6 +482,7 @@ func _delete_selection() -> void:
 	editor_camera.frozen = false
 	_update_selection_visual()
 	_set_status("deleted %s — placed: %d" % [iid, _placements.size()])
+	_refresh_grab_label()
 
 
 func _clear_all() -> void:
@@ -479,20 +505,20 @@ func _map_path(name: String) -> String:
 func save_map() -> void:
 	var name := current_map_name.strip_edges()
 	if name.is_empty():
-		_set_status("save aborted: empty map name")
+		_user_status("save aborted: empty map name")
 		return
 	var data := MapIO.serialize(name, _placements)
 	var issues := MapIO.validate_map(data)
 	issues.append_array(MapIO.validate_refs(data, catalog))
 	if not issues.is_empty():
-		_set_status("SAVE ISSUES: %s" % ", ".join(issues))
+		_user_status("SAVE ISSUES: %s" % ", ".join(issues))
 		return
 	var err := JsonFile.save_atomic(_map_path(name), data)
 	if err != OK:
-		_set_status("save FAILED (%d)" % err)
+		_user_status("save FAILED (%d)" % err)
 		return
 	map_saved.emit(_map_path(name))
-	_set_status("saved %s (%d placements)" % [name, _placements.size()])
+	_user_status("saved %s (%d placements)" % [name, _placements.size()])
 
 
 func load_map(name: String) -> void:
@@ -570,6 +596,7 @@ func toggle_playtest() -> void:
 	catalog_panel.visible = not _playtest_active
 	_selected = null
 	_update_selection_visual()
+	_refresh_grab_label()
 	_set_status("PLAYTEST %s — WASD to move, mouse to look, P to leave" % ("ON" if _playtest_active else "OFF"))
 
 
@@ -582,19 +609,25 @@ func _on_input_action(action: StringName) -> void:
 		&"quick_save":
 			if not _playtest_active:
 				save_map()
-		&"delete":
-			if not _playtest_active:
-				_delete_selection()
 		&"delete_shifted":
-			# R1+B: delete, grabbed or not (the shifted face of B/cancel).
+			# R1+B: the ONLY delete path (grabbed or not). The old X/Delete
+			# action was removed: a single delete path, no duplicates.
 			if not _playtest_active:
 				_delete_selection()
+		&"menu":
+			# ESC/GUIDE: auto-save, then back to the map menu. Exits even if
+			# the save reports issues (status shows them) — never trap the user.
+			if not _playtest_active:
+				save_map()
+				get_tree().change_scene_to_file(MENU_SCENE)
 		&"snap_toggle":
 			# L1/Tab: grid+angle snap on/off, grabbed or not (applies next
 			# transform while grabbed).
 			if not _playtest_active:
 				_snap_on = not _snap_on
-				_set_status("snap %s (grid %.1f m, angles %d°)" % ["ON" if _snap_on else "OFF", SNAP_STEP, int(roundf(rad_to_deg(SNAP_ANGLE)))])
+				_set_status("snap toggled %s" % ("ON" if _snap_on else "OFF"))
+				if hud != null:
+					hud.set_persistent(&"snap", "SNAP ON" if _snap_on else "SNAP OFF")
 				_refresh_grab_label()
 				_refresh_debug()
 		&"catalog_next":
@@ -623,6 +656,7 @@ func _on_input_action(action: StringName) -> void:
 				else:
 					_select(null)
 					_refresh_debug()
+					_refresh_grab_label()
 
 
 func _placement_entry(placement: Node3D) -> Dictionary:
@@ -688,7 +722,17 @@ func _refresh_debug() -> void:
 	_set_status("placed: %d — selected: %s (%s) pos=%s" % [_placements.size(), pid, iid, _selected.position])
 
 
+## Dev log: every state change prints here. The on-screen STATUS label is
+## deliberately narrower — snap state + save confirmations only (user
+## decision); command help lives in the HINT label. User-facing writes go
+## through _user_status, everything else stays log-only.
 func _set_status(msg: String) -> void:
 	print("[MapEditor] %s" % msg)
-	if debug_label != null:
-		debug_label.text = "MODE: %s\n%s" % ["PLAYTEST" if _playtest_active else "EDIT", msg]
+
+
+## User-facing transient note: log line + toast (auto-clears, never touches
+## persistent status). Save confirmations go through here.
+func _user_status(msg: String) -> void:
+	_set_status(msg)
+	if hud != null:
+		hud.flash(msg)

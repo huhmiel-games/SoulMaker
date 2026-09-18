@@ -1,7 +1,0 @@
-[gd_scene format=3 uid="uid://4wdabdbsgp6l"]
-
-[ext_resource type="PackedScene" uid="uid://bbj2o1d33y53k" path="res://scenes/editors/map_editor.tscn" id="1"]
-
-[node name="Main" type="Node" unique_id=1530082711]
-
-[node name="MapEditor" parent="." unique_id=1724968495 instance=ExtResource("1")]
