@@ -4,10 +4,10 @@
 
 ## Current thread
 
-- **Objective**: P1 map editor — ambiance page (pause → AMBIANCE) done, human recipe next
+- **Objective**: P1 map editor — base toon shader done (last P1 work), human eye recipe next
 - **Expected mode**: build
-- Next step: human ambiance recipe (below); commit AFTER human OK (not requested yet).
-- **Last step done**: ambiance settings page (presets JSON + MapIO section + GenericMenu value rows + viewport apply); audit PASS, AMB round-trip PASS, import + editor headless clean.
+- Next step: human toon recipe (below); commit AFTER human OK (not requested yet).
+- **Last step done**: `src/shaders/base_toon.gdshader` (flexible_toon derivative: cuts wired @2, shade dropped, normal-map guarded) + `ToonKit` applier (placements + relief, gizmos excluded); P1 amendment in roadmap; audit PASS, import + editor headless clean.
 
 ## Test recipe (human) — EDIT_FLOOR relief
 
@@ -19,6 +19,14 @@
 6. Place an asset on a mound → it sits on the relief; grab + move it → its base follows the relief.
 7. Relief judged visually (slopes get walked by the real walker at P2, via the editor ⇄ game round-trip).
 8. Report: sculpt feel (cursor/height rates too fast/slow?), any visible hitch while holding height, all `[MapEditor]` log lines, relief after reload.
+
+## Test recipe (human) — base toon (the look locks here)
+
+1. Open a map with placed assets (dungeon kit): everything 3D renders stepped-cel (banded light/shadow, rim on edges). Relief too. HUD/crosshair/ring/selection = standard (gizmos excluded by decision).
+2. Judge cuts/wrap/steepness on YOUR assets (you know flexible_toon): shadow bands clean or muddy? Rim too strong? `shade` defaults to black (= legacy look); lift/tint only if a night/dungeon asks for it. Report values to freeze or adjust.
+3. Ambiance cross-check: Dungeon preset + toon = readable (not pitch black)? Clear day + toon = not blown out? Ambient energy still lights (ambient_light_disabled stayed OFF)?
+4. Reload the map → toon persists on all placements (override per surface, textures intact).
+5. Report: screenshots-worth description (no image input on my side), any `[MapEditor]` error lines, which uniform defaults to freeze.
 
 ## Test recipe (human) — ambiance page
 

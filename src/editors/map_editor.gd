@@ -153,7 +153,6 @@ var _floor_cd := 0.0
 ## SelectionBox's own mesh (BoxMesh scaffold), swapped for the floor ring
 ## while sculpting and restored on exit.
 var _selection_mesh_orig: Mesh = null
-var _ground_mat: StandardMaterial3D = null
 ## Ring material (red translucent, carried by the ring mesh itself) — the
 ## SelectionBox's yellow stays placements-only.
 var _ring_mat: StandardMaterial3D = null
@@ -255,6 +254,8 @@ func _instance_placement(packed: PackedScene, id: String, iid: String) -> Node3D
 
 	var asset := packed.instantiate()
 	placement.add_child(asset)
+	# ADR-019: every 3D asset renders toon (GIMP textures carry through).
+	ToonKit.apply_to(placement)
 
 	var box: AABB = _find_mesh_aabb(placement)
 	var selector := StaticBody3D.new()
@@ -584,9 +585,6 @@ func _vertex_height(ix: int, iz: int) -> float:
 func _rebuild_ground() -> void:
 	var n := MapIO.GROUND_N
 	var v := n + 1
-	if _ground_mat == null:
-		_ground_mat = StandardMaterial3D.new()
-		_ground_mat.albedo_color = Color(0.22, 0.23, 0.26, 1)
 	var verts := PackedVector3Array()
 	verts.resize(v * v)
 	var heights := PackedFloat32Array()
@@ -636,7 +634,7 @@ func _rebuild_ground() -> void:
 	arrays[Mesh.ARRAY_INDEX] = indices
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-	mesh.surface_set_material(0, _ground_mat)
+	mesh.surface_set_material(0, ToonKit.material_for(null, Color(0.35, 0.36, 0.4)))
 	ground_mesh.mesh = mesh
 	var shape := HeightMapShape3D.new()
 	shape.map_width = v

@@ -45,6 +45,8 @@ A game that is not a game: a base that lets anyone create their own souls-like w
 
 **Goal** : prove the maker. The loop "I build a 30 m corridor in 5 min without feeling the grid".
 
+> **Amendment 18/09/2026 — functional closure**: free transform is direct grab&move (no gizmos); zoom removed (orbit only); one-key playtest deleted in favor of the editor ⇄ game round-trip (P2); the hub stays single-door (Map editor + EXIT — Play door, Options and Continue arrive with the round-trip). The « play in it » Done criterion moves to the P2 round-trip; palette is dropped (textures ship ready-made from GIMP, intake checklist = shader applied + ready textures).
+
 **Deliverables**
 - Home shell: **two-door hub (Play / Create)** — transverse actions (Options, Credits, Quit) in a corner, contextual Continue per door (resume run / resume editing). Details in `screens.md`.
 - Fluid camera editing (orbit, zoom)
