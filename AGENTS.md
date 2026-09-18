@@ -26,7 +26,7 @@
 
 ## Input
 
-- **Device parity (standing rule, editors + game)**: keyboard/mouse and gamepad are the same logical device. No code path may branch on which device drives it — every action resolves through a named `InputManager` action (arrows/D-pad share actions, A/E share actions, …); no raw `Input.*` polling and no device-specific paths in `src/`. The gamepad's limited set is the source of truth: the keyboard mirrors it 1:1, chords included (R1-pad / Shift-key) — no keyboard-only actions. Consequences: no catalog drag & drop (placement is arrows/D-pad + A/E), no OS file-drop import (file-picker only). Per-context device tables live in `concepts_and_docs/editor_input_mapping.md`.
+- **Device parity (standing rule, editors + game)**: keyboard/mouse and gamepad are the same logical device. No code path may branch on which device drives it — every action resolves through a named `InputManager` action (arrows/D-pad share actions, A/E share actions, …); no raw `Input.*` polling and no device-specific paths in `src/`. The gamepad defines the capabilities (source of truth): the keyboard mirrors them — extra mirrors of an existing capability are allowed (Q, Shift+LMB), new capabilities are not. R1-pad chords are editor-only; Shift-key chords exist in every profile. The keyboard sets are **frozen** (editor table + game table; features/11 wins over DS3 PC). Enforced headless by `src/tools/input_audit.gd` — run it after any input change. Consequences: no catalog drag & drop (placement is arrows/D-pad + A/E), no OS file-drop import (file-picker only). Per-context device tables live in `concepts_and_docs/editor_input_mapping.md`.
 
 ## Folder structure
 

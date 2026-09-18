@@ -2,8 +2,7 @@ class_name MapEditor
 extends Control
 
 ## P1 map editor controller (unit 1): the minimal maker loop.
-## Place an asset (catalog click) → move it (arrow keys) →
-## save/reload a versioned JSON map → one-key playtest (free-fly camera).
+## Place an asset → move it (grab & move) → save/reload a versioned JSON map.
 ## Y/P sculpts the ground relief (EDIT_FLOOR: LS moves a grid cursor, RS
 ## heightens, A checkpoints, B undoes to checkpoint, Y exits).
 ## Start/S or Guide/ESC opens the pause modal (SAVE / CANCEL / QUIT); QUIT
@@ -32,8 +31,6 @@ const GENERIC_MENU_SCENE := preload("res://scenes/ui/generic_menu.tscn")
 const CROSSHAIR_OK: Texture2D = preload("res://assets/textures/ui/crosshair_green.png")
 const CROSSHAIR_HIT: Texture2D = preload("res://assets/textures/ui/crosshair_red.png")
 
-const MOVE_STEP := 0.25
-const MOVE_FINE := 0.05
 ## Grab feel knobs (tune live): object move/height speed (m/s at full
 ## deflection) and turn speed (rad/s).
 const OBJ_MOVE_SPEED := 2.5
@@ -65,7 +62,6 @@ const FLOOR_HINT := "LS/WASD cell · RS height · RSX/Sh+A-D radius · A/E keep 
 @onready var world_viewport: SubViewport = get_node("ViewportContainer/WorldViewport")
 @onready var placement_root: Node3D = get_node("ViewportContainer/WorldViewport/Placements")
 @onready var editor_camera: OrbitCamera = get_node("ViewportContainer/WorldViewport/EditorCamera")
-@onready var play_camera: FlyCamera = get_node("ViewportContainer/WorldViewport/PlayCamera")
 @onready var selection_box: MeshInstance3D = get_node("ViewportContainer/WorldViewport/SelectionBox")
 @onready var ground_mesh: MeshInstance3D = get_node("ViewportContainer/WorldViewport/Ground/GroundMesh")
 @onready var ground_shape: CollisionShape3D = get_node("ViewportContainer/WorldViewport/Ground/GroundShape")
@@ -77,11 +73,10 @@ const FLOOR_HINT := "LS/WASD cell · RS height · RSX/Sh+A-D radius · A/E keep 
 var catalog := Catalog.new()
 var _placements: Array[Dictionary] = []
 var _selected: Node3D = null
-var _playtest_active := false
 var current_map_name := "corridor_01"
-## Unsaved-changes flag: set by every edit (place, grab, nudge, delete,
-## sculpt), cleared by save/load. QUIT consults it (clean quits directly,
-## dirty swaps in the quit-confirm).
+## Unsaved-changes flag: set by every edit (place, grab, delete, sculpt),
+## cleared by save/load. QUIT consults it (clean quits directly, dirty swaps
+## in the quit-confirm).
 var _dirty := false
 ## Pause modal state (0 = none, 1 = pause, 2 = quit-confirm). While open the
 ## editor ignores every input except the Start/ESC toggle, and _process edit
@@ -140,7 +135,7 @@ func _ready() -> void:
 	# stick (unbounded relative motion — the cursor must never hit a window
 	# edge), and no UI needs a visible cursor (panel is arrows/D-pad only).
 	# Cursor release arrives with the menu scene; Alt-Tab still works at OS
-	# level. Playtest manages its own capture via FlyCamera.
+	# level.
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	var load_err := catalog.load()
 	if load_err != OK:
@@ -176,29 +171,12 @@ func _process(delta: float) -> void:
 	_refresh_crosshair()
 	if _modal_open:
 		return
-	if _playtest_active:
-		return
 	if _floor_mode:
 		_move_floor(delta)
 		return
 	if _grabbed:
 		_move_grabbed(delta)
 		return
-	if _selected == null:
-		return
-	var step: float = MOVE_FINE if InputManager.is_pressed(&"fine_mode") else MOVE_STEP
-	if InputManager.is_pressed(&"nudge_x_neg"):
-		_nudge_selection(Vector3(-step, 0.0, 0.0))
-	elif InputManager.is_pressed(&"nudge_x_pos"):
-		_nudge_selection(Vector3(step, 0.0, 0.0))
-	elif InputManager.is_pressed(&"nudge_z_neg"):
-		_nudge_selection(Vector3(0.0, 0.0, -step))
-	elif InputManager.is_pressed(&"nudge_z_pos"):
-		_nudge_selection(Vector3(0.0, 0.0, step))
-	elif InputManager.is_pressed(&"nudge_y_pos"):
-		_nudge_selection(Vector3(0.0, step, 0.0))
-	elif InputManager.is_pressed(&"nudge_y_neg"):
-		_nudge_selection(Vector3(0.0, -step, 0.0))
 
 
 ## ── catalog & placement ────────────────────────────────────────────────
@@ -208,8 +186,6 @@ func refill_catalog() -> void:
 
 
 func _on_asset_selected(id: String) -> void:
-	if _playtest_active:
-		return
 	var scene_path := catalog.resolve_scene_path(id)
 	if scene_path.is_empty():
 		_set_status("no scene file for %s" % id)
@@ -497,12 +473,12 @@ func _pick_placement_at_screen(screen_pos: Vector2) -> Node3D:
 	return null
 
 
-## Crosshair upkeep (runs before the _process gate): hidden in playtest, while
-## grabbed (the SelectionBox takes over) and in floor mode (the 3D cell cursor
-## takes over), otherwise green = empty space (A/E places), red = aiming at a
+## Crosshair upkeep (runs before the _process gate): hidden while grabbed
+## (the SelectionBox takes over) and in floor mode (the 3D cell cursor takes
+## over), otherwise green = empty space (A/E places), red = aiming at a
 ## placed asset (A/E grabs it).
 func _refresh_crosshair() -> void:
-	if _playtest_active or _grabbed or _floor_mode:
+	if _grabbed or _floor_mode:
 		if crosshair.visible:
 			crosshair.hide()
 		return
@@ -652,7 +628,7 @@ func _ground_hit(screen_pos: Vector2) -> Dictionary:
 ## are not placements, delete stays placements-only everywhere.
 
 func _enter_floor_mode() -> void:
-	if _playtest_active or _floor_mode:
+	if _floor_mode:
 		return
 	if _grabbed:
 		_drop_grab()
@@ -886,14 +862,6 @@ func _update_floor_ring_pos() -> void:
 
 ## ── transform ──────────────────────────────────────────────────────────
 
-func _nudge_selection(delta: Vector3) -> void:
-	if _selected == null:
-		return
-	_selected.position += delta
-	_dirty = true
-	_apply_placement_transform(_selected)
-
-
 func _apply_placement_transform(placement: Node3D) -> void:
 	_update_selection_visual()
 	_set_placement_data(placement)
@@ -1017,37 +985,8 @@ func _instance_from_data(placement: Dictionary) -> void:
 	_apply_placement_transform(node)
 
 
-## ── playtest ───────────────────────────────────────────────────────────
-
-func toggle_playtest() -> void:
-	_playtest_active = not _playtest_active
-	InputManager.set_profile(&"playtest" if _playtest_active else &"editor")
-	if _playtest_active:
-		# Entering playtest force-drops any grab (live transform kept) and
-		# exits floor mode (relief kept).
-		_grabbed = false
-		if _floor_mode:
-			_exit_floor_mode()
-		editor_camera.frozen = false
-		play_camera.global_position = editor_camera.global_position
-		play_camera.rotation = editor_camera.rotation
-	editor_camera.current = not _playtest_active
-	play_camera.current = _playtest_active
-	play_camera.set_capture(_playtest_active)
-	if not _playtest_active:
-		# Back to editor: re-capture (see _ready — the editor is always
-		# CAPTURED, set_capture(false) above just released to VISIBLE).
-		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-	catalog_panel.visible = not _playtest_active
-	_selected = null
-	_update_selection_visual()
-	_refresh_grab_label()
-	_set_status("PLAYTEST %s — WASD to move, mouse to look, Y/P to leave" % ("ON" if _playtest_active else "OFF"))
-
-
 ## ── pause modal ────────────────────────────────────────────────────
-## Start/S (pause_menu) and Guide/ESC (menu) toggle the pause; inert in
-## playtest. The modal owns all other inputs while open (gated in
+## Start/S (pause_menu) and Guide/ESC (menu) toggle the pause. The modal owns all other inputs while open (gated in
 ## _on_input_action + _process). Grab/floor state underneath is kept as-is;
 ## only the camera freeze is managed (IDLE/SELECTED thaw on close).
 
@@ -1170,11 +1109,9 @@ func _quit_to_menu() -> void:
 
 func _on_input_action(action: StringName) -> void:
 	# Pause toggle (Start/S = pause_menu, Guide/ESC = menu — same gesture by
-	# decision). Inert in playtest (exit = Y/P). With the modal open both
-	# step one level back: confirm → pause, pause → close.
+	# decision). With the modal open both step one level back: confirm →
+	# pause, pause → close.
 	if action == &"pause_menu" or action == &"menu":
-		if _playtest_active:
-			return
 		if not _modal_open:
 			_open_pause()
 		elif _modal_level == 2:
@@ -1187,27 +1124,16 @@ func _on_input_action(action: StringName) -> void:
 	if _modal_open:
 		return
 	match action:
-		&"playtest":
-			# R1+Y (gamepad chord). Keyboard Shift+P lands on floor_mode
-			# instead (_resolve_key is shift-blind) and redirects there.
-			toggle_playtest()
 		&"floor_mode":
-			# Y/P: the 4th editor state. Shift+P is playtest's keyboard face
-			# (same consumer-side shift pattern as Shift+Q delete).
-			if _playtest_active:
-				return
-			if InputManager.is_shifted():
-				toggle_playtest()
-			elif _floor_mode:
+			# Y/P: the 4th editor state. Shift+P lands here too (keys are
+			# shift-blind) and simply enters floor like P.
+			if _floor_mode:
 				_exit_floor_mode()
 			else:
 				_enter_floor_mode()
 		&"delete_shifted":
 			# R1+B: the ONLY delete path (grabbed or not). Inert in floor
-			# mode — relief cells are not placements. The old X/Delete
-			# action was removed: a single delete path, no duplicates.
-			if _playtest_active:
-				return
+			# mode — relief cells are not placements.
 			if _floor_mode:
 				_set_status("nothing to delete in floor mode")
 				return
@@ -1215,36 +1141,27 @@ func _on_input_action(action: StringName) -> void:
 		&"snap_toggle":
 			# L1/Tab: grid+angle snap on/off, grabbed or not (applies next
 			# transform while grabbed).
-			if not _playtest_active:
-				_snap_on = not _snap_on
-				_set_status("snap toggled %s" % ("ON" if _snap_on else "OFF"))
-				if hud != null:
-					hud.set_persistent(&"snap", "SNAP ON" if _snap_on else "SNAP OFF")
-				_refresh_grab_label()
-				_refresh_debug()
+			_snap_on = not _snap_on
+			_set_status("snap toggled %s" % ("ON" if _snap_on else "OFF"))
+			if hud != null:
+				hud.set_persistent(&"snap", "SNAP ON" if _snap_on else "SNAP OFF")
+			_refresh_grab_label()
+			_refresh_debug()
 		&"catalog_next":
-			if not _playtest_active:
-				catalog_panel.cycle_next()
+			catalog_panel.cycle_next()
 		&"catalog_prev":
-			if not _playtest_active:
-				catalog_panel.cycle_prev()
+			catalog_panel.cycle_prev()
 		&"tab_next":
-			if not _playtest_active:
-				catalog_panel.next_tab()
+			catalog_panel.next_tab()
 		&"tab_prev":
-			if not _playtest_active:
-				catalog_panel.prev_tab()
+			catalog_panel.prev_tab()
 		&"place_select":
 			# A/E: checkpoint in floor mode (stays), place/grab otherwise.
-			if _playtest_active:
-				return
 			if _floor_mode:
 				_floor_commit()
 			else:
 				_place_or_select()
 		&"deselect":
-			if _playtest_active:
-				return
 			if _floor_mode:
 				if InputManager.is_shifted():
 					# Shift+Q: inert too — same rule as R1+B above.

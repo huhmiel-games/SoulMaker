@@ -2,7 +2,6 @@
 
 [ext_resource type="Script" uid="uid://d3dqkwetg7f0o" path="res://src/editors/map_editor.gd" id="1"]
 [ext_resource type="Script" uid="uid://c18ex1d2emvvs" path="res://src/editors/orbit_camera.gd" id="2"]
-[ext_resource type="Script" uid="uid://cvp0vnyrft4vg" path="res://src/editors/fly_camera.gd" id="3"]
 [ext_resource type="Script" uid="uid://bhitaha28qo03" path="res://src/editors/catalog_panel.gd" id="4"]
 [ext_resource type="Environment" path="res://scenes/editors/env_default.tres" id="5"]
 [ext_resource type="PackedScene" path="res://scenes/ui/editor_hud.tscn" id="6"]
@@ -84,9 +83,6 @@ shadow_enabled = true
 [node name="EditorCamera" type="Camera3D" parent="ViewportContainer/WorldViewport" unique_id=1480636853]
 current = true
 script = ExtResource("2")
-
-[node name="PlayCamera" type="Camera3D" parent="ViewportContainer/WorldViewport" unique_id=24806255]
-script = ExtResource("3")
 
 [node name="SelectionBox" type="MeshInstance3D" parent="ViewportContainer/WorldViewport" unique_id=1683305903]
 visible = false

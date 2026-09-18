@@ -67,6 +67,7 @@ A game that is not a game: a base that lets anyone create their own souls-like w
 **Deliverables**
 - Anime character template (re-targeted asset — **first starter-catalog character**, ADR-017) built on the **attachment-slot skeleton** of P4 (hair/ears/equipment markers on the rig) to avoid rework; shared animation library (locomotion, melee)
 - 3rd-person controller: locomotion, orbit camera, lock-on, dodge + i-frames, stamina
+- Maker round-trip: editor ⇄ game on the current map (symmetric `pending_map` handover — replaces the deleted P1 fly playtest) + return to the editor
 - **Game feel**:
   - Markers windup/attack/release; upper/lower body layers (animation combos)
   - Hitstop, screen shake, VFX, hit reactions, controller rumble (haptics) — sound/audio deferred to vault (ADR-014): the "slam" jury reads **without audio**, keep that in mind when judging the P2 baseline

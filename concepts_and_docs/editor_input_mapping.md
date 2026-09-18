@@ -44,7 +44,6 @@ Default set (R1 released) — viewport & placement:
 | L1 | snap toggle: grid position (0.1 m, base on grid) + angles (15°) while grabbed |
 | X | (unbound in editor — future use) |
 | Y | EDIT_FLOOR toggle (sculpt the ground relief) |
-| R1 + Y | toggle playtest |
 | Start | pause menu (SAVE / CANCEL / QUIT modal) |
 | R1 + Start | rename (mapped, not consumed yet — rename feature deferred) |
 | LT / RT | (unbound in editor — future scale candidate) |
@@ -73,7 +72,6 @@ Shifted set (R1 held) — grab & utilities (grab = camera frozen, sticks drive t
 | A | drop grab (keeps transform, deselects, unfreezes) |
 | B | cancel grab (restores pre-grab transform) — R1+B deletes instead |
 | X | (nothing — unbound in editor) |
-| Y | toggle playtest (R1+Y chord) |
 
 ### EDIT_FLOOR (camera frozen — the sticks drive the relief)
 
@@ -132,24 +130,56 @@ confirm, never a modifier. UI buttons are deliberately **not mouse-clickable**
 | mouse click (panel or viewport) | *(nothing — parity: the mouse only orbits, selection is arrows/D-pad + A/E)* |
 | delete placement | Shift+Q (the only path — no Delete-key shortcut) |
 | rename | F2 (mapped, not consumed yet) |
-| floor mode (Y) | P (Shift+P = playtest, same shift pattern as Shift+Q delete) |
-| playtest | R1+Y chord, Shift+P (Y/P exits playtest) |
+| floor mode (Y) | P |
 | save | *(nothing direct — SAVE lives in the pause menu)* |
-| pause menu | S / Start, or Escape / Guide (same gesture) |
+| pause menu | Start, or Escape / Guide (same gesture — S stays WASD-only: sharing it opened the pause on every pan-back) |
 | menu | *(merged into pause menu — same as above)* |
 
-## Playtest profile
+## Game profile (frozen, consumed at P2)
 
-Fly-cam stand-in until the P2 player controller:
+The in-editor fly playtest is deleted (2026-09-18): it noclipped through
+everything it was supposed to validate (collisions, walkable slopes), so it
+was a duplicate of the future game in worse. The maker loop at P2 becomes
+editor ⇄ game on the current map (symmetric `pending_map` handover), and
+slopes get walked by the real walker. Until then relief is judged visually.
+
+`InputManager.PROFILES["game"]` holds the frozen game table below —
+defined but NOT consumed (mapped-not-consumed, `rename` precedent).
+`src/tools/input_audit.gd` validates it headless (bindings unique per
+profile, pad+key coverage per capability, consumers name real actions, zero
+raw `Input.*` outside `input_manager.gd`). Layout (features/11 wins over
+DS3 PC where they conflict, DS3 fills the gaps):
 
 | Action | Gamepad | Keyboard |
 |---|---|---|
-| move forward / back | LS Y (±) | W / S |
-| move left / right | LS X (±) | A / D |
-| move up / down | — | Space / Shift |
-| toggle playtest | Y | P |
+| move | LS (tilt = walk/run) | WASD (no keyboard walk — Alt is offhand) |
+| camera orbit | RS | mouse motion |
+| dodge / sprint (tap = roll/backstep, hold+move = dash; jump = sprint+dodge, consumer-side) | B | Space |
+| light attack | R1 | LMB |
+| heavy attack | R2 (trigger, past half pull) | RMB, or Shift+LMB |
+| guard (hold) | L1 | Shift held |
+| offhand skill / parry | L2 (trigger) | Alt+RMB (both fire with heavy's RMB — consumer prioritizes, mod wins) |
+| two-hand / use item / interact | Y / X / A | F / R / E |
+| spells / items / right-hand / left-hand | D-pad | arrows |
+| quickbar cycle | — (mirror-only: re-exposes the d-pad capability) | Q (consumed with the quickbar at P8) |
+| lock-on (tap) | R3 | middle mouse |
+| menu | Start + Guide | Esc |
+| gestures | Select | G (mapped-not-consumed) |
 
-ESC still releases mouse capture in the fly-cam (unchanged).
+Abandoned DS3 rows: RMB block, RMB/Shift+RMB left-hand use, Alt walk,
+Q cancel in game, X sort (→ P8). Known limitation: the pad's left-hand
+context (L1-tap) has no keyboard mirror — features/11 lists none; settled
+at the P3 design pass, never by adding a key.
+
+Resolution rules (in the header of `input_manager.gd`): actions are
+source-lists, OR-ed. Keys match shift-blind and mod-blind (chords redirect
+consumer-side: Shift+Q lands on deselect, the handler deletes). Buttons,
+mouse and triggers are shift-aware (`shifted` == `is_shifted()`, optional
+`mod` key). Edges emit centrally from `_process`, so keys/pad/mouse/
+triggers share one timing. `is_shifted()` = R1-pad in editor only (R1 taps
+attack in game) + Shift-key in every profile. B mirrors per profile
+(Q in editor/menus, Space in game); movement keys ignore Shift
+(holding Shift to pre-arm a strong never stops WASD).
 
 ## Generic menu (hub, library, all future menus)
 
@@ -193,7 +223,7 @@ auto-drops the row, `""` toasts failure) — the future library-as-modal case:
 on success, stays open on failure), CANCEL (closes, state underneath
 intact), QUIT (clean → map library, dirty → swaps in the quit-confirm:
 QUIT WITHOUT SAVING / CANCEL-back-to-pause). Start/S and Guide/ESC toggle
-the pause (confirm → pause → close), inert in playtest; while open the
+the pause (confirm → pause → close); while open the
 editor ignores every other input and freezes its edit paths (grab/floor
 kept as-is underneath).
 
