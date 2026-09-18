@@ -1,0 +1,42 @@
+{
+  "format_version": "0.1",
+  "description": "Named ambiance bundles (features/06). Each preset fills every setting; applying writes values, never an id.",
+  "presets": {
+    "clear_day": {
+      "label": "Clear day",
+      "values": {
+        "sun": { "elevation": 55.0, "energy": 1.1 },
+        "fog": { "enabled": true, "depth_begin": 40.0, "depth_end": 200.0, "height": 0.0, "height_density": 0.0 },
+        "tonemapping": { "mode": 2, "exposure": 1.0 },
+        "ambient": { "energy": 0.6 }
+      }
+    },
+    "misty_dusk": {
+      "label": "Misty dusk",
+      "values": {
+        "sun": { "elevation": 14.0, "energy": 0.7 },
+        "fog": { "enabled": true, "depth_begin": 10.0, "depth_end": 90.0, "height": 2.0, "height_density": 0.15 },
+        "tonemapping": { "mode": 2, "exposure": 1.0 },
+        "ambient": { "energy": 0.45 }
+      }
+    },
+    "stormy_night": {
+      "label": "Stormy night",
+      "values": {
+        "sun": { "elevation": 12.0, "energy": 0.12 },
+        "fog": { "enabled": true, "depth_begin": 5.0, "depth_end": 60.0, "height": 4.0, "height_density": 0.35 },
+        "tonemapping": { "mode": 2, "exposure": 0.85 },
+        "ambient": { "energy": 0.25 }
+      }
+    },
+    "dungeon": {
+      "label": "Dungeon",
+      "values": {
+        "sun": { "elevation": 25.0, "energy": 0.05 },
+        "fog": { "enabled": true, "depth_begin": 2.0, "depth_end": 35.0, "height": 0.0, "height_density": 0.1 },
+        "tonemapping": { "mode": 2, "exposure": 0.9 },
+        "ambient": { "energy": 0.3 }
+      }
+    }
+  }
+}

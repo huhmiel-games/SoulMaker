@@ -19,13 +19,51 @@ const GROUND_CELL := 1.0
 const GROUND_STEP := 0.001
 const GROUND_H_MIN := -8.0
 const GROUND_H_MAX := 8.0
+## Ambiance override section (map editor page, features/06 set): sun
+## elevation/exposure, fog depth/height, tonemapping, ambient energy.
+## Sparse like ground — absent = env_default.tres. Files nest per the world
+## schema ({sun, fog, tonemapping, ambient}); the editor works a flat dict
+## ({sun_elev, sun_energy, fog_enabled, fog_begin, fog_end, fog_height,
+## fog_hdensity, tonemap_mode, tonemap_exposure, ambient_energy}).
+## Bounds are single-sourced here; steps live with the editor rows.
+const AMBIANCE_BOUNDS := {
+	"sun_elev": [10.0, 90.0],
+	"sun_energy": [0.0, 8.0],
+	"fog_begin": [0.0, 400.0],
+	"fog_end": [5.0, 500.0],
+	"fog_height": [-50.0, 100.0],
+	"fog_hdensity": [0.0, 1.0],
+	"tonemap_mode": [0.0, 4.0],
+	"tonemap_exposure": [0.1, 4.0],
+	"ambient_energy": [0.0, 2.0],
+}
+## Mirrors env_default.tres (fog off). The editor applies these on boot when
+## the map carries no section, so the viewport always shows defined values.
+const AMBIANCE_DEFAULTS := {
+	"sun_elev": 45.0, "sun_energy": 1.1,
+	"fog_enabled": false, "fog_begin": 10.0, "fog_end": 100.0,
+	"fog_height": 0.0, "fog_hdensity": 0.0,
+	"tonemap_mode": 2.0, "tonemap_exposure": 1.0,
+	"ambient_energy": 0.6,
+}
+## Flat key → [file group, file key].
+const AMBIANCE_NEST := {
+	"sun_elev": ["sun", "elevation"], "sun_energy": ["sun", "energy"],
+	"fog_enabled": ["fog", "enabled"], "fog_begin": ["fog", "depth_begin"],
+	"fog_end": ["fog", "depth_end"], "fog_height": ["fog", "height"],
+	"fog_hdensity": ["fog", "height_density"],
+	"tonemap_mode": ["tonemapping", "mode"],
+	"tonemap_exposure": ["tonemapping", "exposure"],
+	"ambient_energy": ["ambient", "energy"],
+}
 
 
 ## Encodes parent-local placements (passed as
 ## {prefab_id: String, transform: {position: Vector3, rotation: Vector3, scale: Vector3}})
 ## into a schema-conform map object. ground is the sparse relief
 ## {Vector2i cell: float height} (may be empty = flat, section omitted).
-static func serialize(name: String, placements: Array, ground := {}) -> Dictionary:
+## ambiance is the flat override dict (may be empty = defaults, omitted).
+static func serialize(name: String, placements: Array, ground := {}, ambiance := {}) -> Dictionary:
 	var prefabs := []
 	for p in placements:
 		var t: Dictionary = p.get("transform", {})
@@ -41,6 +79,8 @@ static func serialize(name: String, placements: Array, ground := {}) -> Dictiona
 	var out := {"format_version": format_version, "name": name, "prefabs": prefabs}
 	if not (ground as Dictionary).is_empty():
 		out["ground"] = {"cell": GROUND_CELL, "cells": _ground_to_data(ground)}
+	if not (ambiance as Dictionary).is_empty():
+		out["ambiance"] = ambiance_to_data(ambiance)
 	return out
 
 
@@ -99,6 +139,7 @@ static func validate_map(map: Dictionary) -> PackedStringArray:
 			if t.has(key) and not _is_float_triple(t[key]):
 				issues.append("transform.%s must be 3 numbers (%s)" % [key, pid])
 	issues.append_array(validate_ground(map))
+	issues.append_array(validate_ambiance(map))
 	return issues
 
 
@@ -166,6 +207,77 @@ static func validate_ground(map: Dictionary) -> PackedStringArray:
 			issues.append("ground height out of range [-8, +8]: %s" % key)
 		elif absf(hf - snappedf(hf, GROUND_STEP)) > 0.0001:
 			issues.append("ground height not a %s step: %s" % [GROUND_STEP, key])
+	return issues
+
+
+## Flat override dict → nested file section (3-decimal quants, same file
+## discipline as ground). Only known keys serialize; fog_enabled as bool,
+## tonemap_mode as int.
+static func ambiance_to_data(amb: Dictionary) -> Dictionary:
+	var out := {"sun": {}, "fog": {}, "tonemapping": {}, "ambient": {}}
+	for flat in AMBIANCE_NEST:
+		if not (amb as Dictionary).has(flat):
+			continue
+		var pair: Array = AMBIANCE_NEST[flat]
+		var v: Variant = (amb as Dictionary)[flat]
+		if flat == "fog_enabled":
+			(out[pair[0]] as Dictionary)[pair[1]] = bool(v)
+		elif flat == "tonemap_mode":
+			(out[pair[0]] as Dictionary)[pair[1]] = int(v)
+		elif v is float or v is int:
+			var q := roundf(snappedf(float(v), 0.001) * 1000.0) / 1000.0
+			(out[pair[0]] as Dictionary)[pair[1]] = q
+	return out
+
+
+## Nested file section → flat editor dict. Tolerant (bad entries skipped);
+## validate_ambiance reports them separately. Unknown groups/keys ignored.
+static func ambiance_from_data(map: Dictionary) -> Dictionary:
+	var out := {}
+	var section: Variant = map.get("ambiance", {})
+	if not section is Dictionary:
+		return out
+	var flip := {}
+	for flat in AMBIANCE_NEST:
+		var pair: Array = AMBIANCE_NEST[flat]
+		flip["%s/%s" % [pair[0], pair[1]]] = flat
+	for group in (section as Dictionary):
+		var gd: Variant = (section as Dictionary)[group]
+		if not gd is Dictionary:
+			continue
+		for key in (gd as Dictionary):
+			var flat: String = str(flip.get("%s/%s" % [group, key], ""))
+			if flat.is_empty():
+				continue
+			var v: Variant = (gd as Dictionary)[key]
+			if flat == "fog_enabled":
+				out[flat] = bool(v)
+			elif v is float or v is int or (flat == "tonemap_mode" and v is int):
+				out[flat] = float(v)
+	return out
+
+
+## Structural checks for the ambiance section (absent = defaults = valid).
+static func validate_ambiance(map: Dictionary) -> PackedStringArray:
+	var issues := PackedStringArray()
+	if not map.has("ambiance"):
+		return issues
+	var section: Variant = map.get("ambiance")
+	if not section is Dictionary:
+		issues.append("ambiance must be an object")
+		return issues
+	var flat := ambiance_from_data(map)
+	for key in flat:
+		if key == "fog_enabled":
+			continue
+		if not AMBIANCE_BOUNDS.has(key):
+			continue
+		var bounds: Array = AMBIANCE_BOUNDS[key]
+		var v := float(flat[key])
+		if v < float(bounds[0]) or v > float(bounds[1]):
+			issues.append("ambiance.%s out of range [%s, %s]: %s" % [key, bounds[0], bounds[1], v])
+	if flat.has("fog_end") and flat.has("fog_begin") and float(flat["fog_end"]) <= float(flat["fog_begin"]):
+		issues.append("ambiance.fog_end must exceed fog_begin")
 	return issues
 
 

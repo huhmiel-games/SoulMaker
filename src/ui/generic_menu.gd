@@ -87,7 +87,7 @@ func _refresh_list() -> void:
 	_entries = _load_entries()
 	for e in _entries:
 		var row := Label.new()
-		row.text = String(e.get("label", "?"))
+		row.text = _row_text(e)
 		row.focus_mode = Control.FOCUS_NONE
 		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		entry_list.add_child(row)
@@ -95,6 +95,23 @@ func _refresh_list() -> void:
 	_delete_armed = -1
 	_cursor = clampi(_cursor, 0, _rows.size() - 1)
 	_highlight_current()
+
+
+## Row text: value-kind rows (settings pages) show "label: value", refreshed
+## after every adjust. Entries: {"label", "kind": "value", "get": Callable
+## (-> String display), "adjust": Callable (dir int -> String display),
+## "reset": Callable (-> String display, A/E)}.
+func _row_text(e: Dictionary) -> String:
+	if str(e.get("kind", "")) == "value":
+		var get: Callable = e.get("get", Callable())
+		var display := str(get.call()) if get.is_valid() else "?"
+		return "%s: %s" % [String(e.get("label", "?")), display]
+	return String(e.get("label", "?"))
+
+
+func _refresh_current() -> void:
+	if _cursor >= 0 and _cursor < _rows.size() and _cursor < _entries.size():
+		_rows[_cursor].text = _row_text(_entries[_cursor])
 
 
 ## Entry source, one dict per row (see class doc). Subclasses override; the
@@ -147,6 +164,10 @@ func _on_input_action(action: StringName) -> void:
 				_notice("delete cancelled")
 			elif runtime_cancel.is_valid():
 				runtime_cancel.call()
+		&"tab_next":
+			_adjust_current(1)
+		&"tab_prev":
+			_adjust_current(-1)
 
 
 func _confirm_current() -> void:
@@ -154,6 +175,13 @@ func _confirm_current() -> void:
 		return
 	var e: Dictionary = _entries[_cursor]
 	_delete_armed = -1
+	if str(e.get("kind", "")) == "value":
+		# A/E on a setting resets it (caller-owned default); plain rows below.
+		var reset: Callable = e.get("reset", Callable())
+		if reset.is_valid():
+			reset.call()
+			_refresh_current()
+		return
 	if e.get("quit", false):
 		print("[Menu] quit from %s" % _menu_title())
 		get_tree().quit()
@@ -163,6 +191,23 @@ func _confirm_current() -> void:
 		return
 	_confirm_verb(e)
 	_highlight_current()
+
+
+## Left/Right on a value row: the caller's adjust applies (clamp + side
+## effects + dirty) and returns the new display; the row re-renders. Plain
+## rows ignore these (catalog tabs live outside modals).
+func _adjust_current(direction: int) -> void:
+	_delete_armed = -1
+	if _cursor < 0 or _cursor >= _entries.size():
+		return
+	var e: Dictionary = _entries[_cursor]
+	if str(e.get("kind", "")) != "value":
+		return
+	var adjust: Callable = e.get("adjust", Callable())
+	if adjust.is_valid():
+		adjust.call(direction)
+		_refresh_current()
+		_highlight_current()
 
 
 ## Non-open verbs (new/load/…). Handled by the subclass; default is inert —

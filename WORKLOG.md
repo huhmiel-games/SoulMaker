@@ -4,10 +4,10 @@
 
 ## Current thread
 
-- **Objective**: P1 map editor — input freeze (DS3/features-11 game table, fly deleted) + fog presets next
+- **Objective**: P1 map editor — ambiance page (pause → AMBIANCE) done, human recipe next
 - **Expected mode**: build
-- Next step: human freeze recipe (below); commit AFTER human OK (not requested yet).
-- **Last step done**: playtest-fly deleted (fly_camera.gd, PlayCamera, toggle+gates, dead nudge block); `InputManager` sources-schema (mouse/trigger/mod, central edges, per-profile mirrors) + frozen `game` profile; `input_audit.gd` PASS (41 actions); import clean.
+- Next step: human ambiance recipe (below); commit AFTER human OK (not requested yet).
+- **Last step done**: ambiance settings page (presets JSON + MapIO section + GenericMenu value rows + viewport apply); audit PASS, AMB round-trip PASS, import + editor headless clean.
 
 ## Test recipe (human) — EDIT_FLOOR relief
 
@@ -20,13 +20,14 @@
 7. Relief judged visually (slopes get walked by the real walker at P2, via the editor ⇄ game round-trip).
 8. Report: sculpt feel (cursor/height rates too fast/slow?), any visible hitch while holding height, all `[MapEditor]` log lines, relief after reload.
 
-## Test recipe (human) — input freeze (no playtest anymore)
+## Test recipe (human) — ambiance page
 
-1. Editor boots with no errors (PlayCamera gone, no `playtest` profile). Y/P = floor mode; Shift+P = floor too (same as P).
-2. Start or ESC → pause modal (SAVE / CANCEL / QUIT), unchanged. CANCEL resumes grab/floor intact.
-3. These do NOTHING (no crash, no error log): Space, Shift, Clics, R, F, G, Q (in editor — Q still cancels/deselects!), MMB, X key.
-4. Menus unchanged: hub/library arrows + E/Q, X-delete arm in library, F2 rename still mapped-not-consumed.
-5. Report: any input leaking (camera moving behind the modal = bug), any `[Menu]`/`[MapEditor]` error lines.
+1. Boot the editor: viewport looks as before (defaults = old tres + fog off).
+2. Start → pause now has 4 rows (SAVE / AMBIANCE / CANCEL / QUIT). AMBIANCE → page titled `AMBIANCE (Default)`: 5 preset rows, 10 value rows, BACK.
+3. A/E on `Preset: Dungeon` → viewport goes dark/foggy, title becomes `AMBIANCE (dungeon)`. ←/→ on `Fog depth end` → fog visibly moves; row text updates. A/E on the row → resets to the dungeon value.
+4. Adjust anything → title flips to `AMBIANCE (Custom)`. BACK (or B) → pause. QUIT on a dirty map → confirm (ambiance edits count as edits).
+5. SAVE → reopen the map → override kept (same look). New map without section → defaults.
+6. Report: preset feel (dungeon/misty readable?), adjust steps too coarse/fine?, all `[MapEditor]` lines.
 
 ## Test recipe (human) — pause modal
 

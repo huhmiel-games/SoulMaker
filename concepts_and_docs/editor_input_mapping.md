@@ -227,6 +227,27 @@ the pause (confirm → pause → close); while open the
 editor ignores every other input and freezes its edit paths (grab/floor
 kept as-is underneath).
 
+## Ambiance page (pause → AMBIANCE)
+
+Settings page, not a preset dropdown: presets are named bundles
+(`data/ambiance/presets.json` — clear day / misty dusk / stormy night /
+dungeon) that FILL the settings; every setting stays retouchable. Opened
+from the pause 4th row (zero new keys, freeze intact); level-3 modal
+content like the quit-confirm (BACK / B returns to the pause). Rows:
+presets (A applies, page rebuilds with the new title), 10 value rows
+(←/→ adjusts at the row step — tab actions, free in modals; A resets to
+the preset/default value), BACK. Title shows the match (`AMBIANCE
+(dungeon)`) or `Custom` once diverged. Any apply/adjust/reset marks
+`_dirty` and owns a map section, so the quit-confirm covers it gratis.
+
+Engine: `MapIO` sparse `ambiance` section (absent = `env_default.tres`;
+bounds single-sourced in `AMBIANCE_BOUNDS`, 3-decimal file quants);
+`_apply_ambiance()` pushes clamped values to the duplicated `Environment`
+(fog DEPTH mode: begin/end/height/density) + `Sun` (elevation keeps the
+azimuth) live. P1 set = features/06 (sun elev/expo, fog depth/height,
+tonemap, ambient energy) — no colors, no volumetrics, no light counter
+(P6 with placeable lights).
+
 ## Map menu (library: Load / New / Delete / Back)
 
 `MapMenu extends GenericMenu` (all menu behavior inherited). Rows: `[ + New

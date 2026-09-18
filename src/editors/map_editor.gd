@@ -52,6 +52,23 @@ const FLOOR_CURSOR_RATE := 8.0
 ## default 2). Radius rate in steps/s at full deflection.
 const FLOOR_RADIUS_MAX := 6
 const FLOOR_RADIUS_RATE := 3.0
+## Ambiance page rows (pause → AMBIANCE): label + flat MapIO key + UI step.
+## Min/max come from MapIO.AMBIANCE_BOUNDS (single source); tonemap_mode and
+## fog_enabled render as names, not numbers (see _amb_display).
+const AMBIANCE_ROWS := [
+	{"label": "Fog", "key": "fog_enabled", "step": 1.0},
+	{"label": "Fog depth begin", "key": "fog_begin", "step": 5.0},
+	{"label": "Fog depth end", "key": "fog_end", "step": 5.0},
+	{"label": "Fog height", "key": "fog_height", "step": 1.0},
+	{"label": "Fog height density", "key": "fog_hdensity", "step": 0.05},
+	{"label": "Tonemap", "key": "tonemap_mode", "step": 1.0},
+	{"label": "Exposure", "key": "tonemap_exposure", "step": 0.1},
+	{"label": "Sun elevation", "key": "sun_elev", "step": 1.0},
+	{"label": "Sun energy", "key": "sun_energy", "step": 0.1},
+	{"label": "Ambient energy", "key": "ambient_energy", "step": 0.05},
+]
+const TONEMAP_NAMES := ["Linear", "Reinhard", "Filmic", "ACES", "AgX"]
+const PRESETS_PATH := "res://data/ambiance/presets.json"
 ## Rebuild throttle: mesh + collision rebuild at most this often while
 ## sculpting (heights themselves update per frame), plus one final rebuild on
 ## release.
@@ -62,6 +79,8 @@ const FLOOR_HINT := "LS/WASD cell · RS height · RSX/Sh+A-D radius · A/E keep 
 @onready var world_viewport: SubViewport = get_node("ViewportContainer/WorldViewport")
 @onready var placement_root: Node3D = get_node("ViewportContainer/WorldViewport/Placements")
 @onready var editor_camera: OrbitCamera = get_node("ViewportContainer/WorldViewport/EditorCamera")
+@onready var world_env: WorldEnvironment = get_node("ViewportContainer/WorldViewport/WorldEnvironment")
+@onready var sun: DirectionalLight3D = get_node("ViewportContainer/WorldViewport/Sun")
 @onready var selection_box: MeshInstance3D = get_node("ViewportContainer/WorldViewport/SelectionBox")
 @onready var ground_mesh: MeshInstance3D = get_node("ViewportContainer/WorldViewport/Ground/GroundMesh")
 @onready var ground_shape: CollisionShape3D = get_node("ViewportContainer/WorldViewport/Ground/GroundShape")
@@ -74,6 +93,16 @@ var catalog := Catalog.new()
 var _placements: Array[Dictionary] = []
 var _selected: Node3D = null
 var current_map_name := "corridor_01"
+## Ambiance override (flat MapIO dict): live values driving the viewport.
+## _amb_has_section tracks whether the map OWNS a section (user-edited,
+## preset-applied, or loaded) — only then does save serialize it.
+var _ambiance: Dictionary = {}
+var _amb_has_section := false
+## Preset registry {id: {label, values flat}} from presets.json + match state
+## ("" = Custom/diverged, shown in the page title).
+var _amb_presets := {}
+var _amb_preset := ""
+var _sun_azimuth := 0.0
 ## Unsaved-changes flag: set by every edit (place, grab, delete, sculpt),
 ## cleared by save/load. QUIT consults it (clean quits directly, dirty swaps
 ## in the quit-confirm).
@@ -155,6 +184,13 @@ func _ready() -> void:
 	# Flat relief until a map (with its ground section) loads; the mesh +
 	# HeightMapShape replace the tscn placeholders here.
 	_rebuild_ground()
+	# Ambiance owns its resource: duplicate the tres so live tweaks never
+	# touch the asset, then boot on defaults (a loaded section overlays).
+	world_env.environment = (world_env.environment as Environment).duplicate()
+	_sun_azimuth = sun.rotation_degrees.y
+	_load_presets()
+	_ambiance = (MapIO.AMBIANCE_DEFAULTS as Dictionary).duplicate()
+	_apply_ambiance()
 
 	InputManager.action_pressed.connect(_on_input_action)
 	InputManager.set_profile(&"editor")
@@ -912,7 +948,7 @@ func save_map() -> bool:
 	if name.is_empty():
 		_user_status("save aborted: empty map name")
 		return false
-	var data := MapIO.serialize(name, _placements, _ground)
+	var data := MapIO.serialize(name, _placements, _ground, _ambiance if _amb_has_section else {})
 	var issues := MapIO.validate_map(data)
 	issues.append_array(MapIO.validate_refs(data, catalog))
 	if not issues.is_empty():
@@ -942,6 +978,15 @@ func load_map(name: String) -> void:
 	_sync_iid_counter()
 	_ground = MapIO.ground_from_data(data)
 	_rebuild_ground()
+	# Ambiance override overlays the boot defaults (absent = defaults stay);
+	# the section owns itself from here until save.
+	_ambiance = (MapIO.AMBIANCE_DEFAULTS as Dictionary).duplicate()
+	var amb := MapIO.ambiance_from_data(data)
+	for key in amb:
+		_ambiance[key] = amb[key]
+	_amb_has_section = data.has("ambiance")
+	_amb_preset = _match_preset()
+	_apply_ambiance()
 	if not issues.is_empty():
 		for issue in issues:
 			_set_status("LOAD ISSUE: %s" % issue)
@@ -1000,11 +1045,7 @@ func _open_pause() -> void:
 	content.configure(
 		"MAP PAUSED",
 		"arrows move · A confirm · B cancel",
-		[
-			{"label": "SAVE", "call": _on_pause_save},
-			{"label": "CANCEL", "call": _on_pause_cancel},
-			{"label": "QUIT", "call": _on_pause_quit},
-		],
+		_pause_entries(),
 		_on_pause_cancel
 	)
 	_cam_unfreeze_on_close = not editor_camera.frozen
@@ -1061,17 +1102,194 @@ func _back_to_pause() -> void:
 	content.configure(
 		"MAP PAUSED",
 		"arrows move · A confirm · B cancel",
-		[
-			{"label": "SAVE", "call": _on_pause_save},
-			{"label": "CANCEL", "call": _on_pause_cancel},
-			{"label": "QUIT", "call": _on_pause_quit},
-		],
+		_pause_entries(),
 		_on_pause_cancel
 	)
 	modal.close()
 	modal.open(content)
 	_modal_level = 1
 	_set_status("paused")
+
+
+## Pause rows (single source: _open_pause + _back_to_pause rebuild the same
+## list). AMBIANCE swaps in the settings page like the quit-confirm does.
+func _pause_entries() -> Array:
+	return [
+		{"label": "SAVE", "call": _on_pause_save},
+		{"label": "AMBIANCE", "call": _on_pause_ambiance},
+		{"label": "CANCEL", "call": _on_pause_cancel},
+		{"label": "QUIT", "call": _on_pause_quit},
+	]
+
+
+func _on_pause_ambiance() -> void:
+	_show_ambiance()
+
+
+## Ambiance settings page (modal level 3): preset rows apply bundles, value
+## rows adjust with ←/→ (tab actions, free in modals) and reset with A/E.
+## BACK / B returns to the pause (same round-trip as the quit-confirm).
+func _show_ambiance() -> void:
+	var content := GENERIC_MENU_SCENE.instantiate() as GenericMenu
+	if content == null:
+		_set_status("ambiance FAILED: cannot instance generic menu")
+		return
+	var rows := []
+	for id in _amb_presets:
+		rows.append({"label": "Preset: %s" % str((_amb_presets[id] as Dictionary).get("label", id)), "call": _amb_apply_preset.bind(id)})
+	rows.append({"label": "Preset: Default", "call": _amb_apply_preset.bind(&"__default")})
+	for spec in AMBIANCE_ROWS:
+		var key := str(spec.get("key", ""))
+		rows.append({
+			"label": str(spec.get("label", key)), "kind": "value",
+			"get": _amb_display.bind(key), "adjust": _amb_adjust.bind(key),
+			"reset": _amb_reset.bind(key),
+		})
+	rows.append({"label": "BACK", "call": _on_confirm_back})
+	content.configure(
+		"AMBIANCE (%s)" % _amb_preset_name(),
+		"up/down move · left/right adjust · A reset · B back",
+		rows,
+		_on_confirm_back
+	)
+	modal.close()
+	modal.open(content)
+	_modal_level = 3
+	_set_status("ambiance settings — %s" % _amb_preset_name())
+
+
+## ── ambiance engine ────────────────────────────────────────────────
+## Registry + live values + viewport apply. Presets fill values (never an
+## id); any retouch diverges to Custom and marks dirty + owns a section.
+
+func _load_presets() -> void:
+	_amb_presets.clear()
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(PRESETS_PATH))
+	if not parsed is Dictionary:
+		push_warning("Ambiance presets unreadable, defaults only")
+		return
+	var bundles: Variant = (parsed as Dictionary).get("presets", {})
+	if not bundles is Dictionary:
+		return
+	for id in (bundles as Dictionary):
+		var bundle: Variant = (bundles as Dictionary)[id]
+		if not bundle is Dictionary:
+			continue
+		var flat := MapIO.ambiance_from_data({"ambiance": (bundle as Dictionary).get("values", {})})
+		if not _amb_values_valid(flat):
+			push_warning("Ambiance preset skipped (incomplete/out of range): %s" % id)
+			continue
+		_amb_presets[str(id)] = {"label": str((bundle as Dictionary).get("label", id)), "values": flat}
+
+
+## A bundle is valid when it fills every flat key in bounds (fog_enabled bool).
+func _amb_values_valid(flat: Dictionary) -> bool:
+	for key in MapIO.AMBIANCE_NEST:
+		if not (flat as Dictionary).has(key):
+			return false
+		if key == "fog_enabled":
+			continue
+		var bounds: Array = MapIO.AMBIANCE_BOUNDS[key]
+		var v := float((flat as Dictionary)[key])
+		if v < float(bounds[0]) or v > float(bounds[1]):
+			return false
+	return true
+
+
+func _amb_preset_name() -> String:
+	return _amb_preset if not _amb_preset.is_empty() else "Custom"
+
+
+func _match_preset() -> String:
+	for id in _amb_presets:
+		if _ambiance == (_amb_presets[id] as Dictionary).get("values", {}):
+			return str(id)
+	if _ambiance == MapIO.AMBIANCE_DEFAULTS:
+		return "Default"
+	return ""
+
+
+func _amb_apply_preset(id: StringName) -> void:
+	if str(id) == "__default":
+		_ambiance = (MapIO.AMBIANCE_DEFAULTS as Dictionary).duplicate()
+		_amb_preset = "Default"
+	else:
+		if not _amb_presets.has(str(id)):
+			return
+		_ambiance = ((_amb_presets[str(id)] as Dictionary).get("values", {}) as Dictionary).duplicate()
+		_amb_preset = str(id)
+	_amb_has_section = true
+	_apply_ambiance()
+	_dirty = true
+	_set_status("ambiance preset: %s" % _amb_preset)
+	_show_ambiance()
+
+
+func _amb_display(key: String) -> String:
+	if key == "fog_enabled":
+		return "ON" if bool(_ambiance.get(key, false)) else "OFF"
+	if key == "tonemap_mode":
+		var i := clampi(int(_ambiance.get(key, 2.0)), 0, TONEMAP_NAMES.size() - 1)
+		return TONEMAP_NAMES[i]
+	var bounds: Array = MapIO.AMBIANCE_BOUNDS.get(key, [0.0, 1.0])
+	var span := float(bounds[1]) - float(bounds[0])
+	var dec := 0 if span >= 100.0 else (1 if span >= 10.0 else 2)
+	return "%.*f" % [dec, float(_ambiance.get(key, 0.0))]
+
+
+## Bound as adjust: the menu calls adjust.call(direction), bound key lands
+## second (Callable.bind appends). Applies, clamps, dirties.
+func _amb_adjust(direction: int, key: String) -> void:
+	var step := 0.1
+	for spec in AMBIANCE_ROWS:
+		if str(spec.get("key", "")) == key:
+			step = float(spec.get("step", 0.1))
+	var bounds: Array = MapIO.AMBIANCE_BOUNDS.get(key, [0.0, 1.0])
+	var lo := float(bounds[0])
+	var hi := float(bounds[1])
+	if key == "fog_end":
+		lo = maxf(lo, float(_ambiance.get("fog_begin", 0.0)) + 1.0)
+	var v := clampf(float(_ambiance.get(key, 0.0)) + float(direction) * step, lo, hi)
+	if key == "fog_enabled" or key == "tonemap_mode":
+		v = roundf(v)
+	_ambiance[key] = v
+	_amb_preset = ""
+	_amb_has_section = true
+	_apply_ambiance()
+	_dirty = true
+
+
+func _amb_reset(key: String) -> void:
+	var source: Dictionary = MapIO.AMBIANCE_DEFAULTS
+	if not _amb_preset.is_empty() and _amb_preset != "Default" and _amb_presets.has(_amb_preset):
+		source = (_amb_presets[_amb_preset] as Dictionary).get("values", source)
+	_ambiance[key] = (source as Dictionary).get(key, (MapIO.AMBIANCE_DEFAULTS as Dictionary)[key])
+	_amb_has_section = true
+	_apply_ambiance()
+	_dirty = true
+	_set_status("ambiance %s reset" % key)
+
+
+## Pushes live values to the viewport (clamped — files may carry anything
+## until validation reports). Sun keeps its azimuth, takes the elevation.
+func _apply_ambiance() -> void:
+	var env := world_env.environment as Environment
+	if env == null:
+		return
+	var get := func(key: String) -> float:
+		var bounds: Array = MapIO.AMBIANCE_BOUNDS.get(key, [0.0, 1.0])
+		return clampf(float(_ambiance.get(key, (MapIO.AMBIANCE_DEFAULTS as Dictionary).get(key, 0.0))), float(bounds[0]), float(bounds[1]))
+	env.fog_enabled = bool(_ambiance.get("fog_enabled", false))
+	env.fog_mode = Environment.FOG_MODE_DEPTH
+	env.fog_depth_begin = get.call("fog_begin")
+	env.fog_depth_end = maxf(get.call("fog_end"), env.fog_depth_begin + 1.0)
+	env.fog_height = get.call("fog_height")
+	env.fog_height_density = get.call("fog_hdensity")
+	env.tonemap_mode = clampi(int(_ambiance.get("tonemap_mode", 2.0)), 0, 4) as Environment.ToneMapper
+	env.tonemap_exposure = get.call("tonemap_exposure")
+	env.ambient_light_energy = get.call("ambient_energy")
+	sun.light_energy = get.call("sun_energy")
+	sun.rotation_degrees = Vector3(-get.call("sun_elev"), _sun_azimuth, 0.0)
 
 
 func _on_pause_save() -> void:
