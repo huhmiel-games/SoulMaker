@@ -123,28 +123,44 @@ Fly-cam stand-in until the P2 player controller:
 
 ESC still releases mouse capture in the fly-cam (unchanged).
 
-## Map menu (library: Load / New / Delete)
+## Generic menu (hub, library, all future menus)
 
-Boot scene. Reuses the editor profile — arrows/D-pad drive the focused
-row list (same physical inputs as catalog browsing, menu-local meaning):
+One behavior (`src/ui/generic_menu.gd` + `scenes/ui/generic_menu.tscn`),
+data-driven entries (`open` / `quit` / `new` / `load` / `can_delete`);
+subclasses only supply title, hint, entries and delete. Display-only rows,
+never clickable: arrows/D-pad move, A/E confirms, X arms/confirms delete on
+deletable rows (2nd press executes, red highlight while armed), B cancels the
+arm, ESC inert. Feedback = log + HUD toast.
 
 | Action | Gamepad | Keyboard |
 |---|---|---|
-| move highlight (New row + maps) | D-pad U / D | Up / Down arrows |
-| Load highlighted / create (New row) | A | E |
-| delete: 1st press arms, 2nd executes | X (button) | Delete key |
+| move highlight | D-pad U / D | Up / Down arrows |
+| confirm (open / load / new) | A | E |
+| delete: 1st press arms, 2nd executes | X | Delete key |
 | cancel delete-arm | B | Q |
-| (B with no arm: inert — no hub yet) | — | — |
-| (ESC in menu: inert — nothing above the menu yet) | — | — |
+| (X on non-deletable rows: "nothing to delete here") | — | — |
+| (ESC anywhere in a menu: inert) | — | — |
 
-Editor returns here via ESC/GUIDE (`menu` action, auto-saves first).
-Rename deferred (needs text entry).
+## Main hub (SOULMAKER: entries to editors)
+
+Boot scene. Entries: Map editor → map library, EXIT → quit the game
+directly (nothing above the hub). More editors append entries in
+`src/ui/main_menu.gd`. Routing note: the editor still returns to the map
+library via ESC — hub-as-back-target comes later, with more editors.
+
+## Map menu (library: Load / New / Delete / Back)
+
+`MapMenu extends GenericMenu` (all menu behavior inherited). Rows: `[ + New
+map ]` first, map files (deletable) in the middle, `[ ← Back ]` last (opens
+the hub, inert to X like New). New creates `untitled_NN` and enters the
+editor; Load enters via `GameState editor/pending_map`; the editor returns
+here via ESC/GUIDE (`menu` action, auto-saves first). Rename deferred (needs
+text entry).
 
 Shared overlay: `scenes/ui/editor_hud.tscn` (`EditorHUD`) — persistent facts
 (`set/clear_persistent(key)`, e.g. snap, joined by " · "), temporary notes
-(`flash`, 5 s auto-clear, e.g. save), command help (hint); display-only,
-mouse ignored. The crosshair stays per-editor by decision. map_menu migrates
-to it after.
+(`flash`, 5 s auto-clear, e.g. save and menu feedback), command help (hint);
+display-only, mouse ignored. The crosshair stays per-editor by decision.
 
 ## Architecture notes
 

@@ -7,7 +7,7 @@
 - **Objective**: P1 map editor — continue building the maker loop (post-input-layer)
 - **Expected mode**: edit
 - Next step: human check (import) + visual HUD recipe (below); map_menu HUD migration AFTER.
-- **Last step done**: EditorHUD v2 (persistent registry + toast + hint): `set/clear_persistent(key)` joined by " · " (future-proof for more permanent facts), `flash(msg, 5s)` with anti-stale seq, `set_status` removed. map_editor: snap = persistent "SNAP ON/OFF" (no angles); save 4 sites = log + toast (SNAP survives); GRAB_HINT drops values-prefix, gains "L1/Tab snap". tscn: ToastLabel above status (green tint), mouse_filter=2 restored on labels (were eating clicks). Deferred: map_menu migration, rename, face-link snap, scale, spawn-fallback sign, first-AABB ground snap, nudge dead-code cleanup.
+- **Last step done**: menu command hint → HintLabel (persistent) instead of toast (was auto-clearing at 5s); `_notice`/flash kept for transient events only. Prior: invalid-shell fix. Deferred: map_menu migration, rename, face-link snap, scale, spawn-fallback sign, first-AABB ground snap, nudge dead-code cleanup.
 
 ## Test recipe (human) — map menu round-trip
 
