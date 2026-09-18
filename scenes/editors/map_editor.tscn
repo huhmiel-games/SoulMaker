@@ -6,15 +6,7 @@
 [ext_resource type="Script" uid="uid://bhitaha28qo03" path="res://src/editors/catalog_panel.gd" id="4"]
 [ext_resource type="Environment" path="res://scenes/editors/env_default.tres" id="5"]
 [ext_resource type="PackedScene" path="res://scenes/ui/editor_hud.tscn" id="6"]
-
-[sub_resource type="StandardMaterial3D" id="ground_mat"]
-albedo_color = Color(0.22, 0.23, 0.26, 1)
-
-[sub_resource type="PlaneMesh" id="ground_mesh"]
-material = SubResource("ground_mat")
-size = Vector2(100, 100)
-
-[sub_resource type="WorldBoundaryShape3D" id="ground_shape"]
+[ext_resource type="PackedScene" path="res://scenes/ui/modal_dialog.tscn" id="7"]
 
 [sub_resource type="StandardMaterial3D" id="selection_mat"]
 transparency = 1
@@ -84,10 +76,8 @@ shadow_enabled = true
 [node name="Ground" type="StaticBody3D" parent="ViewportContainer/WorldViewport" unique_id=1525420290 groups=["ground"]]
 
 [node name="GroundMesh" type="MeshInstance3D" parent="ViewportContainer/WorldViewport/Ground" unique_id=1876905675]
-mesh = SubResource("ground_mesh")
 
 [node name="GroundShape" type="CollisionShape3D" parent="ViewportContainer/WorldViewport/Ground" unique_id=921671820]
-shape = SubResource("ground_shape")
 
 [node name="Placements" type="Node3D" parent="ViewportContainer/WorldViewport" unique_id=550667816]
 
@@ -114,3 +104,14 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 stretch_mode = 3
+
+[node name="ModalLayer" type="Control" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="ModalDialog" parent="ModalLayer" instance=ExtResource("7")]

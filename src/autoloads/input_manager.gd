@@ -15,11 +15,13 @@ extends Node
 ##   R1 (shift) ──  Shift held   (shifted chords; editor only)
 ##   A          ──  E           (place / confirm / select)
 ##   B          ──  Q           (back / deselect)
-##   Y          ──  P           (playtest)
-##   X          ──  Delete      (delete)
-##   Start      ──  S           (quick-save)
-##   R1+Start   ──  F2          (rename — dedicated key, no chord)
-##   Guide      ──  Esc         (menu)
+##   Y          ──  P           (floor mode — sculpt the ground relief)
+##   R1+Y       ──  Shift+P     (playtest; consumer-side shift redirect,
+##                              same pattern as Shift+Q delete)
+##   X          ──  Delete      (delete — menus only)
+##   Start      ──  S           (pause menu: SAVE / CANCEL / QUIT modal)
+##   R1 + Start ──  F2          (rename — dedicated key, no chord)
+##   Guide      ──  Esc         (pause menu, same as Start)
 ##
 ## Profiles let one action mean different things per context (editor vs
 ## playtest). Shift chords exist on both devices (R1-pad, Shift-key in the
@@ -61,8 +63,9 @@ const PROFILES := {
 		"delete_shifted": {"btn": JOY_BUTTON_B, "shifted": true},
 		"delete_file": {"btn": JOY_BUTTON_X, "key": KEY_DELETE},
 		"snap_toggle": {"btn": JOY_BUTTON_LEFT_SHOULDER, "key": KEY_TAB},
-		"playtest": {"btn": JOY_BUTTON_Y, "key": KEY_P},
-		"quick_save": {"btn": JOY_BUTTON_START, "key": KEY_S},
+		"playtest": {"btn": JOY_BUTTON_Y, "shifted": true},
+		"floor_mode": {"btn": JOY_BUTTON_Y, "key": KEY_P},
+		"pause_menu": {"btn": JOY_BUTTON_START, "key": KEY_S},
 		"rename": {"btn": JOY_BUTTON_START, "shifted": true, "key": KEY_F2},
 		"menu": {"btn": JOY_BUTTON_GUIDE, "key": KEY_ESCAPE},
 	},

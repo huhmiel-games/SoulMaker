@@ -4,6 +4,10 @@ extends Control
 ## P1 map editor controller (unit 1): the minimal maker loop.
 ## Place an asset (catalog click) → move it (arrow keys) →
 ## save/reload a versioned JSON map → one-key playtest (free-fly camera).
+## Y/P sculpts the ground relief (EDIT_FLOOR: LS moves a grid cursor, RS
+## heightens, A checkpoints, B undoes to checkpoint, Y exits).
+## Start/S or Guide/ESC opens the pause modal (SAVE / CANCEL / QUIT); QUIT
+## while dirty swaps in the quit-confirm (QUIT WITHOUT SAVING / CANCEL).
 ## The shared EditorHUD shows persistent facts (snap state) + temporary
 ## confirmations (save toast, 5 s) + command help (hint); every state change
 ## also prints a matching log line.
@@ -17,10 +21,13 @@ const SELECTOR_LAYER := 2
 const GROUND_LAYER := 1
 const SELECT_MASK := GROUND_LAYER | SELECTOR_LAYER
 const MAPS_DIR := "user://maps"
-## Menu scene (ESC returns here, auto-saving first) + the GameState key the
-## menu uses to hand over the map to open ("" = none, boot empty as usual).
+## Menu scene (QUIT returns here) + the GameState key the menu uses to hand
+## over the map to open ("" = none, boot empty as usual).
 const MENU_SCENE := "res://scenes/editors/map_editor_menu.tscn"
 const PENDING_KEY := "editor/pending_map"
+## Single generic menu scene, configured at runtime (pause + quit-confirm
+## are just entries + Callables — zero menu-specific scenes).
+const GENERIC_MENU_SCENE := preload("res://scenes/ui/generic_menu.tscn")
 
 const CROSSHAIR_OK: Texture2D = preload("res://assets/textures/ui/crosshair_green.png")
 const CROSSHAIR_HIT: Texture2D = preload("res://assets/textures/ui/crosshair_red.png")
@@ -38,6 +45,21 @@ const OBJ_TURN_SPEED := 1.8
 ## steps safe (no freeze).
 const SNAP_STEP := 0.1
 const SNAP_ANGLE := PI / 12.0
+## Floor relief knobs (EDIT_FLOOR, Y/P): cell size/count/bounds live in MapIO
+## (single source: MapIO.GROUND_*). Sculpt is continuous-additive (plugin
+## style): rate in m/s at the disk center, cosine falloff to the rim, trails
+## while traveling; files quantize to the step at save (MapIO guarantee).
+const FLOOR_HEIGHT_RATE := 1.0
+const FLOOR_CURSOR_RATE := 8.0
+## Brush: RS X / mouse X / Shift+A-D grows the elevation disk (0..6 cells,
+## default 2). Radius rate in steps/s at full deflection.
+const FLOOR_RADIUS_MAX := 6
+const FLOOR_RADIUS_RATE := 3.0
+## Rebuild throttle: mesh + collision rebuild at most this often while
+## sculpting (heights themselves update per frame), plus one final rebuild on
+## release.
+const FLOOR_REBUILD_INTERVAL := 0.1
+const FLOOR_HINT := "LS/WASD cell · RS height · RSX/Sh+A-D radius · A/E keep · B/Q undo · Y/P exit"
 
 ## Attach points (must exist in the scene scaffold).
 @onready var world_viewport: SubViewport = get_node("ViewportContainer/WorldViewport")
@@ -45,15 +67,31 @@ const SNAP_ANGLE := PI / 12.0
 @onready var editor_camera: OrbitCamera = get_node("ViewportContainer/WorldViewport/EditorCamera")
 @onready var play_camera: FlyCamera = get_node("ViewportContainer/WorldViewport/PlayCamera")
 @onready var selection_box: MeshInstance3D = get_node("ViewportContainer/WorldViewport/SelectionBox")
+@onready var ground_mesh: MeshInstance3D = get_node("ViewportContainer/WorldViewport/Ground/GroundMesh")
+@onready var ground_shape: CollisionShape3D = get_node("ViewportContainer/WorldViewport/Ground/GroundShape")
 @onready var catalog_panel: CatalogPanel = get_node("CatalogPanel")
 @onready var hud: EditorHUD = get_node("HUD")
 @onready var crosshair: TextureRect = get_node("Crosshair")
+@onready var modal: ModalDialog = get_node("ModalLayer/ModalDialog")
 
 var catalog := Catalog.new()
 var _placements: Array[Dictionary] = []
 var _selected: Node3D = null
 var _playtest_active := false
 var current_map_name := "corridor_01"
+## Unsaved-changes flag: set by every edit (place, grab, nudge, delete,
+## sculpt), cleared by save/load. QUIT consults it (clean quits directly,
+## dirty swaps in the quit-confirm).
+var _dirty := false
+## Pause modal state (0 = none, 1 = pause, 2 = quit-confirm). While open the
+## editor ignores every input except the Start/ESC toggle, and _process edit
+## paths are gated — the modal owns A/E/B. Grab/floor state underneath is
+## kept as-is (camera restore flag below).
+var _modal_open := false
+var _modal_level := 0
+## True when the camera was NOT frozen before the modal opened (IDLE /
+## SELECTED) — restored on close. Grabbed/floor states stay frozen.
+var _cam_unfreeze_on_close := false
 ## Monotonic placement counter — instance ids must stay unique even after
 ## deletions, so they are never derived from _placements.size().
 var _next_iid: int = 0
@@ -72,6 +110,29 @@ var _grab_rot := Vector3.ZERO
 ## the node shows the snapped (or raw) copy. Rounding the live node position
 ## in place would erase sub-half-step progress every frame and freeze motion.
 var _grab_pos := Vector3.ZERO
+## Floor relief (EDIT_FLOOR, the 4th editor state): sparse heights
+## ({Vector2i cell: float}, default 0 = flat), camera frozen like a grab, LS
+## moves a grid cursor, RS heightens the hovered cell. Entering snapshots the
+## relief; A checkpoints (stays), B restores to checkpoint (stays), Y exits
+## (keeps). Same grammar as grab: A validates, B cancels.
+var _ground: Dictionary = {}
+var _floor_mode := false
+var _floor_cursor := Vector2i(50, 50)
+var _floor_checkpoint := {}
+var _floor_rep := Vector2.ZERO
+## Brush radius (disk around the cursor) + radius accumulator.
+var _floor_radius := 2
+var _floor_rad_accum := 0.0
+## Rebuild dirty flag + cooldown (throttled sculpt visuals).
+var _floor_dirty := false
+var _floor_cd := 0.0
+## SelectionBox's own mesh (BoxMesh scaffold), swapped for the floor ring
+## while sculpting and restored on exit.
+var _selection_mesh_orig: Mesh = null
+var _ground_mat: StandardMaterial3D = null
+## Ring material (red translucent, carried by the ring mesh itself) — the
+## SelectionBox's yellow stays placements-only.
+var _ring_mat: StandardMaterial3D = null
 
 
 func _ready() -> void:
@@ -96,6 +157,9 @@ func _ready() -> void:
 	_set_status("editor ready — arrows browse the catalog, E confirms at the crosshair")
 	if hud != null:
 		hud.set_persistent(&"snap", "SNAP ON" if _snap_on else "SNAP OFF")
+	# Flat relief until a map (with its ground section) loads; the mesh +
+	# HeightMapShape replace the tscn placeholders here.
+	_rebuild_ground()
 
 	InputManager.action_pressed.connect(_on_input_action)
 	InputManager.set_profile(&"editor")
@@ -110,7 +174,12 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_refresh_crosshair()
+	if _modal_open:
+		return
 	if _playtest_active:
+		return
+	if _floor_mode:
+		_move_floor(delta)
 		return
 	if _grabbed:
 		_move_grabbed(delta)
@@ -157,6 +226,7 @@ func _on_asset_selected(id: String) -> void:
 	_move_asset_to_ground(placement)
 	_select(placement)
 	_set_placement_data(placement)
+	_dirty = true
 	_set_status("spawned %s (%s) — placed: %d" % [id, iid, _placements.size()])
 	_refresh_grab_label()
 
@@ -248,6 +318,7 @@ func _drop_grab() -> void:
 	_selected = null
 	editor_camera.frozen = false
 	_update_selection_visual()
+	_dirty = true
 	_set_status("dropped %s" % iid)
 	_refresh_grab_label()
 
@@ -263,6 +334,7 @@ func _cancel_grab() -> void:
 	_selected = null
 	editor_camera.frozen = false
 	_update_selection_visual()
+	_dirty = true
 	_set_status("grab cancelled %s (restored)" % iid)
 	_refresh_grab_label()
 
@@ -279,6 +351,7 @@ func _move_grabbed(delta: float) -> void:
 		return
 	var node := _selected
 	var shifted := InputManager.is_shifted()
+	var applied := false
 	# XZ move, unshifted only (keyboard steps scaled like the camera pan +
 	# stick on top).
 	if not shifted:
@@ -293,6 +366,7 @@ func _move_grabbed(delta: float) -> void:
 			mv.y -= 1.0
 		mv = mv * 0.5 + InputManager.left_stick()
 		if mv != Vector2.ZERO:
+			applied = true
 			var cbasis := editor_camera.global_basis
 			var right := cbasis.x
 			right.y = 0.0
@@ -302,7 +376,8 @@ func _move_grabbed(delta: float) -> void:
 			fwd = fwd.normalized() if fwd.length() > 0.001 else Vector3.FORWARD
 			_grab_pos += (right * mv.x + fwd * -mv.y) * OBJ_MOVE_SPEED * delta
 	# Height, shifted only: LS Y / W-S, push up lifts. Base clamped above
-	# the ground (on the accumulator).
+	# the relief (on the accumulator); outside the slab the old 0.0 floor
+	# applies.
 	if shifted:
 		var ls := InputManager.left_stick()
 		var h := -ls.y
@@ -311,15 +386,20 @@ func _move_grabbed(delta: float) -> void:
 		if InputManager.is_pressed(&"cam_pan_back"):
 			h -= 1.0
 		if h != 0.0:
+			applied = true
 			_grab_pos.y += h * OBJ_HEIGHT_SPEED * delta
 			var box := _find_mesh_aabb(node)
-			_grab_pos.y = maxf(_grab_pos.y, -box.position.y)
+			var gh := _ground_height_at(_grab_pos.x, _grab_pos.z)
+			var floor_y := 0.0 if is_nan(gh) else gh
+			_grab_pos.y = maxf(_grab_pos.y, floor_y - box.position.y)
 	# Display pose: raw accumulator, or base-snapped to the grid (the base
-	# lands exactly on-grid and never below ground — rounding the origin
+	# lands exactly on-grid and never below the relief — rounding the origin
 	# instead would bury it up to half a step).
 	if _snap_on:
 		var sbox := _find_mesh_aabb(node)
-		var base_y := maxf(roundf((_grab_pos.y + sbox.position.y) / SNAP_STEP) * SNAP_STEP, 0.0)
+		var gh2 := _ground_height_at(_grab_pos.x, _grab_pos.z)
+		var floor_y2 := 0.0 if is_nan(gh2) else gh2
+		var base_y := maxf(roundf((_grab_pos.y + sbox.position.y) / SNAP_STEP) * SNAP_STEP, floor_y2)
 		node.position = Vector3(
 			roundf(_grab_pos.x / SNAP_STEP) * SNAP_STEP,
 			base_y - sbox.position.y,
@@ -331,6 +411,8 @@ func _move_grabbed(delta: float) -> void:
 	# shifted = roll alone (Y dead). Accumulated, applied absolute.
 	var tx := InputManager.analog(&"cam_orbit_x")
 	var ty := InputManager.analog(&"cam_orbit_y")
+	if tx != 0.0 or ty != 0.0:
+		applied = true
 	if shifted:
 		_grab_rot.z += -tx * OBJ_TURN_SPEED * delta
 	else:
@@ -340,6 +422,8 @@ func _move_grabbed(delta: float) -> void:
 		node.rotation = _snap_vec(_grab_rot, SNAP_ANGLE)
 	else:
 		node.rotation = _grab_rot
+	if applied:
+		_dirty = true
 	_set_placement_data(node)
 	_update_selection_visual()
 	_refresh_grab_label()
@@ -368,6 +452,10 @@ const GRAB_HINT := "LS/WASD move · R1+LS/Shift+WASD height · RS/mouse turn · 
 ## Neither: hint cleared.
 func _refresh_grab_label() -> void:
 	if hud == null:
+		return
+	if _floor_mode:
+		# Owned by _update_floor_visual (cursor cell + height facts); nothing
+		# to do here beyond keeping them.
 		return
 	if _grabbed and _selected != null:
 		var bits := GRAB_HINT
@@ -409,11 +497,12 @@ func _pick_placement_at_screen(screen_pos: Vector2) -> Node3D:
 	return null
 
 
-## Crosshair upkeep (runs before the _process gate): hidden in playtest and
-## while grabbed (the SelectionBox takes over), otherwise green = empty space
-## (A/E places), red = aiming at a placed asset (A/E grabs it).
+## Crosshair upkeep (runs before the _process gate): hidden in playtest, while
+## grabbed (the SelectionBox takes over) and in floor mode (the 3D cell cursor
+## takes over), otherwise green = empty space (A/E places), red = aiming at a
+## placed asset (A/E grabs it).
 func _refresh_crosshair() -> void:
-	if _playtest_active or _grabbed:
+	if _playtest_active or _grabbed or _floor_mode:
 		if crosshair.visible:
 			crosshair.hide()
 		return
@@ -451,12 +540,357 @@ func _update_selection_visual() -> void:
 		mesh.size = world_box.size
 
 
+## ── ground relief ────────────────────────────────────────────────────
+## Heightfield over the 100x100 slab (MapIO.GROUND_* bounds): (N+1)x(N+1)
+## vertex heights sampled from the sparse _ground cells, mesh + HeightMapShape
+## rebuilt from the same grid so visual and collision agree by construction
+## (shape convention probed headless 2026-09-18: data[ix + iz*w] sits at
+## x=ix-(w-1)/2, z=iz-(d-1)/2). Gentle strokes render as walkable slopes for
+## the future walker; sharp gaps as steep unclimbable faces.
+
+func _cell_of(x: float, z: float) -> Vector2i:
+	return Vector2i(floori(x + MapIO.GROUND_N * 0.5), floori(z + MapIO.GROUND_N * 0.5))
+
+
+func _cell_valid(c: Vector2i) -> bool:
+	return c.x >= 0 and c.y >= 0 and c.x < MapIO.GROUND_N and c.y < MapIO.GROUND_N
+
+
+## Relief height at a world XZ; NAN outside the slab (callers fall back).
+func _ground_height_at(x: float, z: float) -> float:
+	var c := _cell_of(x, z)
+	if not _cell_valid(c):
+		return NAN
+	return float(_ground.get(c, 0.0))
+
+
+func _vertex_height(ix: int, iz: int) -> float:
+	var c := Vector2i(clampi(ix, 0, MapIO.GROUND_N - 1), clampi(iz, 0, MapIO.GROUND_N - 1))
+	return float(_ground.get(c, 0.0))
+
+
+func _rebuild_ground() -> void:
+	var n := MapIO.GROUND_N
+	var v := n + 1
+	if _ground_mat == null:
+		_ground_mat = StandardMaterial3D.new()
+		_ground_mat.albedo_color = Color(0.22, 0.23, 0.26, 1)
+	var verts := PackedVector3Array()
+	verts.resize(v * v)
+	var heights := PackedFloat32Array()
+	heights.resize(v * v)
+	for iz in range(v):
+		for ix in range(v):
+			var h := _vertex_height(ix, iz)
+			var i := ix + iz * v
+			verts[i] = Vector3(ix - n * 0.5, h, iz - n * 0.5)
+			heights[i] = h
+	# (a,b,d) + (a,d,c) per quad: clockwise seen from above = Godot front
+	# (CCW renders from below only — caught 2026-09-18: floor invisible
+	# from above, gray from below).
+	var indices := PackedInt32Array()
+	indices.resize(n * n * 6)
+	var k := 0
+	for cz in range(n):
+		for cx in range(n):
+			var a := cx + cz * v
+			var b := (cx + 1) + cz * v
+			var c := cx + (cz + 1) * v
+			var d := (cx + 1) + (cz + 1) * v
+			indices[k] = a
+			indices[k + 1] = b
+			indices[k + 2] = d
+			indices[k + 3] = a
+			indices[k + 4] = d
+			indices[k + 5] = c
+			k += 6
+	var normals := PackedVector3Array()
+	normals.resize(v * v)
+	for t in range(0, indices.size(), 3):
+		var p0 := verts[indices[t]]
+		var p1 := verts[indices[t + 1]]
+		var p2 := verts[indices[t + 2]]
+		# Operand order mirrors the flipped winding so normals stay +Y-up.
+		var fn := (p2 - p0).cross(p1 - p0)
+		normals[indices[t]] += fn
+		normals[indices[t + 1]] += fn
+		normals[indices[t + 2]] += fn
+	for i in range(normals.size()):
+		normals[i] = normals[i].normalized()
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	arrays[Mesh.ARRAY_INDEX] = indices
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	mesh.surface_set_material(0, _ground_mat)
+	ground_mesh.mesh = mesh
+	var shape := HeightMapShape3D.new()
+	shape.map_width = v
+	shape.map_depth = v
+	shape.map_data = heights
+	ground_shape.shape = shape
+
+
+## Physics ray against the relief (spawn point, floor cursor). Empty when the
+## ray misses the slab (aimed past the edge or at the sky).
+func _ground_hit(screen_pos: Vector2) -> Dictionary:
+	var world := editor_camera.get_world_3d()
+	if world == null:
+		return {}
+	var origin := editor_camera.project_ray_origin(screen_pos)
+	var dir := editor_camera.project_ray_normal(screen_pos)
+	var query := PhysicsRayQueryParameters3D.create(origin, origin + dir * 1000.0, GROUND_LAYER)
+	return world.direct_space_state.intersect_ray(query)
+
+
+## ── EDIT_FLOOR ───────────────────────────────────────────────────────
+## The 4th editor state (Y/P toggles). Same grammar as grab: A validates
+## (checkpoint, stays in mode), B cancels (restores to checkpoint, stays),
+## Y is the door (exits, keeps). R1+B / Shift+Q are inert here — relief cells
+## are not placements, delete stays placements-only everywhere.
+
+func _enter_floor_mode() -> void:
+	if _playtest_active or _floor_mode:
+		return
+	if _grabbed:
+		_drop_grab()
+	_selected = null
+	_floor_mode = true
+	_floor_checkpoint = _ground.duplicate()
+	editor_camera.frozen = true
+	crosshair.hide()
+	var hit := _ground_hit(_viewport_center())
+	if not hit.is_empty():
+		var p: Vector3 = hit["position"]
+		var c := _cell_of(p.x, p.z)
+		_floor_cursor = c if _cell_valid(c) else Vector2i(50, 50)
+	else:
+		_floor_cursor = Vector2i(50, 50)
+	_floor_rep = Vector2.ZERO
+	_floor_radius = 2
+	_floor_rad_accum = 0.0
+	_floor_dirty = false
+	_floor_cd = 0.0
+	_selection_mesh_orig = selection_box.mesh
+	selection_box.mesh = _make_floor_ring(_floor_radius)
+	# The ring is a cursor: no shadow on the map (restored on exit).
+	selection_box.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_update_floor_visual()
+	_set_status("floor mode — LS/WASD moves the cell cursor, RS heightens, camera frozen")
+
+
+func _exit_floor_mode() -> void:
+	if not _floor_mode:
+		return
+	_floor_mode = false
+	editor_camera.frozen = false
+	crosshair.show()
+	if _selection_mesh_orig != null:
+		selection_box.mesh = _selection_mesh_orig
+		_selection_mesh_orig = null
+	selection_box.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	selection_box.visible = false
+	if hud != null:
+		hud.clear_persistent(&"floor")
+		hud.clear_hint()
+	_set_status("floor mode off — relief kept")
+
+
+func _floor_commit() -> void:
+	_floor_checkpoint = _ground.duplicate()
+	_user_status("floor checkpoint — A keeps going, B undoes to here")
+
+
+func _floor_undo() -> void:
+	_ground = _floor_checkpoint.duplicate()
+	_rebuild_ground()
+	_update_floor_visual()
+	_dirty = true
+	_user_status("floor restored to checkpoint")
+
+
+## Cursor cell-by-cell (key-repeat feel, camera-relative like the grab) +
+## continuous sculpt. LS/WASD point where the cursor must go on screen; the
+## camera basis converts to slab cells (world axes here re-invert as soon as
+## the camera orbits — reported 2026-09-18).
+func _move_floor(delta: float) -> void:
+	var iv := Vector2.ZERO
+	if InputManager.is_pressed(&"cam_pan_right"):
+		iv.x += 1.0
+	if InputManager.is_pressed(&"cam_pan_left"):
+		iv.x -= 1.0
+	if InputManager.is_pressed(&"cam_pan_back"):
+		iv.y += 1.0
+	if InputManager.is_pressed(&"cam_pan_fwd"):
+		iv.y -= 1.0
+	iv = iv * 0.5 + InputManager.left_stick()
+	var cbasis := editor_camera.global_basis
+	var right := cbasis.x
+	right.y = 0.0
+	right = right.normalized() if right.length() > 0.001 else Vector3.RIGHT
+	var fwd := -cbasis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized() if fwd.length() > 0.001 else Vector3.FORWARD
+	var off := right * iv.x + fwd * -iv.y
+	_floor_rep.x += off.x * FLOOR_CURSOR_RATE * delta
+	_floor_rep.y += off.z * FLOOR_CURSOR_RATE * delta
+	var stepped := false
+	while absf(_floor_rep.x) >= 1.0:
+		_floor_cursor.x += 1 if _floor_rep.x > 0.0 else -1
+		_floor_rep.x -= 1.0 if _floor_rep.x > 0.0 else -1.0
+		stepped = true
+	while absf(_floor_rep.y) >= 1.0:
+		_floor_cursor.y += 1 if _floor_rep.y > 0.0 else -1
+		_floor_rep.y -= 1.0 if _floor_rep.y > 0.0 else -1.0
+		stepped = true
+	if stepped:
+		_floor_cursor.x = clampi(_floor_cursor.x, 0, MapIO.GROUND_N - 1)
+		_floor_cursor.y = clampi(_floor_cursor.y, 0, MapIO.GROUND_N - 1)
+		_update_floor_visual()
+	# Brush radius: RS X / mouse X / Shift+A-D, discrete steps (no trail
+	# issue here — radius is not positional).
+	var r := InputManager.right_stick().x
+	r += InputManager.analog(&"cam_orbit_x")
+	if InputManager.is_shifted():
+		if InputManager.is_pressed(&"cam_pan_right"):
+			r += 1.0
+		if InputManager.is_pressed(&"cam_pan_left"):
+			r -= 1.0
+	if r != 0.0:
+		_floor_rad_accum += r * FLOOR_RADIUS_RATE * delta
+		var resized := false
+		while _floor_rad_accum >= 1.0:
+			_floor_rad_accum -= 1.0
+			if _floor_radius < FLOOR_RADIUS_MAX:
+				_floor_radius += 1
+				resized = true
+		while _floor_rad_accum <= -1.0:
+			_floor_rad_accum += 1.0
+			if _floor_radius > 0:
+				_floor_radius -= 1
+				resized = true
+		if resized:
+			selection_box.mesh = _make_floor_ring(_floor_radius)
+			_update_floor_visual()
+			_set_status("floor brush R=%d" % _floor_radius)
+	# Height: continuous-additive stroke over the disk (plugin style) with
+	# trails — traveling with the stick held paints a ridge, as intended.
+	var h := -InputManager.right_stick().y
+	h += -InputManager.analog(&"cam_orbit_y")
+	if InputManager.is_shifted():
+		if InputManager.is_pressed(&"cam_pan_fwd"):
+			h += 1.0
+		if InputManager.is_pressed(&"cam_pan_back"):
+			h -= 1.0
+	if h != 0.0:
+		if _floor_stroke(h * FLOOR_HEIGHT_RATE * delta):
+			_floor_dirty = true
+			_dirty = true
+		_floor_cd -= delta
+		if _floor_dirty and _floor_cd <= 0.0:
+			_rebuild_ground()
+			_floor_cd = FLOOR_REBUILD_INTERVAL
+			_update_floor_visual()
+	elif _floor_dirty:
+		_rebuild_ground()
+		_floor_dirty = false
+		_update_floor_visual()
+	_update_floor_ring_pos()
+
+
+## Continuous stroke: adds amount (signed meters at the disk center, cosine
+## falloff to the rim) to every cell in the brush disk, clamped [-8, +8].
+## Heights stay float in memory (smooth hills); files quantize to
+## MapIO.GROUND_STEP at save. Near-zero cells stay sparse. True when anything
+## moved.
+func _floor_stroke(amount: float) -> bool:
+	var moved := false
+	var rad := _floor_radius
+	for dz in range(-rad, rad + 1):
+		for dx in range(-rad, rad + 1):
+			var dist := Vector2(dx, dz).length()
+			if dist > rad + 0.01:
+				continue
+			var w := 1.0 if rad == 0 else 0.5 + 0.5 * cos(PI * dist / float(rad + 1))
+			var cell := _floor_cursor + Vector2i(dx, dz)
+			if not _cell_valid(cell):
+				continue
+			var cur := float(_ground.get(cell, 0.0))
+			var next := clampf(cur + amount * w, MapIO.GROUND_H_MIN, MapIO.GROUND_H_MAX)
+			if is_equal_approx(next, cur):
+				continue
+			if absf(next) < 0.01:
+				_ground.erase(cell)
+			else:
+				_ground[cell] = next
+			moved = true
+	return moved
+
+
+## Flat annulus cursor (outer = disk rim + half cell) generated per radius —
+## the plugin-style circle on the ground. 48 segments, explicit +Y normals,
+## clockwise-from-above winding (Godot front, same fix as the relief mesh).
+func _make_floor_ring(rad: int) -> ArrayMesh:
+	var segs := 48
+	var ro := rad + 0.5
+	var ri := maxf(ro - 0.12, 0.05)
+	var verts := PackedVector3Array()
+	var normals := PackedVector3Array()
+	for i in range(segs):
+		var a0 := TAU * i / segs
+		var a1 := TAU * (i + 1) / segs
+		var o0 := Vector3(cos(a0) * ro, 0.0, sin(a0) * ro)
+		var o1 := Vector3(cos(a1) * ro, 0.0, sin(a1) * ro)
+		var i0 := Vector3(cos(a0) * ri, 0.0, sin(a0) * ri)
+		var i1 := Vector3(cos(a1) * ri, 0.0, sin(a1) * ri)
+		for p in [o0, o1, i1, o0, i1, i0]:
+			verts.append(p)
+			normals.append(Vector3.UP)
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	if _ring_mat == null:
+		_ring_mat = StandardMaterial3D.new()
+		# Cursor contract: identical red everywhere — opaque (no washout over
+		# bright slopes) + unshaded (no light/shadow tint) + no depth test
+		# (never buried by the relief).
+		_ring_mat.albedo_color = Color(1.0, 0.2, 0.15, 1.0)
+		_ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_ring_mat.no_depth_test = true
+	mesh.surface_set_material(0, _ring_mat)
+	return mesh
+
+
+## SelectionBox doubles as the floor ring (mesh swapped on enter/exit) +
+## persistent HUD facts (cell + center height + radius). Ring position tracks
+## per frame (smooth follow while sculpting); facts refresh on rebuilds.
+func _update_floor_visual() -> void:
+	_update_floor_ring_pos()
+	if hud != null:
+		var h := float(_ground.get(_floor_cursor, 0.0))
+		var sign := "+" if h >= 0.0 else ""
+		hud.set_persistent(&"floor", "FLOOR (%d,%d) h=%s%.3f R=%d" % [_floor_cursor.x, _floor_cursor.y, sign, h, _floor_radius])
+		hud.set_hint(FLOOR_HINT)
+
+
+func _update_floor_ring_pos() -> void:
+	selection_box.visible = true
+	var h := float(_ground.get(_floor_cursor, 0.0))
+	selection_box.position = Vector3(_floor_cursor.x - 50.0 + 0.5, h + 0.1, _floor_cursor.y - 50.0 + 0.5)
+
+
 ## ── transform ──────────────────────────────────────────────────────────
 
 func _nudge_selection(delta: Vector3) -> void:
 	if _selected == null:
 		return
 	_selected.position += delta
+	_dirty = true
 	_apply_placement_transform(_selected)
 
 
@@ -481,6 +915,7 @@ func _delete_selection() -> void:
 	_grabbed = false
 	editor_camera.frozen = false
 	_update_selection_visual()
+	_dirty = true
 	_set_status("deleted %s — placed: %d" % [iid, _placements.size()])
 	_refresh_grab_label()
 
@@ -502,23 +937,27 @@ func _map_path(name: String) -> String:
 	return MAPS_DIR.path_join("%s.json" % name)
 
 
-func save_map() -> void:
+## Saves the map; true on success (dirty cleared), false otherwise (caller
+## keeps its context — the pause stays open, the menu still exits).
+func save_map() -> bool:
 	var name := current_map_name.strip_edges()
 	if name.is_empty():
 		_user_status("save aborted: empty map name")
-		return
-	var data := MapIO.serialize(name, _placements)
+		return false
+	var data := MapIO.serialize(name, _placements, _ground)
 	var issues := MapIO.validate_map(data)
 	issues.append_array(MapIO.validate_refs(data, catalog))
 	if not issues.is_empty():
 		_user_status("SAVE ISSUES: %s" % ", ".join(issues))
-		return
+		return false
 	var err := JsonFile.save_atomic(_map_path(name), data)
 	if err != OK:
 		_user_status("save FAILED (%d)" % err)
-		return
+		return false
 	map_saved.emit(_map_path(name))
-	_user_status("saved %s (%d placements)" % [name, _placements.size()])
+	_dirty = false
+	_user_status("saved %s (%d placements, %d relief cells)" % [name, _placements.size(), _ground.size()])
+	return true
 
 
 func load_map(name: String) -> void:
@@ -533,11 +972,14 @@ func load_map(name: String) -> void:
 	for placement in MapIO.deserialize(data):
 		_instance_from_data(placement)
 	_sync_iid_counter()
+	_ground = MapIO.ground_from_data(data)
+	_rebuild_ground()
 	if not issues.is_empty():
 		for issue in issues:
 			_set_status("LOAD ISSUE: %s" % issue)
 	map_loaded.emit(path)
 	current_map_name = name
+	_dirty = false
 	_set_status("loaded %s — placed: %d %s" % [name, _placements.size(), "(issues above)" if not issues.is_empty() else ""])
 
 
@@ -581,8 +1023,11 @@ func toggle_playtest() -> void:
 	_playtest_active = not _playtest_active
 	InputManager.set_profile(&"playtest" if _playtest_active else &"editor")
 	if _playtest_active:
-		# Entering playtest force-drops any grab (live transform kept).
+		# Entering playtest force-drops any grab (live transform kept) and
+		# exits floor mode (relief kept).
 		_grabbed = false
+		if _floor_mode:
+			_exit_floor_mode()
 		editor_camera.frozen = false
 		play_camera.global_position = editor_camera.global_position
 		play_camera.rotation = editor_camera.rotation
@@ -597,29 +1042,176 @@ func toggle_playtest() -> void:
 	_selected = null
 	_update_selection_visual()
 	_refresh_grab_label()
-	_set_status("PLAYTEST %s — WASD to move, mouse to look, P to leave" % ("ON" if _playtest_active else "OFF"))
+	_set_status("PLAYTEST %s — WASD to move, mouse to look, Y/P to leave" % ("ON" if _playtest_active else "OFF"))
+
+
+## ── pause modal ────────────────────────────────────────────────────
+## Start/S (pause_menu) and Guide/ESC (menu) toggle the pause; inert in
+## playtest. The modal owns all other inputs while open (gated in
+## _on_input_action + _process). Grab/floor state underneath is kept as-is;
+## only the camera freeze is managed (IDLE/SELECTED thaw on close).
+
+func _open_pause() -> void:
+	if _modal_open:
+		return
+	var content := GENERIC_MENU_SCENE.instantiate() as GenericMenu
+	if content == null:
+		_set_status("pause FAILED: cannot instance generic menu")
+		return
+	content.configure(
+		"MAP PAUSED",
+		"arrows move · A confirm · B cancel",
+		[
+			{"label": "SAVE", "call": _on_pause_save},
+			{"label": "CANCEL", "call": _on_pause_cancel},
+			{"label": "QUIT", "call": _on_pause_quit},
+		],
+		_on_pause_cancel
+	)
+	_cam_unfreeze_on_close = not editor_camera.frozen
+	editor_camera.frozen = true
+	modal.open(content)
+	_modal_open = true
+	_modal_level = 1
+	_set_status("paused")
+
+
+func _close_modal() -> void:
+	if not _modal_open:
+		return
+	modal.close()
+	_modal_open = false
+	_modal_level = 0
+	if _cam_unfreeze_on_close:
+		editor_camera.frozen = false
+		_cam_unfreeze_on_close = false
+	_set_status("resumed")
+
+
+## Swaps the pause content for the quit-confirm (dirty QUIT only). Back goes
+## the other way — one ModalDialog, two contents, never stacked.
+func _show_confirm() -> void:
+	var content := GENERIC_MENU_SCENE.instantiate() as GenericMenu
+	if content == null:
+		_set_status("quit-confirm FAILED: cannot instance generic menu")
+		return
+	content.configure(
+		"UNSAVED CHANGES",
+		"arrows move · A confirm · B back",
+		[
+			{"label": "QUIT WITHOUT SAVING", "call": _on_confirm_discard},
+			{"label": "CANCEL", "call": _on_confirm_back},
+		],
+		_on_confirm_back
+	)
+	modal.close()
+	modal.open(content)
+	_modal_level = 2
+	_set_status("quit-confirm — unsaved changes")
+
+
+func _back_to_pause() -> void:
+	if not _modal_open:
+		return
+	# Inline (not via _open_pause): the camera freeze flag from the original
+	# open must survive the round-trip — re-opening would see a frozen camera
+	# and wrongly clear the restore.
+	var content := GENERIC_MENU_SCENE.instantiate() as GenericMenu
+	if content == null:
+		return
+	content.configure(
+		"MAP PAUSED",
+		"arrows move · A confirm · B cancel",
+		[
+			{"label": "SAVE", "call": _on_pause_save},
+			{"label": "CANCEL", "call": _on_pause_cancel},
+			{"label": "QUIT", "call": _on_pause_quit},
+		],
+		_on_pause_cancel
+	)
+	modal.close()
+	modal.open(content)
+	_modal_level = 1
+	_set_status("paused")
+
+
+func _on_pause_save() -> void:
+	# Success closes (toast surfaces above the closed modal); failure keeps
+	# the pause open (toast still fires behind — visible after close, 5 s).
+	if save_map():
+		_close_modal()
+
+
+func _on_pause_cancel() -> void:
+	_close_modal()
+
+
+func _on_pause_quit() -> void:
+	if _dirty:
+		_show_confirm()
+	else:
+		_quit_to_menu()
+
+
+func _on_confirm_discard() -> void:
+	_quit_to_menu()
+
+
+func _on_confirm_back() -> void:
+	_back_to_pause()
+
+
+func _quit_to_menu() -> void:
+	_set_status("quit to map menu")
+	get_tree().change_scene_to_file(MENU_SCENE)
 
 
 ## ── helpers ────────────────────────────────────────────────────────────
 
 func _on_input_action(action: StringName) -> void:
+	# Pause toggle (Start/S = pause_menu, Guide/ESC = menu — same gesture by
+	# decision). Inert in playtest (exit = Y/P). With the modal open both
+	# step one level back: confirm → pause, pause → close.
+	if action == &"pause_menu" or action == &"menu":
+		if _playtest_active:
+			return
+		if not _modal_open:
+			_open_pause()
+		elif _modal_level == 2:
+			_back_to_pause()
+		else:
+			_close_modal()
+		return
+	# Modal owns every other input while open (A/E/B navigate it) — the
+	# editor underneath stays untouched (no place/grab/floor/delete).
+	if _modal_open:
+		return
 	match action:
 		&"playtest":
+			# R1+Y (gamepad chord). Keyboard Shift+P lands on floor_mode
+			# instead (_resolve_key is shift-blind) and redirects there.
 			toggle_playtest()
-		&"quick_save":
-			if not _playtest_active:
-				save_map()
+		&"floor_mode":
+			# Y/P: the 4th editor state. Shift+P is playtest's keyboard face
+			# (same consumer-side shift pattern as Shift+Q delete).
+			if _playtest_active:
+				return
+			if InputManager.is_shifted():
+				toggle_playtest()
+			elif _floor_mode:
+				_exit_floor_mode()
+			else:
+				_enter_floor_mode()
 		&"delete_shifted":
-			# R1+B: the ONLY delete path (grabbed or not). The old X/Delete
+			# R1+B: the ONLY delete path (grabbed or not). Inert in floor
+			# mode — relief cells are not placements. The old X/Delete
 			# action was removed: a single delete path, no duplicates.
-			if not _playtest_active:
-				_delete_selection()
-		&"menu":
-			# ESC/GUIDE: auto-save, then back to the map menu. Exits even if
-			# the save reports issues (status shows them) — never trap the user.
-			if not _playtest_active:
-				save_map()
-				get_tree().change_scene_to_file(MENU_SCENE)
+			if _playtest_active:
+				return
+			if _floor_mode:
+				_set_status("nothing to delete in floor mode")
+				return
+			_delete_selection()
 		&"snap_toggle":
 			# L1/Tab: grid+angle snap on/off, grabbed or not (applies next
 			# transform while grabbed).
@@ -643,20 +1235,33 @@ func _on_input_action(action: StringName) -> void:
 			if not _playtest_active:
 				catalog_panel.prev_tab()
 		&"place_select":
-			if not _playtest_active:
+			# A/E: checkpoint in floor mode (stays), place/grab otherwise.
+			if _playtest_active:
+				return
+			if _floor_mode:
+				_floor_commit()
+			else:
 				_place_or_select()
 		&"deselect":
-			if not _playtest_active:
-				if _grabbed:
-					_cancel_grab()
-				elif InputManager.is_shifted():
-					# Shift+Q: the shifted face of cancel (R1+B's keyboard
-					# mirror — _resolve_key is shift-blind, so it lands here).
-					_delete_selection()
+			if _playtest_active:
+				return
+			if _floor_mode:
+				if InputManager.is_shifted():
+					# Shift+Q: inert too — same rule as R1+B above.
+					_set_status("nothing to delete in floor mode")
 				else:
-					_select(null)
-					_refresh_debug()
-					_refresh_grab_label()
+					_floor_undo()
+				return
+			if _grabbed:
+				_cancel_grab()
+			elif InputManager.is_shifted():
+				# Shift+Q: the shifted face of cancel (R1+B's keyboard
+				# mirror — _resolve_key is shift-blind, so it lands here).
+				_delete_selection()
+			else:
+				_select(null)
+				_refresh_debug()
+				_refresh_grab_label()
 
 
 func _placement_entry(placement: Node3D) -> Dictionary:
@@ -679,11 +1284,12 @@ func _set_placement_data(placement: Node3D) -> void:
 
 
 func _spawn_point() -> Vector3:
+	var hit := _ground_hit(_viewport_center())
+	if not hit.is_empty():
+		var p: Vector3 = hit["position"]
+		return p
 	var origin := editor_camera.global_position
 	var dir := -editor_camera.global_basis.z
-	var spot: Variant = _plane_hit(origin, dir, 0.0)
-	if spot != null:
-		return spot as Vector3
 	return origin - dir * 6.0
 
 
@@ -696,15 +1302,6 @@ func _find_mesh_aabb(node: Node) -> AABB:
 			if box.size != Vector3.ZERO:
 				return box
 	return AABB(-Vector3.ONE * 0.5, Vector3.ONE)
-
-
-func _plane_hit(origin: Vector3, dir: Vector3, height: float) -> Variant:
-	if absf(dir.y) < 0.00001:
-		return null
-	var t := (height - origin.y) / dir.y
-	if t < 0.0:
-		return null
-	return origin + dir * t
 
 
 func _move_asset_to_ground(placement: Node3D) -> void:

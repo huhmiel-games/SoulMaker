@@ -20,10 +20,14 @@ extends Control
 
 ## Title + hint source. Subclasses override.
 func _menu_title() -> String:
+	if not runtime_title.is_empty():
+		return runtime_title
 	return "MENU"
 
 
 func _menu_hint() -> String:
+	if not runtime_hint.is_empty():
+		return runtime_hint
 	return "Up/Down select · A/E confirm"
 
 ## Attach points — must exist in the scene scaffold.
@@ -35,6 +39,27 @@ var _entries: Array = []
 var _cursor := 0
 var _rows: Array[Label] = []
 var _delete_armed := -1
+
+## Runtime content (param-driven menus, no subclass): the caller fills these
+## via configure() BEFORE add_child (so _ready builds the list first try).
+## - entries: one dict per row, {"label": "…"} + either a verb the subclass
+##   understands or "call": Callable (executed on confirm — bind args at build
+##   time). Deletable rows add "can_delete": true + "delete_call": Callable
+##   (same contract as _delete_entry(index) -> String; success auto-drops the
+##   row from runtime_entries, "" keeps it with a failure toast).
+## - on_cancel: executed on B/Q when no delete-arm is pending (pause CANCEL,
+##   confirm BACK, …).
+var runtime_title := ""
+var runtime_hint := ""
+var runtime_entries: Array = []
+var runtime_cancel: Callable
+
+
+func configure(title: String, hint: String, entries: Array, on_cancel: Callable = Callable()) -> void:
+	runtime_title = title
+	runtime_hint = hint
+	runtime_entries = entries
+	runtime_cancel = on_cancel
 
 
 func _ready() -> void:
@@ -48,6 +73,11 @@ func _ready() -> void:
 	print("[Menu] %s" % _menu_hint())
 	if hud != null:
 		hud.set_hint(_menu_hint())
+		# Runtime contents live in a small modal panel — their inner HUD
+		# would overflow it (offsets are fullscreen-sized). The caller's HUD
+		# behind the dim stays the single toast surface; notices stay log.
+		if not runtime_entries.is_empty():
+			hud.visible = false
 
 
 func _refresh_list() -> void:
@@ -67,8 +97,11 @@ func _refresh_list() -> void:
 	_highlight_current()
 
 
-## Entry source, one dict per row (see class doc). Subclasses override.
+## Entry source, one dict per row (see class doc). Subclasses override; the
+## runtime path returns the configured entries.
 func _load_entries() -> Array:
+	if not runtime_entries.is_empty():
+		return runtime_entries
 	return []
 
 
@@ -112,6 +145,8 @@ func _on_input_action(action: StringName) -> void:
 				_delete_armed = -1
 				_highlight_current()
 				_notice("delete cancelled")
+			elif runtime_cancel.is_valid():
+				runtime_cancel.call()
 
 
 func _confirm_current() -> void:
@@ -130,9 +165,12 @@ func _confirm_current() -> void:
 	_highlight_current()
 
 
-## Non-open verbs (new/load/…). Handled by the subclass; default is inert.
+## Non-open verbs (new/load/…). Handled by the subclass; default is inert —
+## except the runtime "call" verb (see configure), executed here.
 func _confirm_verb(_e: Dictionary) -> void:
-	pass
+	var call: Callable = _e.get("call", Callable())
+	if call.is_valid():
+		call.call()
 
 
 func _delete_pressed() -> void:
@@ -148,6 +186,21 @@ func _delete_pressed() -> void:
 		_notice("DELETE %s? X again to confirm · B cancels" % e.get("label", "?"))
 		return
 	_delete_armed = -1
+	# Runtime path first (param-driven menus): the caller's delete_call owns
+	# the disk/file work; on success the row drops itself. Subclasses keep
+	# their _delete_entry override (MapMenu files, …).
+	var delete_call: Callable = e.get("delete_call", Callable())
+	if delete_call.is_valid():
+		var out := str(delete_call.call(_cursor))
+		if out.is_empty():
+			_notice("cannot delete %s" % e.get("label", "?"))
+			return
+		_notice(out)
+		var idx := _entries.find(e)
+		if idx != -1:
+			runtime_entries.remove_at(idx)
+		_refresh_list()
+		return
 	var msg := _delete_entry(_cursor)
 	if msg.is_empty():
 		_notice("cannot delete %s" % e.get("label", "?"))

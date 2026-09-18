@@ -5,7 +5,8 @@ extends GenericMenu
 ## Delete, plus a Back row to the hub. Row 0 is always "[ + New map ]", the
 ## last row is always "[ ← Back ]" — both inert to X. Boots the editor via
 ## GameState "editor/pending_map" + scene change; the editor returns here
-## through ESC (menu action, auto-saves first). Rename deferred.
+## through the pause QUIT (clean quits directly, dirty asks first). Rename
+## deferred.
 
 const MAPS_DIR := "user://maps"
 const EDITOR_SCENE := "res://scenes/editors/map_editor.tscn"

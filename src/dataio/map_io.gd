@@ -8,12 +8,24 @@ extends RefCounted
 
 const format_version := "0.1"
 const TRANSFORM_KEYS := ["position", "rotation", "scale"]
+## Ground relief section (EDIT_FLOOR): sparse heightfield over a 100x100 m
+## slab (1 m cells, default 0 = flat). Only nonzero cells serialize; maps
+## without the section load flat (additive, tolerant as usual).
+const GROUND_N := 100
+const GROUND_CELL := 1.0
+## File quantum (1 mm, 3 decimals): the editor sculpts continuous floats,
+## files round here — millimeter-precise (no visible terracing on gentle
+## grades) yet clean to read.
+const GROUND_STEP := 0.001
+const GROUND_H_MIN := -8.0
+const GROUND_H_MAX := 8.0
 
 
 ## Encodes parent-local placements (passed as
 ## {prefab_id: String, transform: {position: Vector3, rotation: Vector3, scale: Vector3}})
-## into a schema-conform map object.
-static func serialize(name: String, placements: Array) -> Dictionary:
+## into a schema-conform map object. ground is the sparse relief
+## {Vector2i cell: float height} (may be empty = flat, section omitted).
+static func serialize(name: String, placements: Array, ground := {}) -> Dictionary:
 	var prefabs := []
 	for p in placements:
 		var t: Dictionary = p.get("transform", {})
@@ -26,7 +38,10 @@ static func serialize(name: String, placements: Array) -> Dictionary:
 				"scale": _vec3_to_array(t.get("scale", Vector3.ONE)),
 			},
 		})
-	return {"format_version": format_version, "name": name, "prefabs": prefabs}
+	var out := {"format_version": format_version, "name": name, "prefabs": prefabs}
+	if not (ground as Dictionary).is_empty():
+		out["ground"] = {"cell": GROUND_CELL, "cells": _ground_to_data(ground)}
+	return out
 
 
 ## Decodes a map object back into placements (Dictionary with Vector3
@@ -83,6 +98,7 @@ static func validate_map(map: Dictionary) -> PackedStringArray:
 		for key in TRANSFORM_KEYS:
 			if t.has(key) and not _is_float_triple(t[key]):
 				issues.append("transform.%s must be 3 numbers (%s)" % [key, pid])
+	issues.append_array(validate_ground(map))
 	return issues
 
 
@@ -98,6 +114,58 @@ static func validate_refs(map: Dictionary, catalog: Catalog) -> PackedStringArra
 			issues.append("unknown prefab_id in catalog: %s" % pid)
 		elif catalog.resolve_scene_path(pid).is_empty():
 			issues.append("prefab_id has no scene file: %s" % pid)
+	return issues
+
+
+## Decodes the ground section back into a sparse relief {Vector2i: float}.
+## Tolerant (bad entries skipped); validate_ground reports them separately.
+static func ground_from_data(map: Dictionary) -> Dictionary:
+	var out := {}
+	var g: Variant = map.get("ground", {})
+	if not g is Dictionary:
+		return out
+	var cells: Variant = (g as Dictionary).get("cells", {})
+	if not cells is Dictionary:
+		return out
+	for key in (cells as Dictionary):
+		var cell := _parse_cell_key(str(key))
+		if cell.x < 0:
+			continue
+		var h: Variant = (cells as Dictionary)[key]
+		if h is float or h is int:
+			out[cell] = float(h)
+	return out
+
+
+## Structural checks for the ground section (absent = flat = valid).
+static func validate_ground(map: Dictionary) -> PackedStringArray:
+	var issues := PackedStringArray()
+	if not map.has("ground"):
+		return issues
+	var g: Variant = map.get("ground")
+	if not g is Dictionary:
+		issues.append("ground must be an object")
+		return issues
+	if float((g as Dictionary).get("cell", GROUND_CELL)) != GROUND_CELL:
+		issues.append("ground.cell must be %s" % GROUND_CELL)
+	var cells: Variant = (g as Dictionary).get("cells", {})
+	if not cells is Dictionary:
+		issues.append("ground.cells missing")
+		return issues
+	for key in (cells as Dictionary):
+		var cell := _parse_cell_key(str(key))
+		if cell.x < 0 or cell.x >= GROUND_N or cell.y < 0 or cell.y >= GROUND_N:
+			issues.append("ground cell out of range: %s" % key)
+			continue
+		var h: Variant = (cells as Dictionary)[key]
+		if not h is float and not h is int:
+			issues.append("ground height not a number: %s" % key)
+			continue
+		var hf := float(h)
+		if hf < GROUND_H_MIN or hf > GROUND_H_MAX:
+			issues.append("ground height out of range [-8, +8]: %s" % key)
+		elif absf(hf - snappedf(hf, GROUND_STEP)) > 0.0001:
+			issues.append("ground height not a %s step: %s" % [GROUND_STEP, key])
 	return issues
 
 
@@ -142,6 +210,30 @@ static func first_free_name(existing: PackedStringArray, stem := "untitled") -> 
 
 
 ## ── internal ──────────────────────────────────────────────────────────
+
+static func _ground_to_data(ground: Dictionary) -> Dictionary:
+	# Format guarantee: files store GROUND_STEP quants (the editor sculpts
+	# continuous floats in memory); near-zero rounds out and stays sparse.
+	var cells := {}
+	for c in ground:
+		if c is Vector2i:
+			# Binary dust (7×0.05 != 0.35) normalized to 3 decimals so files
+			# stay readable and round-trips idempotent.
+			var q := roundf(snappedf(float(ground[c]), GROUND_STEP) * 1000.0) / 1000.0
+			if not is_zero_approx(q):
+				cells["%d,%d" % [c.x, c.y]] = q
+	return cells
+
+
+## Parses an "x,z" cell key; (-1, -1) when malformed.
+static func _parse_cell_key(key: String) -> Vector2i:
+	var parts := key.split(",")
+	if parts.size() != 2:
+		return Vector2i(-1, -1)
+	if not parts[0].is_valid_int() or not parts[1].is_valid_int():
+		return Vector2i(-1, -1)
+	return Vector2i(int(parts[0]), int(parts[1]))
+
 
 static func _vec3_to_array(v: Vector3) -> Array:
 	return [v.x, v.y, v.z]
