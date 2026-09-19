@@ -32,6 +32,17 @@ func snap_aft() -> void:
 	rotation = Vector3(deg_to_rad(_pitch), deg_to_rad(_yaw), 0.0)
 
 
+## World-yaw preservation when the BODY snaps by d_body radians: the pivot
+## is a body child, so local yaw shifts opposite to keep the camera frozen
+## in the world. _yaw is tracked in DEGREES (rates are °/s) — convert.
+## Applied immediately (_process early-outs on zero input and would not
+## reapply it). Reserved for lock-on facing snaps (free rolls never touch
+## the body heading — reset_camera convention).
+func shift_yaw(d_body: float) -> void:
+	_yaw -= rad_to_deg(d_body)
+	rotation = Vector3(deg_to_rad(_pitch), deg_to_rad(_yaw), 0.0)
+
+
 func _process(delta: float) -> void:
 	var orbit := Vector2(
 		InputManager.analog(&"cam_orbit_x"),

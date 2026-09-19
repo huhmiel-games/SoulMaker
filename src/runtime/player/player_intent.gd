@@ -42,6 +42,12 @@ func wish_direction(raw: Vector2) -> Vector3:
 	return (right.normalized() * raw.x + fwd.normalized() * -raw.y).normalized()
 
 
+## Dodge tap (Space / B per frozen game table): just-pressed edge, read by
+## the grounded states — the DODGE state itself never re-reads it.
+func dodge_pressed() -> bool:
+	return InputManager.is_just_pressed(&"dodge")
+
+
 ## Turn feed shared with the camera (same analog value, same units): Idle
 ## lets the camera orbit with it, Locomotion turns the body instead.
 func turn_axis() -> float:

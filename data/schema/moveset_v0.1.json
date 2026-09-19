@@ -14,7 +14,7 @@
 	},
 	"slots": {
 	  "type": "object",
-	  "description": "Semantic slots (locomotion v0.1: idle/walk/run/fall). Unknown slots are ignored with a warning.",
+	  "description": "Semantic slots (locomotion v0.1: idle/walk/run/fall/roll/backstep). Unknown slots are ignored with a warning.",
 	  "additionalProperties": {
 		"type": "object",
 		"required": ["clips"],

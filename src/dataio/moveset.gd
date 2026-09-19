@@ -16,9 +16,11 @@ const FALLBACK_SLOTS := {
 	&"walk": ["walking", "walk"],
 	&"run": ["running", "run"],
 	&"fall": ["falling", "fall", "drop"],
+	&"roll": ["roll", "dodge", "flip"],
+	&"backstep": ["backstep", "jump", "hop"],
 }
 
-const KNOWN_SLOTS := [&"idle", &"walk", &"run", &"fall"]
+const KNOWN_SLOTS := [&"idle", &"walk", &"run", &"fall", &"roll", &"backstep"]
 
 
 ## Structural checks against schema v0.1. Returns the issue list (empty =

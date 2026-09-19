@@ -1,7 +1,8 @@
 {
 	"format_version": "0.1",
 	"packs": {
-		"adventure": "res://assets/animations/adventure.glb"
+		"adventure": "res://assets/animations/adventure.glb",
+		"aerial": "res://assets/animations/aerial.glb"
 	},
 	"slots": {
 		"idle": {
@@ -32,6 +33,20 @@
 			],
 			"active": 0,
 			"loop": true
+		},
+		"roll": {
+			"clips": [
+				"aerial__Quick Roll To Run"
+			],
+			"active": 0,
+			"loop": false
+		},
+		"backstep": {
+			"clips": [
+				"aerial__Jump Away"
+			],
+			"active": 0,
+			"loop": false
 		}
 	}
 }

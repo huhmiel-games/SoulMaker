@@ -29,6 +29,14 @@ func step(delta: float) -> int:
 		_air += delta
 		if _air > PlayerController.AIR_TO_FALL:
 			return PlayerStateMachine.FALL
+	# Dodge tap wins over the turn/move below: neutral stick = backstep
+	# hop, any input = committed roll in the input direction (stamina prepaid).
+	if intent.dodge_pressed() and ctrl.is_on_floor():
+		if raw == Vector2.ZERO:
+			if ctrl.spend_stamina(PlayerController.BACKSTEP_COST):
+				return PlayerStateMachine.BACKSTEP
+		elif ctrl.spend_stamina(PlayerController.ROLL_COST):
+			return PlayerStateMachine.ROLL
 	# Turn the body with the shared turn feed (same value/units as the
 	# camera orbit, so Idle-orbit and Move-turn feel identical). Degrees
 	# in, radians out (rotation.y is radians).

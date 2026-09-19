@@ -7,7 +7,7 @@
 - **Objective**: P2 fighter core — locomotion rewrite body-relative, nodess state machine (Idle/Locomotion/Fall), uncommitted
 - **Expected mode**: build
 - Next step: human locomotion recipe (below); commit AFTER human OK (not requested yet).
-- **Last step done**: real camera bug fixed — `_yaw` (degrees) was applied raw as radians (×57 too hot, since v1; pitch had its `deg_to_rad`, yaw didn't — that was the axis asymmetry all along, not the mouse). `deg_to_rad(_yaw)` in camera ×3 + body turn ×1; mouse gains reunified single 0.035 (X/Y split was tuned against the broken yaw). Boot + audit clean; UNCOMMITTED, feel needs human check.
+- **Last step done**: dodge rules (UNCOMMITTED) — backstep au neutre strict, roll libre sans snap body/caméra, `_face_rig` gelé pendant BACKSTEP (le mesh garde son facing). Boot clean ; feel à valider humain.
 
 ## Test recipe (human) — EDIT_FLOOR relief
 

@@ -32,6 +32,14 @@ func step(delta: float) -> int:
 	planar = planar.move_toward(Vector3.ZERO, PlayerController.DECEL * delta)
 	ctrl.velocity.x = planar.x
 	ctrl.velocity.z = planar.z
+	# Dodge tap: neutral stick = backstep hop (no rotation, no i-frames),
+	# any input = committed roll in the input direction. Stamina prepaid here.
+	if intent.dodge_pressed() and ctrl.is_on_floor():
+		if raw == Vector2.ZERO:
+			if ctrl.spend_stamina(PlayerController.BACKSTEP_COST):
+				return PlayerStateMachine.BACKSTEP
+		elif ctrl.spend_stamina(PlayerController.ROLL_COST):
+			return PlayerStateMachine.ROLL
 	if raw != Vector2.ZERO and ctrl.is_on_floor():
 		return PlayerStateMachine.LOCOMOTION
 	return PlayerStateMachine.KEEP
