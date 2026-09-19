@@ -56,11 +56,14 @@ const DEADZONE := 0.2
 ## Trigger-as-button threshold: R2/L2 only count pressed past half pull, so
 ## resting fingers never throw heavies or skills.
 const TRIGGER_THRESHOLD := 0.5
-## Mouse motion -> stick-units scale. Mouse is the right-stick parity but a
-## per-frame delta, not an absolute -1..1 axis: this constant converts pixels
-## into the same units the stick contributes, so both flow through the same
-## analog path. Preserves the old per-event MOUSE_ORBIT_SENS=0.5 feel at 60fps.
-const MOUSE_SCALE := 0.14
+## Mouse motion -> stick-units-per-second scale. Mouse is the right-stick
+## parity but a per-frame displacement (px), not a deflection: it is first
+## converted to a velocity (px/sec, see _mouse_vel) so sticks (velocity) and
+## the mouse share one unit system and every consumer applies a single
+## × delta. Calibrated apart from the stick (px and deflection have no
+## universal exchange rate across DPIs): ~0.10°/px, a full yaw turn ≈ 9 cm
+## at 1000 DPI. Live tuning recipe: still hot → halve, sluggish → double.
+const MOUSE_VEL_SCALE := 0.035 / 60.0
 ## Gamepad shift: Right Shoulder (R1), editor profile only — in game R1 taps
 ## light attack, there is no pad shift role. The keyboard Shift is the chord
 ## modifier in every profile (editor R1-mirror, game heavy-modifier).
@@ -142,6 +145,11 @@ var _mouse_buf := Vector2.ZERO
 var _wheel_buf := 0.0
 var _mouse_pub := Vector2.ZERO
 var _wheel_pub := 0.0
+var _mouse_vel := Vector2.ZERO
+## Mouse velocity (px/sec) published per frame: the displacement buffer
+## divided by the frame delta, so analog() merges velocity with velocity
+## (stick deflection is already velocity-like). Consumers apply one × delta
+## and stay frame-rate independent on both devices.
 ## Mouse button held state ({button_index: bool}), filled in
 ## _unhandled_input so UI consumption is respected, polled per frame like
 ## every other source.
@@ -163,8 +171,9 @@ func get_profile() -> StringName:
 ## nodes run their own _process. Read with is_just_pressed / is_just_released
 ## / time_held within the same frame. The mouse/wheel frame snapshot is
 ## published here too, then the accumulators reset for the next frame.
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	_mouse_pub = _mouse_buf
+	_mouse_vel = _mouse_buf / maxf(delta, 0.0001)
 	_wheel_pub = _wheel_buf
 	_mouse_buf = Vector2.ZERO
 	_wheel_buf = 0.0
@@ -275,12 +284,12 @@ func _entries_for(profile := &"") -> Dictionary:
 	return PROFILES.get(prof, {})
 
 
-## Continuous value of an action, in stick-like units (-1..1 for a full
-## stick). All sources mapped on the entry sum up, with the same deadzone
-## policy as the boolean reads:
+## Continuous value of an action, in velocity units per second (full stick
+## deflection = 1.0). All sources mapped on the entry sum up, with the same
+## deadzone policy as the boolean reads:
 ##   "stick"    → raw axis × stick_sign, deadzone applied
-##   "mouse_x"  → this frame's mouse motion X × MOUSE_SCALE (RS parity)
-##   "mouse_y"  → this frame's mouse motion Y × MOUSE_SCALE
+##   "mouse_x"  → mouse velocity X (px/sec) × MOUSE_VEL_SCALE (RS parity)
+##   "mouse_y"  → mouse velocity Y (px/sec) × MOUSE_VEL_SCALE
 ##   "triggers" → right minus left trigger (each deadzone applied)
 ## Camera orbit consumes this instead of polling devices directly.
 func analog(action: StringName, profile := &"") -> float:
@@ -298,9 +307,9 @@ func analog(action: StringName, profile := &"") -> float:
 			Input.get_joy_axis(DEVICE, stick) * float(e.get("stick_sign", 1.0))
 		)
 	if bool(e.get("mouse_x", false)):
-		out += _mouse_pub.x * MOUSE_SCALE
+		out += _mouse_vel.x * MOUSE_VEL_SCALE
 	if bool(e.get("mouse_y", false)):
-		out += _mouse_pub.y * MOUSE_SCALE
+		out += _mouse_vel.y * MOUSE_VEL_SCALE
 	if bool(e.get("triggers", false)):
 		out += triggers().y - triggers().x
 	return out

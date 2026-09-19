@@ -6,8 +6,11 @@ extends Node3D
 ## SpringArm3D child shortens on walls by itself; this script never casts.
 ## Non-inverted (RS right = turn right); inversion arrives with Options.
 
-const YAW_RATE := 2.8
-const PITCH_RATE := 2.2
+## Rates are degrees per second on the unified analog velocity (stick
+## deflection + mouse px/sec — see InputManager): one × delta below stays
+## frame-rate independent on both devices.
+const YAW_RATE := 168.0
+const PITCH_RATE := 132.0
 const MIN_PITCH := -55.0
 const MAX_PITCH := 35.0
 
@@ -20,13 +23,13 @@ var yaw_enabled := true
 
 
 func _ready() -> void:
-	rotation = Vector3(deg_to_rad(_pitch), _yaw, 0.0)
+	rotation = Vector3(deg_to_rad(_pitch), deg_to_rad(_yaw), 0.0)
 
 
 ## Aft snap after reset_camera: pivot yaw already zeroed by the caller.
 func snap_aft() -> void:
 	_yaw = 0.0
-	rotation = Vector3(deg_to_rad(_pitch), _yaw, 0.0)
+	rotation = Vector3(deg_to_rad(_pitch), deg_to_rad(_yaw), 0.0)
 
 
 func _process(delta: float) -> void:
@@ -38,5 +41,5 @@ func _process(delta: float) -> void:
 		return
 	if yaw_enabled:
 		_yaw -= orbit.x * YAW_RATE * delta
-	_pitch = clampf(_pitch - orbit.y * PITCH_RATE, MIN_PITCH, MAX_PITCH)
-	rotation = Vector3(deg_to_rad(_pitch), _yaw, 0.0)
+	_pitch = clampf(_pitch - orbit.y * PITCH_RATE * delta, MIN_PITCH, MAX_PITCH)
+	rotation = Vector3(deg_to_rad(_pitch), deg_to_rad(_yaw), 0.0)

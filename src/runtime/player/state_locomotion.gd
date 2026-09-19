@@ -30,8 +30,9 @@ func step(delta: float) -> int:
 		if _air > PlayerController.AIR_TO_FALL:
 			return PlayerStateMachine.FALL
 	# Turn the body with the shared turn feed (same value/units as the
-	# camera orbit, so Idle-orbit and Move-turn feel identical).
-	ctrl.rotation.y -= intent.turn_axis() * PlayerController.TURN_RATE * delta
+	# camera orbit, so Idle-orbit and Move-turn feel identical). Degrees
+	# in, radians out (rotation.y is radians).
+	ctrl.rotation.y -= deg_to_rad(intent.turn_axis() * PlayerController.TURN_RATE * delta)
 	if raw == Vector2.ZERO:
 		var planar := Vector3(ctrl.velocity.x, 0.0, ctrl.velocity.z)
 		planar = planar.move_toward(Vector3.ZERO, PlayerController.DECEL * delta)

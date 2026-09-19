@@ -7,7 +7,7 @@
 - **Objective**: P2 fighter core — locomotion rewrite body-relative, nodess state machine (Idle/Locomotion/Fall), uncommitted
 - **Expected mode**: build
 - Next step: human locomotion recipe (below); commit AFTER human OK (not requested yet).
-- **Last step done**: FootWedge prover — capsule restored to old spec (`r=0.3 h=1.29 y=1.06`, wedge untouched, byte-identical to old `StairShapeHandler`) + 4 sharp steps (~0.22 m each, x=-6) in `player_controller_test.tscn`. Boot clean headless; stair climb needs human proof (walk straight at the steps, steady climb + `floor yes`).
+- **Last step done**: real camera bug fixed — `_yaw` (degrees) was applied raw as radians (×57 too hot, since v1; pitch had its `deg_to_rad`, yaw didn't — that was the axis asymmetry all along, not the mouse). `deg_to_rad(_yaw)` in camera ×3 + body turn ×1; mouse gains reunified single 0.035 (X/Y split was tuned against the broken yaw). Boot + audit clean; UNCOMMITTED, feel needs human check.
 
 ## Test recipe (human) — EDIT_FLOOR relief
 
