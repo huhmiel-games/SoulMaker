@@ -34,9 +34,16 @@ func step(delta: float) -> int:
 		ctrl.velocity.y -= PlayerController.GRAVITY * delta
 		if _t > 0.15:
 			return PlayerStateMachine.FALL
+	# Locked rolls keep tracking the target through the displacement
+	# (no-op when free) — the camera never freezes mid-roll.
+	ctrl.track_lock_target(delta)
 	ctrl.velocity.x = _dir.x * PlayerController.ROLL_SPEED
 	ctrl.velocity.z = _dir.z * PlayerController.ROLL_SPEED
 	if _t >= PlayerController.ROLL_TIME:
+		# Lock survives the roll: still valid = back to LockOn (re-snaps
+		# facing on enter), otherwise the free exit routing.
+		if ctrl.lock_target != null and ctrl.lock_valid():
+			return PlayerStateMachine.LOCKON
 		if intent.move_raw() != Vector2.ZERO:
 			return PlayerStateMachine.LOCOMOTION
 		return PlayerStateMachine.IDLE

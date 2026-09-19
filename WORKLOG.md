@@ -7,7 +7,7 @@
 - **Objective**: P2 fighter core — locomotion rewrite body-relative, nodess state machine (Idle/Locomotion/Fall), uncommitted
 - **Expected mode**: build
 - Next step: human locomotion recipe (below); commit AFTER human OK (not requested yet).
-- **Last step done**: lock-on facing mesh (UNCOMMITTED) — `_face_lock` cloue le rig sur le heading du corps pendant LOCKON (plus de profil en strafe orbitale) ; BACKSTEP garde son gel. Boot clean ; feel à valider humain.
+- **Last step done**: lock tracking mid-roll (UNCOMMITTED) — `track_lock_target()` partagé (body ease + caméra), appelé par LockOn/Roll/Backstep ; plus de freeze caméra pendant la roulade, no-op hors lock. Boot clean ; feel à valider humain.
 
 ## Test recipe (human) — EDIT_FLOOR relief
 

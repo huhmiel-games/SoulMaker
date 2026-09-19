@@ -34,14 +34,8 @@ func step(delta: float) -> int:
 		_air += delta
 		if _air > PlayerController.AIR_TO_FALL:
 			return PlayerStateMachine.FALL
-	# Track the target: ease the body, freeze the camera world yaw.
-	var to: Vector3 = ctrl.lock_chest() - ctrl.global_position
-	to.y = 0.0
-	if to.length_squared() > 0.0001:
-		var before := ctrl.rotation.y
-		ctrl.rotation.y = lerp_angle(before, atan2(-to.x, -to.z), minf(PlayerController.LOCK_FACE * delta, 1.0))
-		ctrl.camera.shift_yaw(ctrl.rotation.y - before)
-	ctrl.camera.track_aft(delta)
+	# Track the target: shared helper (body ease + camera follow).
+	ctrl.track_lock_target(delta)
 	# Dodge gates, same as Locomotion: neutral = backstep (away, free),
 	# input = roll (enemy-relative, free).
 	if intent.dodge_pressed() and ctrl.is_on_floor():

@@ -31,9 +31,14 @@ func step(delta: float) -> int:
 		ctrl.velocity.y -= PlayerController.GRAVITY * delta
 		if _t > 0.15:
 			return PlayerStateMachine.FALL
+	# Same tracking as Roll: locked backsteps keep facing + camera glued.
+	ctrl.track_lock_target(delta)
 	ctrl.velocity.x = _dir.x * PlayerController.BACKSTEP_SPEED
 	ctrl.velocity.z = _dir.z * PlayerController.BACKSTEP_SPEED
 	if _t >= PlayerController.BACKSTEP_TIME:
+		# Same lock routing as Roll: still valid = back to LockOn.
+		if ctrl.lock_target != null and ctrl.lock_valid():
+			return PlayerStateMachine.LOCKON
 		if intent.move_raw() != Vector2.ZERO:
 			return PlayerStateMachine.LOCOMOTION
 		return PlayerStateMachine.IDLE

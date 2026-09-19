@@ -215,6 +215,23 @@ func _set_marker(on: bool) -> void:
 		(lock_target.get_node("LockMarker") as Node3D).visible = on
 
 
+## Lock-on tracking shared by LockOn/Roll/Backstep: ease the body toward
+## the target (camera world-yaw preserved via shift_yaw) and the camera
+## behind the body (track_aft). No-op without a valid lock — free motion is
+## untouched. Displacement states keep their own locked _dir; only facing
+## and camera track through them, so the camera never freezes mid-roll.
+func track_lock_target(delta: float) -> void:
+	if lock_target == null or not lock_valid():
+		return
+	var to: Vector3 = lock_chest() - global_position
+	to.y = 0.0
+	if to.length_squared() > 0.0001:
+		var before := rotation.y
+		rotation.y = lerp_angle(before, atan2(-to.x, -to.z), minf(LOCK_FACE * delta, 1.0))
+		camera.shift_yaw(rotation.y - before)
+	camera.track_aft(delta)
+
+
 ## Snap the aft camera behind the body (Locomotion enter, old reset_camera).
 func reset_camera() -> void:
 	rotation.y += cam_pivot.rotation.y
