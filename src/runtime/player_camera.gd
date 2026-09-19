@@ -36,10 +36,18 @@ func snap_aft() -> void:
 ## is a body child, so local yaw shifts opposite to keep the camera frozen
 ## in the world. _yaw is tracked in DEGREES (rates are °/s) — convert.
 ## Applied immediately (_process early-outs on zero input and would not
-## reapply it). Reserved for lock-on facing snaps (free rolls never touch
-## the body heading — reset_camera convention).
+## reapply it). Used by lock-on facing snaps (free rolls never touch the
+## body heading — reset_camera convention).
 func shift_yaw(d_body: float) -> void:
 	_yaw -= rad_to_deg(d_body)
+	rotation = Vector3(deg_to_rad(_pitch), deg_to_rad(_yaw), 0.0)
+
+
+## Lock-on follow: ease local yaw back behind the body. The body itself
+## tracks the enemy (StateLockOn), so yaw 0 = the camera looks at the
+## target. Pitch stays manual — only _yaw is touched here.
+func track_aft(delta: float, rate := 8.0) -> void:
+	_yaw = lerpf(_yaw, 0.0, minf(rate * delta, 1.0))
 	rotation = Vector3(deg_to_rad(_pitch), deg_to_rad(_yaw), 0.0)
 
 

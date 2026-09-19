@@ -86,13 +86,15 @@ func _ready() -> void:
 	var fall := StateFall.new()
 	var roll := StateRoll.new()
 	var backstep := StateBackstep.new()
-	for st in [idle, loco, fall, roll, backstep]:
+	var lockon := StateLockOn.new()
+	for st in [idle, loco, fall, roll, backstep, lockon]:
 		(st as PlayerState).setup(self, intent)
 	machine.add_state(PlayerStateMachine.IDLE, idle)
 	machine.add_state(PlayerStateMachine.LOCOMOTION, loco)
 	machine.add_state(PlayerStateMachine.FALL, fall)
 	machine.add_state(PlayerStateMachine.ROLL, roll)
 	machine.add_state(PlayerStateMachine.BACKSTEP, backstep)
+	machine.add_state(PlayerStateMachine.LOCKON, lockon)
 	machine.start(PlayerStateMachine.IDLE)
 	print("[Player] ready — profile %s, body-relative, nodess SM" % InputManager.get_profile())
 
@@ -103,9 +105,13 @@ func _physics_process(delta: float) -> void:
 		iframes = maxf(iframes - delta, 0.0)
 	machine.step(delta)
 	move_and_slide()
-	# Backstep keeps its entry facing (souls rule): the rig never swings
-	# toward the hop, only the displacement goes back.
-	if machine.state_id() != PlayerStateMachine.BACKSTEP:
+	# Facing ownership: Backstep freezes entry facing, LockOn nails the rig
+	# onto the enemy (body already tracks it — mesh must not strafe-profile),
+	# everything else eases the rig toward travel.
+	var sid := machine.state_id()
+	if sid == PlayerStateMachine.LOCKON:
+		_face_lock(delta)
+	elif sid != PlayerStateMachine.BACKSTEP:
 		_face_rig(delta)
 	_resolve_anim()
 	# Foot bevel follows the visual facing (old StairShapeHandler line).
@@ -133,6 +139,82 @@ func _tick_stamina(delta: float) -> void:
 	stamina = minf(stamina + STAMINA_REGEN * delta, STAMINA_MAX)
 
 
+## Lock-on (P2): tap MMB/R3 to lock the nearest lockable in the front cone,
+## tap again / target gone / past break range to release. The FakeEnemy
+## cylinder carries a LockMarker child shown while locked.
+const LOCK_RANGE := 20.0
+const LOCK_BREAK := 25.0
+const LOCK_HALF_ANGLE := 60.0 # degrees, front cone at acquire
+const LOCK_FACE := 10.0 # body ease toward the target (weight/sec)
+const LOCK_CHEST := 1.2 # aim height on the target
+
+var lock_target: Node3D = null
+
+
+## Nearest lockable inside LOCK_RANGE and the front cone. Arms the marker.
+func try_acquire_lock() -> bool:
+	var fwd := -global_transform.basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized() if fwd.length_squared() > 0.0001 else Vector3(0.0, 0.0, -1.0)
+	var best: Node3D = null
+	var best_d := LOCK_RANGE
+	for n in get_tree().get_nodes_in_group("lockable"):
+		if not (n is Node3D):
+			continue
+		var to: Vector3 = (n as Node3D).global_position - global_position
+		to.y = 0.0
+		var d := to.length()
+		if d > LOCK_RANGE or d < 0.001:
+			continue
+		if rad_to_deg(acos(clampf(fwd.dot(to / d), -1.0, 1.0))) > LOCK_HALF_ANGLE:
+			continue
+		if d < best_d:
+			best_d = d
+			best = n
+	if best == null:
+		return false
+	lock_target = best
+	_set_marker(true)
+	print("[Player] lock acquired %s %.1fm" % [best.name, best_d])
+	return true
+
+
+func clear_lock() -> void:
+	if lock_target != null and is_instance_valid(lock_target):
+		_set_marker(false)
+		print("[Player] lock released")
+	lock_target = null
+
+
+## Still locked: target alive and inside break range (called every LockOn tick).
+func lock_valid() -> bool:
+	if lock_target == null or not is_instance_valid(lock_target):
+		lock_target = null
+		return false
+	var to: Vector3 = lock_target.global_position - global_position
+	to.y = 0.0
+	if to.length() > LOCK_BREAK:
+		return false
+	return true
+
+
+func lock_chest() -> Vector3:
+	return lock_target.global_position + Vector3(0.0, LOCK_CHEST, 0.0)
+
+
+func lock_distance() -> float:
+	if lock_target == null or not is_instance_valid(lock_target):
+		return -1.0
+	var to: Vector3 = lock_target.global_position - global_position
+	to.y = 0.0
+	return to.length()
+
+
+func _set_marker(on: bool) -> void:
+	if lock_target != null and lock_target.has_node("LockMarker"):
+		(lock_target.get_node("LockMarker") as Node3D).visible = on
+
+
 ## Snap the aft camera behind the body (Locomotion enter, old reset_camera).
 func reset_camera() -> void:
 	rotation.y += cam_pivot.rotation.y
@@ -142,6 +224,13 @@ func reset_camera() -> void:
 
 func set_cam_yaw(enabled: bool) -> void:
 	camera.yaw_enabled = enabled
+
+
+## Lock-on facing: ease the rig onto the body heading (RIG_BASE_YAW), i.e.
+## the mesh looks at whatever the body looks at — the enemy. Same rate as
+## the travel ease so handoffs in/out of LockOn never pop.
+func _face_lock(delta: float) -> void:
+	rig_root.rotation.y = lerp_angle(rig_root.rotation.y, RIG_BASE_YAW, minf(RIG_TURN * delta, 1.0))
 
 
 ## Visual facing only: ease the rig toward the body-local travel direction
@@ -173,13 +262,14 @@ func _play(anim: StringName) -> void:
 func _process(_delta: float) -> void:
 	if state_label != null:
 		var planar := Vector2(velocity.x, velocity.z).length()
-		state_label.text = "%s · speed %.1f · floor %s · anim %s · stam %.0f%s\nprofile %s · raw %s" % [
+		state_label.text = "%s · speed %.1f · floor %s · anim %s · stam %.0f%s%s\nprofile %s · raw %s" % [
 			machine.state_name(),
 			planar,
 			"yes" if is_on_floor() else "NO",
 			_anim_cur,
 			stamina,
 			" INVULN" if is_invulnerable() else "",
+			" LOCK %.1fm" % lock_distance() if lock_target != null else "",
 			InputManager.get_profile(),
 			intent.move_raw(),
 		]

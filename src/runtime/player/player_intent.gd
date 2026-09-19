@@ -48,6 +48,11 @@ func dodge_pressed() -> bool:
 	return InputManager.is_just_pressed(&"dodge")
 
 
+## Lock-on tap (MMB / R3 per frozen game table): toggles StateLockOn.
+func lock_pressed() -> bool:
+	return InputManager.is_just_pressed(&"lock_on")
+
+
 ## Turn feed shared with the camera (same analog value, same units): Idle
 ## lets the camera orbit with it, Locomotion turns the body instead.
 func turn_axis() -> float:

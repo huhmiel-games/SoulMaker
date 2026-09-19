@@ -32,6 +32,9 @@ func step(delta: float) -> int:
 	planar = planar.move_toward(Vector3.ZERO, PlayerController.DECEL * delta)
 	ctrl.velocity.x = planar.x
 	ctrl.velocity.z = planar.z
+	# Lock-on tap wins over everything below (acquire gates the transition).
+	if intent.lock_pressed() and ctrl.try_acquire_lock():
+		return PlayerStateMachine.LOCKON
 	# Dodge tap: neutral stick = backstep hop (no rotation, no i-frames),
 	# any input = committed roll in the input direction. Stamina prepaid here.
 	if intent.dodge_pressed() and ctrl.is_on_floor():

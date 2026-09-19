@@ -15,6 +15,9 @@ func step(delta: float) -> int:
 	ctrl.velocity.x = planar.x
 	ctrl.velocity.z = planar.z
 	if ctrl.is_on_floor():
+		# Lock survives accidental edge falls: still valid = back to LockOn.
+		if ctrl.lock_target != null and ctrl.lock_valid():
+			return PlayerStateMachine.LOCKON
 		if intent.move_raw() != Vector2.ZERO:
 			return PlayerStateMachine.LOCOMOTION
 		return PlayerStateMachine.IDLE

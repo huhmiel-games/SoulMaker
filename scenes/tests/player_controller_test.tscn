@@ -48,6 +48,29 @@ height = 1.29
 [sub_resource type="BoxShape3D" id="wedge_shape"]
 size = Vector3(0.313095, 0.596767, 0.436127)
 
+[sub_resource type="CylinderShape3D" id="enemy_shape"]
+radius = 0.4
+height = 1.8
+
+[sub_resource type="StandardMaterial3D" id="enemy_mat"]
+albedo_color = Color(0.7, 0.15, 0.15, 1)
+
+[sub_resource type="CylinderMesh" id="enemy_mesh"]
+top_radius = 0.4
+bottom_radius = 0.4
+height = 1.8
+material = SubResource("enemy_mat")
+
+[sub_resource type="StandardMaterial3D" id="marker_mat"]
+emission_enabled = true
+emission = Color(1, 0.85, 0.2, 1)
+emission_energy_multiplier = 2.0
+
+[sub_resource type="SphereMesh" id="marker_mesh"]
+radius = 0.12
+height = 0.24
+material = SubResource("marker_mat")
+
 [node name="PlayerControllerTest" type="Node3D" unique_id=1938293326]
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1580078726]
@@ -138,6 +161,22 @@ margin = 0.3
 [node name="Camera3D" type="Camera3D" parent="Player/CamPivot/SpringArm3D" unique_id=1396554679]
 current = true
 
+[node name="FakeEnemy" type="StaticBody3D" parent="." groups=["lockable"] unique_id=2100000001]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -2)
+
+[node name="EnemyBody" type="CollisionShape3D" parent="FakeEnemy" unique_id=2100000002]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+shape = SubResource("enemy_shape")
+
+[node name="EnemyMesh" type="MeshInstance3D" parent="FakeEnemy" unique_id=2100000003]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+mesh = SubResource("enemy_mesh")
+
+[node name="LockMarker" type="MeshInstance3D" parent="FakeEnemy" unique_id=2100000004]
+visible = false
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.2, 0)
+mesh = SubResource("marker_mesh")
+
 [node name="HUD" type="CanvasLayer" parent="." unique_id=1667120283]
 
 [node name="State" type="Label" parent="HUD" unique_id=1908280367]
@@ -160,4 +199,4 @@ offset_bottom = -12.0
 grow_horizontal = 2
 grow_vertical = 0
 theme_override_font_sizes/font_size = 14
-text = "ZQSD move (relative to character, A/D strafe) · mouse: orbit in Idle, turn in Locomotion · ramp on the right, stairs on the left"
+text = "ZQSD move (relative to character, A/D strafe) · mouse: orbit in Idle, turn in Locomotion · MMB/R3 lock-on · ramp on the right, stairs on the left"
