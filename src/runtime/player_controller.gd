@@ -1,0 +1,119 @@
+class_name PlayerController
+extends CharacterBody3D
+
+## P2 thin player, body-relative locomotion (old feel, nodess states): owns
+## velocity + move_and_slide, the state machine, the visual rig facing (the
+## BODY yaws for real in Locomotion — the camera never inherits a yaw it did
+## not ask for) and anim resolution via RigKit. No AnimationTree.
+## Body forward is -Z (Godot convention); the rig is authored +Z, hence the
+## PI base yaw below. Spawn faces away from the aft camera.
+const WALK_SPEED := 2.5
+const RUN_SPEED := 8.0
+const ACCEL := 36.0
+const DECEL := 44.0
+const TURN_RATE := 2.8 # mirrors PlayerCamera.YAW_RATE: same feed, same feel
+const GRAVITY := 22.0
+const AIR_TO_FALL := 0.65
+const IDLE_AIR_TO_FALL := 0.35
+const RIG_TURN := 10.0
+const RIG_BASE_YAW := PI
+const ANIM_BLEND := 0.15
+
+## Locomotion clips resolve from data/characters/player_moveset.json (packs
+## + slots + active variant); FALLBACK lives in Moveset, not here.
+
+## Attach points (must exist in the scene scaffold).
+@onready var rig_root: Node3D = get_node("RigRoot")
+@onready var wedge: Node3D = get_node("FootWedge")
+@onready var cam_pivot: Node3D = get_node("CamPivot")
+@onready var camera: PlayerCamera = get_node("CamPivot") as PlayerCamera
+@onready var state_label: Label = get_node("../HUD/State")
+
+var intent := PlayerIntent.new()
+var machine := PlayerStateMachine.new()
+var anim_state := &"idle"
+
+var _player: AnimationPlayer = null
+var _clips := {}
+var _anim_cur := &""
+
+
+func _ready() -> void:
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	InputManager.set_profile(&"game")
+	ToonKit.apply_to(self)
+	var ms := Moveset.load_object()
+	for issue in Moveset.validate_moveset(ms):
+		push_warning("[Moveset] %s" % issue)
+	_player = RigKit.build_player(rig_root, Moveset.packs_of(ms))
+	_clips = Moveset.resolve_clips(ms, _player)
+	if _player != null:
+		_play(_clips.get(&"idle", &""))
+		print("[Player] clips idle=%s walk=%s run=%s fall=%s" % [_clips.get(&"idle"), _clips.get(&"walk"), _clips.get(&"run"), _clips.get(&"fall")])
+	intent.setup(self)
+	var idle := StateIdle.new()
+	var loco := StateLocomotion.new()
+	var fall := StateFall.new()
+	for st in [idle, loco, fall]:
+		(st as PlayerState).setup(self, intent)
+	machine.add_state(PlayerStateMachine.IDLE, idle)
+	machine.add_state(PlayerStateMachine.LOCOMOTION, loco)
+	machine.add_state(PlayerStateMachine.FALL, fall)
+	machine.start(PlayerStateMachine.IDLE)
+	print("[Player] ready — profile %s, body-relative, nodess SM" % InputManager.get_profile())
+
+
+func _physics_process(delta: float) -> void:
+	machine.step(delta)
+	move_and_slide()
+	_face_rig(delta)
+	_resolve_anim()
+	# Foot bevel follows the visual facing (old StairShapeHandler line).
+	wedge.rotation.y = rig_root.rotation.y + PI
+
+
+## Snap the aft camera behind the body (Locomotion enter, old reset_camera).
+func reset_camera() -> void:
+	rotation.y += cam_pivot.rotation.y
+	cam_pivot.rotation.y = 0.0
+	camera.snap_aft()
+
+
+func set_cam_yaw(enabled: bool) -> void:
+	camera.yaw_enabled = enabled
+
+
+## Visual facing only: ease the rig toward the body-local travel direction
+## (strafe turns the rig sideways, body stays — old model.look_at rule).
+func _face_rig(delta: float) -> void:
+	var planar := Vector3(velocity.x, 0.0, velocity.z)
+	if planar.length() < 0.5:
+		return
+	var local: Vector3 = global_transform.basis.inverse() * planar
+	var want := RIG_BASE_YAW + atan2(-local.x, -local.z)
+	rig_root.rotation.y = lerp_angle(rig_root.rotation.y, want, minf(RIG_TURN * delta, 1.0))
+
+
+func _resolve_anim() -> void:
+	_play(str(_clips.get(anim_state, &"")))
+
+
+func _play(anim: StringName) -> void:
+	if anim != &"" and anim != _anim_cur and _player != null:
+		_player.play(anim, ANIM_BLEND)
+		if _anim_cur != &"":
+			print("[Player] anim %s" % anim)
+		_anim_cur = anim
+
+
+func _process(_delta: float) -> void:
+	if state_label != null:
+		var planar := Vector2(velocity.x, velocity.z).length()
+		state_label.text = "%s · speed %.1f · floor %s · anim %s\nprofile %s · raw %s" % [
+			machine.state_name(),
+			planar,
+			"yes" if is_on_floor() else "NO",
+			_anim_cur,
+			InputManager.get_profile(),
+			intent.move_raw(),
+		]

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schemastore.specs.github.io/draft/2020-12/schema",
+  "$id": "data/schema/moveset_v0.1.json",
+  "title": "SoulMaker moveset schema v0.1",
+  "description": "Player-only animation moveset (P2 locomotion): animation packs plus semantic slots. Each slot lists candidate clips in pack__basename form with an explicit active index — switching idle variant is a JSON edit, never code. Only format_version is required (ADR-009): missing pieces fall back at load (first existing clip of the slot, then keep current anim), corrupt files are quarantined by JsonFile. Clip basenames with importer suffixes (idle (2)) are valid but fragile across reimports — the loader warns on any missing clip at boot instead of failing silent (no silent T-pose).",
+  "type": "object",
+  "required": ["format_version"],
+  "properties": {
+	"format_version": { "const": "0.1" },
+	"packs": {
+	  "type": "object",
+	  "description": "Animation packs {pack_id: res:// path to .glb imported as AnimationLibrary}. New .glb = one line here.",
+	  "additionalProperties": { "type": "string" }
+	},
+	"slots": {
+	  "type": "object",
+	  "description": "Semantic slots (locomotion v0.1: idle/walk/run/fall). Unknown slots are ignored with a warning.",
+	  "additionalProperties": {
+		"type": "object",
+		"required": ["clips"],
+		"properties": {
+		  "clips": {
+			"type": "array",
+			"minItems": 1,
+			"items": { "type": "string" },
+			"description": "Candidate clips in pack__basename form (RigKit composes the rig/ prefix). First existing clip is the fallback."
+		  },
+		  "active": {
+			"type": "integer",
+			"minimum": 0,
+			"description": "Index into clips. Out of range clamps into range with a warning."
+		  },
+		  "loop": {
+			"type": "boolean",
+			"description": "LOOP_LINEAR when true, LOOP_NONE when absent or false. Set at boot on the resolved clip (runtime copy, never the imported .glb)."
+		},
+		"additionalProperties": true
+	  }
+	}
+  },
+  "additionalProperties": true
+}

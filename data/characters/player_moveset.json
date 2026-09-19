@@ -1,0 +1,37 @@
+{
+	"format_version": "0.1",
+	"packs": {
+		"adventure": "res://assets/animations/adventure.glb"
+	},
+	"slots": {
+		"idle": {
+			"clips": [
+				"adventure__idle",
+				"adventure__idle (3)"
+			],
+			"active": 0,
+			"loop": true
+		},
+		"walk": {
+			"clips": [
+				"adventure__walking"
+			],
+			"active": 0,
+			"loop": true
+		},
+		"run": {
+			"clips": [
+				"adventure__running"
+			],
+			"active": 0,
+			"loop": true
+		},
+		"fall": {
+			"clips": [
+				"adventure__falling idle"
+			],
+			"active": 0,
+			"loop": true
+		}
+	}
+}

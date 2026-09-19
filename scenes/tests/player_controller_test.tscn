@@ -1,0 +1,163 @@
+[gd_scene format=3 uid="uid://j4qlgcc8lw61"]
+
+[ext_resource type="Script" uid="uid://dugw803h5xx2v" path="res://src/runtime/player_controller.gd" id="1"]
+[ext_resource type="Script" uid="uid://dyfsnw8p84abw" path="res://src/runtime/player_camera.gd" id="2"]
+[ext_resource type="PackedScene" uid="uid://uedsfngbxgvc" path="res://assets/meshes/characters/Superhero_Male_FullBody.gltf" id="3"]
+[ext_resource type="Environment" path="res://scenes/editors/env_default.tres" id="4"]
+
+[sub_resource type="BoxMesh" id="ground_mesh"]
+size = Vector3(40, 0.2, 40)
+
+[sub_resource type="BoxShape3D" id="ground_shape"]
+size = Vector3(40, 0.2, 40)
+
+[sub_resource type="BoxMesh" id="ramp_mesh"]
+size = Vector3(6, 0.2, 4)
+
+[sub_resource type="BoxShape3D" id="ramp_shape"]
+size = Vector3(6, 0.2, 4)
+
+[sub_resource type="BoxMesh" id="stair_mesh_0"]
+size = Vector3(3, 0.22, 0.6)
+
+[sub_resource type="BoxShape3D" id="stair_shape_0"]
+size = Vector3(3, 0.22, 0.6)
+
+[sub_resource type="BoxMesh" id="stair_mesh_1"]
+size = Vector3(3, 0.44, 0.6)
+
+[sub_resource type="BoxShape3D" id="stair_shape_1"]
+size = Vector3(3, 0.44, 0.6)
+
+[sub_resource type="BoxMesh" id="stair_mesh_2"]
+size = Vector3(3, 0.66, 0.6)
+
+[sub_resource type="BoxShape3D" id="stair_shape_2"]
+size = Vector3(3, 0.66, 0.6)
+
+[sub_resource type="BoxMesh" id="stair_mesh_3"]
+size = Vector3(3, 0.88, 0.6)
+
+[sub_resource type="BoxShape3D" id="stair_shape_3"]
+size = Vector3(3, 0.88, 0.6)
+
+[sub_resource type="CapsuleShape3D" id="body_shape"]
+radius = 0.3
+height = 1.29
+
+[sub_resource type="BoxShape3D" id="wedge_shape"]
+size = Vector3(0.313095, 0.596767, 0.436127)
+
+[node name="PlayerControllerTest" type="Node3D" unique_id=1938293326]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1580078726]
+environment = ExtResource("4")
+
+[node name="Sun" type="DirectionalLight3D" parent="." unique_id=1199881733]
+transform = Transform3D(0.81915206, -0.3686878, 0.43938506, 0, 0.76604444, 0.6427876, -0.57357645, -0.52654076, 0.62750685, 0, 0, 0)
+light_energy = 1.1
+shadow_enabled = true
+
+[node name="Ground" type="StaticBody3D" parent="." unique_id=1235442357]
+
+[node name="GroundMesh" type="MeshInstance3D" parent="Ground" unique_id=1773031694]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.1, 0)
+mesh = SubResource("ground_mesh")
+
+[node name="GroundShape" type="CollisionShape3D" parent="Ground" unique_id=1800607022]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.1, 0)
+shape = SubResource("ground_shape")
+
+[node name="Ramp" type="StaticBody3D" parent="." unique_id=1117252832]
+transform = Transform3D(0.9396926, 0, -0.34202015, 0, 1, 0, 0.34202015, 0, 0.9396926, 8, 1, -6)
+
+[node name="RampMesh" type="MeshInstance3D" parent="Ramp" unique_id=841718889]
+mesh = SubResource("ramp_mesh")
+
+[node name="RampShape" type="CollisionShape3D" parent="Ramp" unique_id=1636835968]
+shape = SubResource("ramp_shape")
+
+[node name="Stairs" type="StaticBody3D" parent="." unique_id=451110530]
+
+[node name="Step0Mesh" type="MeshInstance3D" parent="Stairs" unique_id=364943029]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0.11, 4)
+mesh = SubResource("stair_mesh_0")
+
+[node name="Step0Shape" type="CollisionShape3D" parent="Stairs" unique_id=1301054889]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0.11, 4)
+shape = SubResource("stair_shape_0")
+
+[node name="Step1Mesh" type="MeshInstance3D" parent="Stairs" unique_id=267038635]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0.22, 3.4)
+mesh = SubResource("stair_mesh_1")
+
+[node name="Step1Shape" type="CollisionShape3D" parent="Stairs" unique_id=2120909051]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0.22, 3.4)
+shape = SubResource("stair_shape_1")
+
+[node name="Step2Mesh" type="MeshInstance3D" parent="Stairs" unique_id=1575236412]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0.33, 2.8)
+mesh = SubResource("stair_mesh_2")
+
+[node name="Step2Shape" type="CollisionShape3D" parent="Stairs" unique_id=877433497]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0.33, 2.8)
+shape = SubResource("stair_shape_2")
+
+[node name="Step3Mesh" type="MeshInstance3D" parent="Stairs" unique_id=1620535279]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0.44, 2.2)
+mesh = SubResource("stair_mesh_3")
+
+[node name="Step3Shape" type="CollisionShape3D" parent="Stairs" unique_id=425682080]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0.44, 2.2)
+shape = SubResource("stair_shape_3")
+
+[node name="Player" type="CharacterBody3D" parent="." unique_id=1466643306]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 6)
+floor_max_angle = 1.0472
+floor_snap_length = 1.0
+script = ExtResource("1")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Player" unique_id=1670735594]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.06, 0)
+shape = SubResource("body_shape")
+
+[node name="FootWedge" type="CollisionShape3D" parent="Player" unique_id=1947907911]
+transform = Transform3D(1, 0, 0, 0, 0.71934, 0.694658, 0, -0.694658, 0.71934, -0.0129165, 0.367499, -0.0473027)
+shape = SubResource("wedge_shape")
+
+[node name="RigRoot" parent="Player" unique_id=1277114369 instance=ExtResource("3")]
+
+[node name="CamPivot" type="Node3D" parent="Player" unique_id=887196368]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.6, 0)
+script = ExtResource("2")
+
+[node name="SpringArm3D" type="SpringArm3D" parent="Player/CamPivot" unique_id=142683328]
+spring_length = 4.5
+margin = 0.3
+
+[node name="Camera3D" type="Camera3D" parent="Player/CamPivot/SpringArm3D" unique_id=1396554679]
+current = true
+
+[node name="HUD" type="CanvasLayer" parent="." unique_id=1667120283]
+
+[node name="State" type="Label" parent="HUD" unique_id=1908280367]
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 600.0
+offset_bottom = 44.0
+theme_override_font_sizes/font_size = 18
+text = "boot"
+
+[node name="Hint" type="Label" parent="HUD" unique_id=757889275]
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 16.0
+offset_top = -40.0
+offset_right = -16.0
+offset_bottom = -12.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_font_sizes/font_size = 14
+text = "ZQSD move (relative to character, A/D strafe) · mouse: orbit in Idle, turn in Locomotion · ramp on the right, stairs on the left"

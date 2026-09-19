@@ -1,0 +1,42 @@
+class_name PlayerCamera
+extends Node3D
+
+## Follow-orbit pivot behind the player (P2): yaw + clamped pitch from the
+## unified RS/mouse analog feed (game profile, zero device branches). The
+## SpringArm3D child shortens on walls by itself; this script never casts.
+## Non-inverted (RS right = turn right); inversion arrives with Options.
+
+const YAW_RATE := 2.8
+const PITCH_RATE := 2.2
+const MIN_PITCH := -55.0
+const MAX_PITCH := 35.0
+
+var _yaw := 0.0
+var _pitch := -12.0
+
+## Body-relative contract: Idle leaves yaw follow on (free orbit),
+## Locomotion turns it off (the body turns with the same feed instead).
+var yaw_enabled := true
+
+
+func _ready() -> void:
+	rotation = Vector3(deg_to_rad(_pitch), _yaw, 0.0)
+
+
+## Aft snap after reset_camera: pivot yaw already zeroed by the caller.
+func snap_aft() -> void:
+	_yaw = 0.0
+	rotation = Vector3(deg_to_rad(_pitch), _yaw, 0.0)
+
+
+func _process(delta: float) -> void:
+	var orbit := Vector2(
+		InputManager.analog(&"cam_orbit_x"),
+		InputManager.analog(&"cam_orbit_y")
+	)
+	if orbit == Vector2.ZERO:
+		return
+	if yaw_enabled:
+		_yaw -= orbit.x * YAW_RATE * delta
+	_pitch = clampf(_pitch - orbit.y * PITCH_RATE, MIN_PITCH, MAX_PITCH)
+	rotation = Vector3(deg_to_rad(_pitch), _yaw, 0.0)

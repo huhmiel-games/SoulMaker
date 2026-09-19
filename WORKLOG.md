@@ -4,10 +4,10 @@
 
 ## Current thread
 
-- **Objective**: P1 map editor — base toon shader done (last P1 work), human eye recipe next
+- **Objective**: P2 fighter core — locomotion rewrite body-relative, nodess state machine (Idle/Locomotion/Fall), uncommitted
 - **Expected mode**: build
-- Next step: human toon recipe (below); commit AFTER human OK (not requested yet).
-- **Last step done**: `src/shaders/base_toon.gdshader` (flexible_toon derivative: cuts wired @2, shade dropped, normal-map guarded) + `ToonKit` applier (placements + relief, gizmos excluded); P1 amendment in roadmap; audit PASS, import + editor headless clean.
+- Next step: human locomotion recipe (below); commit AFTER human OK (not requested yet).
+- **Last step done**: FootWedge prover — capsule restored to old spec (`r=0.3 h=1.29 y=1.06`, wedge untouched, byte-identical to old `StairShapeHandler`) + 4 sharp steps (~0.22 m each, x=-6) in `player_controller_test.tscn`. Boot clean headless; stair climb needs human proof (walk straight at the steps, steady climb + `floor yes`).
 
 ## Test recipe (human) — EDIT_FLOOR relief
 
@@ -19,6 +19,16 @@
 6. Place an asset on a mound → it sits on the relief; grab + move it → its base follows the relief.
 7. Relief judged visually (slopes get walked by the real walker at P2, via the editor ⇄ game round-trip).
 8. Report: sculpt feel (cursor/height rates too fast/slow?), any visible hitch while holding height, all `[MapEditor]` log lines, relief after reload.
+
+## Test recipe (human) — locomotion step 1 (body-relative rewrite)
+
+Scene: run `scenes/tests/player_controller_test.tscn` (boots straight in, game profile, mouse captured).
+1. Boot: log shows `[Player] ready — profile game, body-relative, nodess SM` (+ `[SM] Idle -> Fall -> Idle` only if spawn drops — snap 1.0 normally sticks the landing silently). Character faces AWAY from camera (report if it moonwalks = rig authored -Z, one-line fix).
+2. Idle: mouse orbits the camera around the character (both axes, pitch clamped). Character does not turn.
+3. Z (étiqueté, = W physique) → `Locomotion`: camera snaps behind, character runs forward (8 m/s, `running`). Release in 1 s with no input → back to `Idle`. Q/D (A/D physiques) strafe left/right — the RIG turns sideways, the body keeps its heading.
+4. While running: mouse-X / RS-X TURNS the body (no camera orbit); pitch still live. Tilt LS partiel → `walking` (2.5 m/s), full → `running`.
+5. Ramp (right side): climb without sliding; walk off its edge → `Fall` → lands → `Idle`/`Locomotion`.
+6. Label top-left: state + speed + floor + anim + profile + raw. Report feel (turn rate? accel? sneak/run thresholds? camera distance?) + all `[Player]`/`[SM]`/`[RigKit]` lines.
 
 ## Test recipe (human) — base toon (the look locks here)
 
