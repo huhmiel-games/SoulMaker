@@ -18,9 +18,17 @@ const FALLBACK_SLOTS := {
 	&"fall": ["falling", "fall", "drop"],
 	&"roll": ["roll", "dodge", "flip"],
 	&"backstep": ["backstep", "jump", "hop"],
+	&"attack_light_1": ["attack", "slash", "swing", "hit"],
 }
 
-const KNOWN_SLOTS := [&"idle", &"walk", &"run", &"fall", &"roll", &"backstep"]
+const KNOWN_SLOTS := [&"idle", &"walk", &"run", &"fall", &"roll", &"backstep", &"attack_light_1"]
+
+## Default attack phases (no phases section = whole clip as release at 1.0).
+const PHASE_DEFAULTS := {
+	"attack_start": 0.0, "release_start": 0.0,
+	"windup_speed": 1.0, "attack_speed": 1.0, "release_speed": 1.0,
+	"stamina_cost": 20.0,
+}
 
 
 ## Structural checks against schema v0.1. Returns the issue list (empty =
@@ -51,6 +59,18 @@ static func validate_moveset(obj: Dictionary) -> PackedStringArray:
 		var loop = slot.get("loop", false)
 		if not (loop is bool):
 			issues.append("moveset slot '%s' loop must be a boolean" % name)
+		var phases: Variant = slot.get("phases", {})
+		if not phases is Dictionary:
+			issues.append("moveset slot '%s' phases must be an object" % name)
+		else:
+			for key in ["attack_start", "release_start", "windup_speed", "attack_speed", "release_speed", "stamina_cost"]:
+				var v: Variant = (phases as Dictionary).get(key, 0.0)
+				if not v is float and not v is int:
+					issues.append("moveset slot '%s' phases.%s must be a number" % [name, key])
+			var a := float((phases as Dictionary).get("attack_start", 0.0))
+			var r := float((phases as Dictionary).get("release_start", 0.0))
+			if r < a:
+				issues.append("moveset slot '%s' phases.release_start < attack_start" % name)
 	return issues
 
 
@@ -80,6 +100,7 @@ static func resolve_clips(obj: Dictionary, player: AnimationPlayer) -> Dictionar
 			_set_loop(player, out[name], false)
 		return out
 	var loops := {}
+	var markers := {}
 	for name in KNOWN_SLOTS:
 		var key := String(name)
 		if not slots.has(key):
@@ -106,7 +127,46 @@ static func resolve_clips(obj: Dictionary, player: AnimationPlayer) -> Dictionar
 			push_warning("[Moveset] slot '%s': active '%s' missing, using '%s'" % [key, clips[active], found])
 		out[name] = found
 		loops[name] = _set_loop(player, found, bool(slot.get("loop", false)))
+		markers[name] = _set_markers(player, found, slot.get("phases", {}))
 	print("[Moveset] loops %s" % str(loops))
+	print("[Moveset] markers %s" % str(markers))
+	return out
+
+
+## Writes the combat section markers (windup_start/attack_start/release_start/
+## anim_end) on the resolved clip from absolute seconds placed by eye. Slots
+## without phases keep whatever the import carries ("none"). Runtime copy only.
+static func _set_markers(player: AnimationPlayer, clip: StringName, phases: Variant) -> String:
+	if player == null or clip == &"" or not phases is Dictionary or (phases as Dictionary).is_empty():
+		return "none"
+	var anim: Animation = player.get_animation(clip)
+	if anim == null:
+		return "none"
+	var length := anim.length
+	var a_start := clampf(float((phases as Dictionary).get("attack_start", 0.0)), 0.0, length)
+	var r_start := clampf(float((phases as Dictionary).get("release_start", a_start)), a_start, length)
+	for m in [&"windup_start", &"attack_start", &"release_start", &"anim_end"]:
+		if anim.has_marker(m):
+			anim.remove_marker(m)
+	anim.add_marker(&"windup_start", 0.0)
+	anim.add_marker(&"attack_start", a_start)
+	anim.add_marker(&"release_start", r_start)
+	anim.add_marker(&"anim_end", length)
+	return "%.2f/%.2f/%.2f" % [a_start, r_start, length]
+
+
+## Attack phases for a slot (defaults when absent): absolute section bounds +
+## per-section speeds + stamina cost. Read once by the controller at boot.
+static func phases_for(obj: Dictionary, slot: StringName) -> Dictionary:
+	var out := (PHASE_DEFAULTS as Dictionary).duplicate()
+	var slots: Dictionary = obj.get("slots", {})
+	var entry: Variant = slots.get(String(slot), {})
+	if entry is Dictionary:
+		var phases: Variant = (entry as Dictionary).get("phases", {})
+		if phases is Dictionary:
+			for key in out:
+				if (phases as Dictionary).has(key):
+					out[key] = float((phases as Dictionary)[key])
 	return out
 
 

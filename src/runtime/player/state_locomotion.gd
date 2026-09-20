@@ -40,6 +40,9 @@ func step(delta: float) -> int:
 				return PlayerStateMachine.BACKSTEP
 		elif ctrl.spend_stamina(PlayerController.ROLL_COST):
 			return PlayerStateMachine.ROLL
+	# Light attack (after dodge — defense wins ties): clip + stamina gate.
+	if intent.attack_light_pressed() and ctrl.is_on_floor() and ctrl.attack_clip() != &"" and ctrl.spend_stamina(float(ctrl.attack_phases().get("stamina_cost", 20.0))):
+		return PlayerStateMachine.ATTACK
 	# Turn the body with the shared turn feed (same value/units as the
 	# camera orbit, so Idle-orbit and Move-turn feel identical). Degrees
 	# in, radians out (rotation.y is radians).

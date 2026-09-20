@@ -7,7 +7,7 @@
 - **Objective**: P2 fighter core — locomotion rewrite body-relative, nodess state machine (Idle/Locomotion/Fall), uncommitted
 - **Expected mode**: build
 - Next step: human locomotion recipe (below); commit AFTER human OK (not requested yet).
-- **Last step done**: round-trip éditeur ⇄ jeu (UNCOMMITTED) — section `spawn` au format, `MapBuilder` partagé (éditeur refactoré dessus), prefab `player.tscn`, scène `run.tscn` + runner (live dict GameState, Esc retour), rows pause PLAYTEST/SET SPAWN, prouveur `roundtrip_harness` PASS. Boot éditeur/test/run + audit clean ; boucle humaine à valider.
+- **Last step done**: attack commit (verdict: COMMITTED ensuite) — porte dodge du windup retirée (commit dès l'appui, règle souls), spec 01:30 corrigée (seul le poise interrompt, 05/17 avec l'ennemi). Boot + audit clean.
 
 ## Test recipe (human) — round-trip editor ⇄ game
 

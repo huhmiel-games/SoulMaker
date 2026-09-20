@@ -10,13 +10,15 @@ const LIBRARIES := {
 
 # Combat clips used to demonstrate marker sections.
 # [library_key, clip_name, windup_end_ratio, attack_end_ratio]
+# First entry = the P2 light-attack candidate (grounded swing, 1.03 s).
 const PLAY_LIST := [
+	["sword_and_shield", "sword and shield attack (4)", 0.32, 0.58],
+	["sword_and_shield", "sword and shield attack (2)", 0.32, 0.58],
+	["sword_and_shield", "sword and shield slash", 0.30, 0.60],
 	["great_sword", "great sword attack", 0.30, 0.60],
 	["great_sword", "great sword high spin attack", 0.33, 0.55],
 	["great_sword", "great sword jump attack", 0.35, 0.50],
 	["great_sword", "great sword slash", 0.28, 0.62],
-	["sword_and_shield", "sword and shield attack", 0.32, 0.58],
-	["sword_and_shield", "sword and shield slash", 0.30, 0.60],
 ]
 
 enum Mode { WHOLE, WINDUP, PUNCH, RECOVERY, BACKWARDS }

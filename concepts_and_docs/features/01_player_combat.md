@@ -27,7 +27,7 @@
 ## Dodge + i-frames
 
 **Goal** — the survival core: committed, readable, forgiving but costly.
-**Behaviors** — dodge consumes stamina, grants invulnerability frames (i-frames), interrupts attack startup but cancels commit; direction determined by input (defaults to back if neutral); recovery state.
+**Behaviors** — dodge consumes stamina, grants invulnerability frames (i-frames); it interrupts NEITHER attack startup NOR commit (attacks engage on press — corrected 20/09/2026, souls rule); only enemy hits break attacks, through poise (`05_enemies`, `17_combat_depth`); direction determined by input (neutral = backstep hop, corrected 20/09/2026); recovery state.
 **Parameters / bounds** — i-frame count, stamina cost, speed/distance curve, recovery window; dodge chain depth (light roll → fast roll limits).
 **Data / JSON** — base mechanic (world, on stats) — see `03_progression` for stamina/load interplay.
 **Interactions** — stamina economy (`03_progression`), swept hitbox timing on enemies (`05_enemies`), boss forgiveness asymmetry (enemies' hitboxes not inflated — `05_enemies`).

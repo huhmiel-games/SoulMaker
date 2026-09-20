@@ -53,6 +53,11 @@ func lock_pressed() -> bool:
 	return InputManager.is_just_pressed(&"lock_on")
 
 
+## Light attack tap (LMB / R1 per frozen game table): enters StateAttack.
+func attack_light_pressed() -> bool:
+	return InputManager.is_just_pressed(&"attack_light")
+
+
 ## Turn feed shared with the camera (same analog value, same units): Idle
 ## lets the camera orbit with it, Locomotion turns the body instead.
 func turn_axis() -> float:

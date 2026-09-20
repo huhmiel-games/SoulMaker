@@ -14,7 +14,7 @@
 	},
 	"slots": {
 	  "type": "object",
-	  "description": "Semantic slots (locomotion v0.1: idle/walk/run/fall/roll/backstep). Unknown slots are ignored with a warning.",
+	  "description": "Semantic slots (locomotion v0.1: idle/walk/run/fall/roll/backstep + attack_light_1 with optional phases). Unknown slots are ignored with a warning.",
 	  "additionalProperties": {
 		"type": "object",
 		"required": ["clips"],
@@ -33,7 +33,20 @@
 		  "loop": {
 			"type": "boolean",
 			"description": "LOOP_LINEAR when true, LOOP_NONE when absent or false. Set at boot on the resolved clip (runtime copy, never the imported .glb)."
-		},
+		  },
+		  "phases": {
+			"type": "object",
+			"description": "Attack sections (absolute seconds, placed by eye in the editor): attack_start/release_start split windup/attack/release; per-section speeds; stamina cost. Absent = plain clip.",
+			"properties": {
+			  "attack_start": { "type": "number", "minimum": 0 },
+			  "release_start": { "type": "number", "minimum": 0 },
+			  "windup_speed": { "type": "number", "exclusiveMinimum": 0 },
+			  "attack_speed": { "type": "number", "exclusiveMinimum": 0 },
+			  "release_speed": { "type": "number", "exclusiveMinimum": 0 },
+			  "stamina_cost": { "type": "number", "minimum": 0 }
+			},
+			"additionalProperties": true
+		  }
 		"additionalProperties": true
 	  }
 	}

@@ -40,6 +40,9 @@ const BACKSTEP_SPEED := 3.5
 const BACKSTEP_TIME := 0.7
 ## Clip idles ~0.8 s before the impulse — seek past it on enter.
 const BACKSTEP_SEEK := 0.8
+## Light attack (P2 single swing): forward step during the attack section
+## (the swing carries through — features/01), planted otherwise.
+const ATTACK_STEP := 2.0
 
 ## Locomotion clips resolve from data/characters/player_moveset.json (packs
 ## + slots + active variant); FALLBACK lives in Moveset, not here.
@@ -57,6 +60,9 @@ var anim_state := &"idle"
 ## One-shot anim offset (seconds) consumed by _resolve_anim: states seek past
 ## clip anticipation so the visible motion matches the committed displacement.
 var anim_seek := -1.0
+## Manual playback flag: StateAttack drives marker sections itself
+## (play_phase) — _resolve_anim stands down while set.
+var anim_manual := false
 var stamina := STAMINA_MAX
 ## Invulnerability countdown (seconds left): set by StateDodge on enter,
 ## ticked here, read by future enemy hitboxes via is_invulnerable().
@@ -66,6 +72,18 @@ var _regen_wait := 0.0
 var _player: AnimationPlayer = null
 var _clips := {}
 var _anim_cur := &""
+## Resolved attack phases per attack slot (Moveset.phases_for at boot).
+var _attack_phases := {}
+
+
+## Light-attack clip ("" = unresolved, attack refused — never T-poses).
+func attack_clip() -> StringName:
+	return _clips.get(&"attack_light_1", &"")
+
+
+## Phases + speeds + stamina cost for the light attack (data-driven).
+func attack_phases() -> Dictionary:
+	return _attack_phases.get(&"attack_light_1", Moveset.PHASE_DEFAULTS)
 
 
 func _ready() -> void:
@@ -77,9 +95,10 @@ func _ready() -> void:
 		push_warning("[Moveset] %s" % issue)
 	_player = RigKit.build_player(rig_root, Moveset.packs_of(ms))
 	_clips = Moveset.resolve_clips(ms, _player)
+	_attack_phases[&"attack_light_1"] = Moveset.phases_for(ms, &"attack_light_1")
 	if _player != null:
 		_play(_clips.get(&"idle", &""))
-		print("[Player] clips idle=%s walk=%s run=%s fall=%s roll=%s backstep=%s" % [_clips.get(&"idle"), _clips.get(&"walk"), _clips.get(&"run"), _clips.get(&"fall"), _clips.get(&"roll"), _clips.get(&"backstep")])
+		print("[Player] clips idle=%s walk=%s run=%s fall=%s roll=%s backstep=%s attack=%s" % [_clips.get(&"idle"), _clips.get(&"walk"), _clips.get(&"run"), _clips.get(&"fall"), _clips.get(&"roll"), _clips.get(&"backstep"), _clips.get(&"attack_light_1")])
 	intent.setup(self)
 	var idle := StateIdle.new()
 	var loco := StateLocomotion.new()
@@ -87,7 +106,8 @@ func _ready() -> void:
 	var roll := StateRoll.new()
 	var backstep := StateBackstep.new()
 	var lockon := StateLockOn.new()
-	for st in [idle, loco, fall, roll, backstep, lockon]:
+	var attack := StateAttack.new()
+	for st in [idle, loco, fall, roll, backstep, lockon, attack]:
 		(st as PlayerState).setup(self, intent)
 	machine.add_state(PlayerStateMachine.IDLE, idle)
 	machine.add_state(PlayerStateMachine.LOCOMOTION, loco)
@@ -95,6 +115,7 @@ func _ready() -> void:
 	machine.add_state(PlayerStateMachine.ROLL, roll)
 	machine.add_state(PlayerStateMachine.BACKSTEP, backstep)
 	machine.add_state(PlayerStateMachine.LOCKON, lockon)
+	machine.add_state(PlayerStateMachine.ATTACK, attack)
 	machine.start(PlayerStateMachine.IDLE)
 	print("[Player] ready — profile %s, body-relative, nodess SM" % InputManager.get_profile())
 
@@ -262,6 +283,10 @@ func _face_rig(delta: float) -> void:
 
 
 func _resolve_anim() -> void:
+	# Attack drives its own marker sections (play_phase) — the auto-resolve
+	# stands down or it would replay the whole clip over the sections.
+	if anim_manual:
+		return
 	_play(str(_clips.get(anim_state, &"")))
 	if anim_seek >= 0.0 and _player != null:
 		_player.seek(anim_seek, true)
@@ -274,6 +299,41 @@ func _play(anim: StringName) -> void:
 		if _anim_cur != &"":
 			print("[Player] anim %s" % anim)
 		_anim_cur = anim
+
+
+## Manual section playback for StateAttack: plays one marker section at its
+## data speed. Sets anim_manual (auto-resolve off) — the state clears it.
+func play_phase(clip: StringName, sec_from: StringName, sec_to: StringName, speed: float) -> void:
+	if _player == null or clip == &"":
+		return
+	anim_manual = true
+	_player.play_section_with_markers(clip, sec_from, sec_to, ANIM_BLEND, speed)
+	_anim_cur = str(clip)
+
+
+## End time of the currently playing section (0 when idle).
+func phase_end() -> float:
+	if _player == null:
+		return 0.0
+	return _player.get_section_end_time()
+
+
+## Position inside the current section (-1 when nothing plays = done).
+func anim_pos() -> float:
+	if _player == null or not _player.is_playing():
+		return -1.0
+	return _player.current_animation_position
+
+
+## Marker time on a rig clip (0 when missing — lets states detect degenerate
+## sections without calling the native section player).
+func marker_time(clip: StringName, marker: StringName) -> float:
+	if _player == null:
+		return 0.0
+	var anim: Animation = _player.get_animation(clip)
+	if anim == null or not anim.has_marker(marker):
+		return 0.0
+	return anim.get_marker_time(marker)
 
 
 func _process(_delta: float) -> void:

@@ -17,3 +17,7 @@ reference/godot47_docs/
 # AI workdirs (local caches, never versioned)
 .kilo/
 .opencode/
+
+# Baked animation lab (regenerable: --script res://src/tools/bake_anim_lab.gd)
+scenes/tests/anim_lab.tscn
+scenes/tests/anim_lab_lib.res

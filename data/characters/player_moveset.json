@@ -2,7 +2,8 @@
 	"format_version": "0.1",
 	"packs": {
 		"adventure": "res://assets/animations/adventure.glb",
-		"aerial": "res://assets/animations/aerial.glb"
+		"aerial": "res://assets/animations/aerial.glb",
+		"melee": "res://assets/animations/sword_and_shield_anims.glb"
 	},
 	"slots": {
 		"idle": {
@@ -47,6 +48,21 @@
 			],
 			"active": 0,
 			"loop": false
+		},
+		"attack_light_1": {
+			"clips": [
+				"melee__sword and shield slash"
+			],
+			"active": 0,
+			"loop": false,
+			"phases": {
+				"attack_start": 0.4416,
+				"release_start": 0.803,
+				"windup_speed": 1.0,
+				"attack_speed": 1.25,
+				"release_speed": 1.0,
+				"stamina_cost": 20.0
+			}
 		}
 	}
 }
