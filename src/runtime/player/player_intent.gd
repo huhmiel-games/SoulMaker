@@ -4,8 +4,9 @@ extends RefCounted
 ## Movement intent reader (P2): the old Movement node rewritten as a plain
 ## object. Reads ONLY InputManager actions (device parity — zero raw Input
 ## polling), so the frozen tables + audit keep enforcing the gel.
-## Body-relative (old feel): forward = body -Z (Godot convention), D strafes
-## screen-right when the camera sits behind. No per-state wiring here.
+## Souls frame: free movement is camera-relative (W = away from the camera),
+## locked movement is body-relative (the body faces the enemy, so W closes
+## in and A/D orbit for free). No per-state wiring here.
 const SNEAK_TRIGGER := 0.3
 const RUN_TRIGGER := 0.75
 
@@ -27,12 +28,14 @@ func force() -> float:
 	return move_raw().length()
 
 
-## Wish direction in world space from body basis (never euler angles — no
-## sign traps). Flattened: the body never pitches.
+## Wish direction in world space from the drive frame's basis (never euler
+## angles — no sign traps). Free = camera basis (flattened — the body never
+## pitches, and trauma shake on the pivot is sub-degree noise on the wish).
+## Locked = body basis (the body faces the enemy). Flattened either way.
 func wish_direction(raw: Vector2) -> Vector3:
 	if raw == Vector2.ZERO:
 		return Vector3.ZERO
-	var b := ctrl.global_transform.basis
+	var b := ctrl.camera.global_transform.basis if ctrl.lock_target == null else ctrl.global_transform.basis
 	var fwd := -b.z
 	fwd.y = 0.0
 	var right := b.x
@@ -56,12 +59,6 @@ func lock_pressed() -> bool:
 ## Light attack tap (LMB / R1 per frozen game table): enters StateAttack.
 func attack_light_pressed() -> bool:
 	return InputManager.is_just_pressed(&"attack_light")
-
-
-## Turn feed shared with the camera (same analog value, same units): Idle
-## lets the camera orbit with it, Locomotion turns the body instead.
-func turn_axis() -> float:
-	return InputManager.analog(&"cam_orbit_x")
 
 
 func _axis(pos: StringName, neg: StringName) -> float:

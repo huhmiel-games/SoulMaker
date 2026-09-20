@@ -61,7 +61,13 @@
 				"windup_speed": 1.0,
 				"attack_speed": 1.25,
 				"release_speed": 1.0,
-				"stamina_cost": 20.0
+				"stamina_cost": 20.0,
+				"sweep_start": 0.4,
+				"impact": {
+					"damage": 10.0,
+					"hitstop_frames": 4,
+					"shake_scale": 1.0
+				}
 			}
 		}
 	}

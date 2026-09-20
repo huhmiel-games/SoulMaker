@@ -353,6 +353,15 @@ func triggers() -> Vector2:
 	)
 
 
+## Gamepad rumble (impact chain output): unconditional call, no-op without
+## a connected pad — outputs never branch on device (parity rule covers
+## inputs; a keyboard simply has no motor). Lives here so the audit's
+## no-raw-Input-outside rule stays green.
+func rumble(weak: float, strong: float, duration: float) -> void:
+	for pad in Input.get_connected_joypads():
+		Input.start_joy_vibration(pad, weak, strong, duration)
+
+
 ## Mouse motion is captured in _input, before GUI handling and SubViewports
 ## consume it: the editor camera lives inside a SubViewport whose ViewportContainer
 ## grabs motion (mouse_filter STOP), so _unhandled_input at the root would never

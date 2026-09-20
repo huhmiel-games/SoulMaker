@@ -18,16 +18,33 @@ const MIN_SECTION := 0.05
 
 var _phase := 0
 var _instant := false
+## Chain fired this swing (strongest-once: first connect triggers hitstop +
+## trauma + rumble; later connects on the same swing only spark + damage).
+var _chained := false
+## Delayed sweep arming (bug 2 fix): the blade travels down first — the
+## sweep arms sweep_start into the attack section, not on its first frame.
+## _section_t runs in scaled time (the sweep follows the anim, hitstop
+## included); durations are clip seconds / play speed.
+var _section_t := 0.0
+var _section_dur := 0.0
+var _section_frac := 0.4
+var _armed := false
 
 
 func enter() -> void:
 	_phase = 0
+	_chained = false
+	# Single facing: nothing to realign — the body already looks where the
+	# character looks (moving: the wish; still: keep-last). Locked swings
+	# keep the enemy tracking in step().
 	ctrl.anim_state = &"attack_light_1"
 	_play_phase()
-	print("[SM] Attack %s" % ctrl.attack_clip())
+	print("[SM] Attack %s body=%.0f lock=%s" % [ctrl.attack_clip(), rad_to_deg(ctrl.rotation.y), str(ctrl.lock_target != null)])
 
 
 func exit() -> void:
+	print("[SM] Attack exit body=%.0f" % rad_to_deg(ctrl.rotation.y))
+	ctrl.swing_end()
 	ctrl.anim_manual = false
 
 
@@ -52,16 +69,50 @@ func step(delta: float) -> int:
 		planar = planar.move_toward(Vector3.ZERO, PlayerController.DECEL * delta)
 		ctrl.velocity.x = planar.x
 		ctrl.velocity.z = planar.z
+	# Sweep connects only during the attack section, armed with a delay
+	# (blade travel). Poll runs once armed; disabled sweep polls empty.
+	if _phase == 1 and not _instant:
+		_section_t += delta
+		if not _armed and _section_t >= _section_frac * _section_dur:
+			_armed = true
+			ctrl.swing_begin()
+		if _armed:
+			_poll_sweep()
 	# Section advance: instant-skip, stopped player, or position past end.
 	var pos := ctrl.anim_pos()
 	if _instant or pos < 0.0 or pos >= ctrl.phase_end() - 0.02:
 		if _phase == 1:
-			print("[SM] Attack ACTIVE (hitbox hook)")
+			ctrl.swing_end()
+			print("[SM] Attack ACTIVE body=%.0f chained=%s" % [rad_to_deg(ctrl.rotation.y), str(_chained)])
 		_phase += 1
 		if _phase > 2:
 			return _finish()
 		_play_phase()
 	return PlayerStateMachine.KEEP
+
+
+## Connect loop: every new take_hit carrier takes damage; the first connect
+## of the swing fires the full chain (hitstop + shake + rumble + spark),
+## later ones spark + damage only (spec: strongest once, never stacked).
+func _poll_sweep() -> void:
+	var connects := ctrl.sweep_poll()
+	if connects.is_empty():
+		return
+	var impact := ctrl.attack_impact()
+	var damage := float(impact.get("damage", 10.0))
+	var host := ctrl.impact_host()
+	for c in connects:
+		var body: Object = c["body"]
+		var point: Vector3 = c["point"]
+		var killed := bool(body.call("take_hit", damage, ctrl.global_position))
+		print("[SM] Attack connect %s dmg %.0f%s" % [body, damage, " KILL" if killed else ""])
+		if host == null:
+			continue
+		if not _chained:
+			_chained = true
+			host.impact(point, int(impact.get("hitstop_frames", 4)), float(impact.get("shake_scale", 1.0)), ctrl.camera)
+		else:
+			host.spark_at(point)
 
 
 func _play_phase() -> void:
@@ -71,7 +122,13 @@ func _play_phase() -> void:
 	var end := ctrl.marker_time(clip, SECTIONS[_phase + 1])
 	_instant = end - start < MIN_SECTION
 	if not _instant:
-		ctrl.play_phase(clip, SECTIONS[_phase], SECTIONS[_phase + 1], float(phases.get(SPEEDS[_phase], 1.0)))
+		var speed := float(phases.get(SPEEDS[_phase], 1.0))
+		ctrl.play_phase(clip, SECTIONS[_phase], SECTIONS[_phase + 1], speed)
+	if _phase == 1:
+		_section_t = 0.0
+		_armed = false
+		_section_frac = clampf(float(phases.get("sweep_start", 0.4)), 0.0, 0.9)
+		_section_dur = (end - start) / maxf(float(phases.get(SPEEDS[_phase], 1.0)), 0.01)
 
 
 func _finish() -> int:

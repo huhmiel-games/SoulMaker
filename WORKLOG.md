@@ -7,7 +7,7 @@
 - **Objective**: P2 fighter core — locomotion rewrite body-relative, nodess state machine (Idle/Locomotion/Fall), uncommitted
 - **Expected mode**: build
 - Next step: human locomotion recipe (below); commit AFTER human OK (not requested yet).
-- **Last step done**: attack commit (verdict: COMMITTED ensuite) — porte dodge du windup retirée (commit dès l'appui, règle souls), spec 01:30 corrigée (seul le poise interrompt, 05/17 avec l'ennemi). Boot + audit clean.
+- **Last step done**: facing unique souls (UNCOMMITTED) — split body/rig supprimé : rig cloué à PI, wish caméra-relative en free (le body tourne vers le wish via `turn_body_to`, yaw follow toujours on), body-relative en lock (track ennemi), roll free tourne vers `_dir`, `align_body_to_mesh`/`_face_rig`/`_face_lock` supprimés. Boot + audit clean, recette free/lock attendue. Connu : strafe locké joue le clip walk avant en glissade (aucun clip strafe dans les packs — futur slot).
 
 ## Test recipe (human) — round-trip editor ⇄ game
 

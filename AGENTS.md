@@ -65,6 +65,10 @@ headless validation is high, so:
 - **Human (testing)**: when code is ready, AI provides a short test recipe —
   exact scene/command, actions (keys/settings), expected result, and what to
   report back (logs + visual impression). Human launches, AI iterates.
+- **Commits only on explicit human order after the test** (standing rule,
+  2026-09-20): « ok ça fonctionne » is a test report, not a commit order.
+  The AI stages nothing and commits nothing until the human explicitly says
+  so (`ok commit`, `tu peux commit`, …) — no anticipatory end-of-build commits.
 - No pose-diff "eyeball" proofs by the AI: visual confirmation is the human's
   job (faster and better). If a specific inspector/frame inspection is needed,
   the AI may request it explicitly.

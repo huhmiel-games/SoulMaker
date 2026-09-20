@@ -27,7 +27,13 @@ const KNOWN_SLOTS := [&"idle", &"walk", &"run", &"fall", &"roll", &"backstep", &
 const PHASE_DEFAULTS := {
 	"attack_start": 0.0, "release_start": 0.0,
 	"windup_speed": 1.0, "attack_speed": 1.0, "release_speed": 1.0,
-	"stamina_cost": 20.0,
+	"stamina_cost": 20.0, "sweep_start": 0.4,
+}
+
+## Default impact payload (features/01 game feel): damage per connect,
+## hitstop frames (2-10 by power), shake scale (trauma multiplier).
+const IMPACT_DEFAULTS := {
+	"damage": 10.0, "hitstop_frames": 4, "shake_scale": 1.0,
 }
 
 
@@ -63,14 +69,22 @@ static func validate_moveset(obj: Dictionary) -> PackedStringArray:
 		if not phases is Dictionary:
 			issues.append("moveset slot '%s' phases must be an object" % name)
 		else:
-			for key in ["attack_start", "release_start", "windup_speed", "attack_speed", "release_speed", "stamina_cost"]:
+			for key in ["attack_start", "release_start", "windup_speed", "attack_speed", "release_speed", "stamina_cost", "sweep_start"]:
 				var v: Variant = (phases as Dictionary).get(key, 0.0)
 				if not v is float and not v is int:
 					issues.append("moveset slot '%s' phases.%s must be a number" % [name, key])
-			var a := float((phases as Dictionary).get("attack_start", 0.0))
-			var r := float((phases as Dictionary).get("release_start", 0.0))
-			if r < a:
-				issues.append("moveset slot '%s' phases.release_start < attack_start" % name)
+		var a := float((phases as Dictionary).get("attack_start", 0.0))
+		var r := float((phases as Dictionary).get("release_start", 0.0))
+		if r < a:
+			issues.append("moveset slot '%s' phases.release_start < attack_start" % name)
+		var impact: Variant = (phases as Dictionary).get("impact", {})
+		if not impact is Dictionary:
+			issues.append("moveset slot '%s' phases.impact must be an object" % name)
+		else:
+			for key in ["damage", "hitstop_frames", "shake_scale"]:
+				var v: Variant = (impact as Dictionary).get(key, 0.0)
+				if not v is float and not v is int:
+					issues.append("moveset slot '%s' phases.impact.%s must be a number" % [name, key])
 	return issues
 
 
@@ -156,17 +170,26 @@ static func _set_markers(player: AnimationPlayer, clip: StringName, phases: Vari
 
 
 ## Attack phases for a slot (defaults when absent): absolute section bounds +
-## per-section speeds + stamina cost. Read once by the controller at boot.
+## per-section speeds + stamina cost + impact payload. Read once by the
+## controller at boot.
 static func phases_for(obj: Dictionary, slot: StringName) -> Dictionary:
 	var out := (PHASE_DEFAULTS as Dictionary).duplicate()
+	out["impact"] = (IMPACT_DEFAULTS as Dictionary).duplicate()
 	var slots: Dictionary = obj.get("slots", {})
 	var entry: Variant = slots.get(String(slot), {})
 	if entry is Dictionary:
 		var phases: Variant = (entry as Dictionary).get("phases", {})
 		if phases is Dictionary:
-			for key in out:
+			for key in PHASE_DEFAULTS:
 				if (phases as Dictionary).has(key):
 					out[key] = float((phases as Dictionary)[key])
+			var impact: Variant = (phases as Dictionary).get("impact", {})
+			if impact is Dictionary:
+				var merged := (IMPACT_DEFAULTS as Dictionary).duplicate()
+				for key in merged:
+					if (impact as Dictionary).has(key):
+						merged[key] = float((impact as Dictionary)[key])
+				out["impact"] = merged
 	return out
 
 

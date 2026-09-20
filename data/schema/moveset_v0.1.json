@@ -43,7 +43,17 @@
 			  "windup_speed": { "type": "number", "exclusiveMinimum": 0 },
 			  "attack_speed": { "type": "number", "exclusiveMinimum": 0 },
 			  "release_speed": { "type": "number", "exclusiveMinimum": 0 },
-			  "stamina_cost": { "type": "number", "minimum": 0 }
+			  "stamina_cost": { "type": "number", "minimum": 0 },
+			  "impact": {
+				"type": "object",
+				"description": "Connect payload (features/01 game feel): damage per connect, hitstop frames (2-10 by power), shake scale (camera trauma multiplier). Whiff = dry, no chain.",
+				"properties": {
+				  "damage": { "type": "number", "minimum": 0 },
+				  "hitstop_frames": { "type": "number", "minimum": 0 },
+				  "shake_scale": { "type": "number", "minimum": 0 }
+				},
+				"additionalProperties": true
+			  }
 			},
 			"additionalProperties": true
 		  }

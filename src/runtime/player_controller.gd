@@ -1,21 +1,23 @@
 class_name PlayerController
 extends CharacterBody3D
 
-## P2 thin player, body-relative locomotion (old feel, nodess states): owns
-## velocity + move_and_slide, the state machine, the visual rig facing (the
-## BODY yaws for real in Locomotion — the camera never inherits a yaw it did
-## not ask for) and anim resolution via RigKit. No AnimationTree.
-## Body forward is -Z (Godot convention); the rig is authored +Z, hence the
-## PI base yaw below. Spawn faces away from the aft camera.
+## P2 thin player, souls facing (single heading — body and mesh are always
+## aligned): owns velocity + move_and_slide, the state machine and anim
+## resolution via RigKit. No AnimationTree. Free, the body turns toward the
+## camera-relative wish; locked, it tracks the enemy; at rest it keeps its
+## facing (nothing turns on its own). The rig is nailed at RIG_BASE_YAW —
+## the mesh looks where the body looks, always. Body forward is -Z (Godot
+## convention); the rig is authored +Z, hence the PI base yaw. Spawn faces
+## away from the aft camera.
 const WALK_SPEED := 2.5
 const RUN_SPEED := 8.0
 const ACCEL := 36.0
 const DECEL := 44.0
-const TURN_RATE := 168.0 # degrees/sec, mirrors PlayerCamera.YAW_RATE: same feed, same feel
 const GRAVITY := 22.0
 const AIR_TO_FALL := 0.65
 const IDLE_AIR_TO_FALL := 0.35
-const RIG_TURN := 10.0
+## Free turn rate toward the wish heading (weight/sec — souls redirect feel).
+const FREE_FACE := 12.0
 const RIG_BASE_YAW := PI
 const ANIM_BLEND := 0.15
 ## Stamina (P2 local pool — P7 derives max/regen from Endurance): dodge is
@@ -43,6 +45,23 @@ const BACKSTEP_SEEK := 0.8
 ## Light attack (P2 single swing): forward step during the attack section
 ## (the swing carries through — features/01), planted otherwise.
 const ATTACK_STEP := 2.0
+## Debug blade (P2 stand-in for the 04 weapon visual): grey box on the right
+## hand via BoneAttachment3D, long axis computed at boot from the
+## elbow→wrist rest direction (no blind axis guess). Replaced by the real
+## weapon mesh on the same attachment when 04 lands.
+const BLADE_LEN := 0.95
+const BLADE_GRIP := 0.10
+const BLADE_WIDTH := 0.07
+const BLADE_THICK := 0.16
+## Sweep hitbox (P2): frontal volume armed with a delay INTO the attack
+## section (sweep_start fraction — the blade must travel down first), swept
+## through space by the body's own forward step. Sized to blade+arm reach
+## (~1.7 m); tuned against the debug blade in the slam recipe.
+const SWEEP_W := 1.6
+const SWEEP_H := 1.4
+const SWEEP_D := 1.2
+const SWEEP_Y := 1.1
+const SWEEP_FWD := 0.9
 
 ## Locomotion clips resolve from data/characters/player_moveset.json (packs
 ## + slots + active variant); FALLBACK lives in Moveset, not here.
@@ -74,6 +93,10 @@ var _clips := {}
 var _anim_cur := &""
 ## Resolved attack phases per attack slot (Moveset.phases_for at boot).
 var _attack_phases := {}
+## Sweep hitbox + per-swing connect registry (strongest-once rule: one
+## connect per body per swing; the chain fires on the first).
+var _sweep: ShapeCast3D = null
+var _swing_hits := {}
 
 
 ## Light-attack clip ("" = unresolved, attack refused — never T-poses).
@@ -86,6 +109,109 @@ func attack_phases() -> Dictionary:
 	return _attack_phases.get(&"attack_light_1", Moveset.PHASE_DEFAULTS)
 
 
+## Impact payload for the light attack (damage, hitstop frames, shake
+## scale — features/01 game feel). Weapon override point for 04.
+func attack_impact() -> Dictionary:
+	return attack_phases().get("impact", Moveset.IMPACT_DEFAULTS)
+
+
+## Impact host of the current scene (test scenes carry one in group
+## "impact"; null in scenes without — the swing still connects, only the
+## juice stack stays silent).
+func impact_host() -> ImpactHost:
+	return get_tree().get_first_node_in_group(&"impact") as ImpactHost
+
+
+## Debug blade on the right hand (see consts): BoneAttachment3D follows the
+## bone through the swing; the long axis is derived from the rest pose
+## (elbow→wrist = finger direction for a fist), so no editor eyeballing.
+func _build_blade() -> void:
+	var skel := rig_root.get_node_or_null("Armature/GeneralSkeleton") as Skeleton3D
+	if skel == null:
+		push_warning("[Player] blade skipped (no skeleton)")
+		return
+	var hand := skel.find_bone("RightHand")
+	var lower := skel.find_bone("RightLowerArm")
+	if hand == -1 or lower == -1:
+		push_warning("[Player] blade skipped (no RightHand bone)")
+		return
+	var hr := skel.get_bone_global_rest(hand)
+	var lr := skel.get_bone_global_rest(lower)
+	var dir_skel: Vector3 = (hr.origin - lr.origin)
+	if dir_skel.length() < 0.001:
+		push_warning("[Player] blade skipped (degenerate hand rest)")
+		return
+	var y: Vector3 = (hr.basis.inverse() * dir_skel).normalized()
+	var ref := Vector3.UP if absf(y.dot(Vector3.UP)) < 0.9 else Vector3.RIGHT
+	var x: Vector3 = y.cross(ref).normalized()
+	var z: Vector3 = x.cross(y).normalized()
+	var attach := BoneAttachment3D.new()
+	attach.name = "BladeAttach"
+	attach.bone_name = "RightHand"
+	skel.add_child(attach)
+	var blade := MeshInstance3D.new()
+	blade.name = "DebugBlade"
+	var box := BoxMesh.new()
+	box.size = Vector3(BLADE_WIDTH, BLADE_LEN, BLADE_THICK)
+	var steel := StandardMaterial3D.new()
+	steel.albedo_color = Color(0.75, 0.78, 0.85)
+	steel.metallic = 0.6
+	steel.roughness = 0.35
+	box.material = steel
+	blade.mesh = box
+	blade.transform = Transform3D(Basis(x, y, z), y * (BLADE_LEN * 0.5 - BLADE_GRIP))
+	attach.add_child(blade)
+	print("[Player] blade on RightHand dir=%s" % str(y))
+
+
+## Frontal sweep volume, armed only during the attack section (StateAttack
+## calls swing_begin/poll/end). Self excluded; only bodies carrying
+## take_hit() connect — the ground and stairs never do.
+func _build_sweep() -> void:
+	_sweep = ShapeCast3D.new()
+	_sweep.name = "Sweep"
+	var box := BoxShape3D.new()
+	box.size = Vector3(SWEEP_W, SWEEP_H, SWEEP_D)
+	_sweep.shape = box
+	_sweep.position = Vector3(0, SWEEP_Y, -SWEEP_FWD)
+	_sweep.target_position = Vector3(0, 0, -0.2)
+	_sweep.enabled = false
+	_sweep.add_exception(self)
+	add_child(_sweep)
+
+
+## Open a swing: clear the connect registry and arm the sweep.
+func swing_begin() -> void:
+	_swing_hits.clear()
+	if _sweep != null:
+		_sweep.enabled = true
+
+
+## Close a swing: disarm the sweep (registry clears on the next begin).
+func swing_end() -> void:
+	if _sweep != null:
+		_sweep.enabled = false
+
+
+## New connects this physics tick: [{body, point}] for take_hit carriers
+## not yet touched by this swing. Empty when disarmed.
+func sweep_poll() -> Array:
+	var out: Array = []
+	if _sweep == null or not _sweep.enabled:
+		return out
+	_sweep.force_shapecast_update()
+	for i in _sweep.get_collision_count():
+		var body := _sweep.get_collider(i) as Object
+		if body == null or not body.has_method("take_hit"):
+			continue
+		var id := body.get_instance_id()
+		if _swing_hits.has(id):
+			continue
+		_swing_hits[id] = true
+		out.append({"body": body, "point": _sweep.get_collision_point(i)})
+	return out
+
+
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	InputManager.set_profile(&"game")
@@ -96,6 +222,11 @@ func _ready() -> void:
 	_player = RigKit.build_player(rig_root, Moveset.packs_of(ms))
 	_clips = Moveset.resolve_clips(ms, _player)
 	_attack_phases[&"attack_light_1"] = Moveset.phases_for(ms, &"attack_light_1")
+	_build_blade()
+	_build_sweep()
+	# Single facing: the rig never yaws (nailed once — mesh = body heading).
+	rig_root.rotation.y = RIG_BASE_YAW
+	print("[Player] impact %s" % str(attack_impact()))
 	if _player != null:
 		_play(_clips.get(&"idle", &""))
 		print("[Player] clips idle=%s walk=%s run=%s fall=%s roll=%s backstep=%s attack=%s" % [_clips.get(&"idle"), _clips.get(&"walk"), _clips.get(&"run"), _clips.get(&"fall"), _clips.get(&"roll"), _clips.get(&"backstep"), _clips.get(&"attack_light_1")])
@@ -126,17 +257,7 @@ func _physics_process(delta: float) -> void:
 		iframes = maxf(iframes - delta, 0.0)
 	machine.step(delta)
 	move_and_slide()
-	# Facing ownership: Backstep freezes entry facing, LockOn nails the rig
-	# onto the enemy (body already tracks it — mesh must not strafe-profile),
-	# everything else eases the rig toward travel.
-	var sid := machine.state_id()
-	if sid == PlayerStateMachine.LOCKON:
-		_face_lock(delta)
-	elif sid != PlayerStateMachine.BACKSTEP:
-		_face_rig(delta)
 	_resolve_anim()
-	# Foot bevel follows the visual facing (old StairShapeHandler line).
-	wedge.rotation.y = rig_root.rotation.y + PI
 
 
 ## Stamina spend gate: true + deducts when affordable, false when denied
@@ -264,22 +385,17 @@ func set_cam_yaw(enabled: bool) -> void:
 	camera.yaw_enabled = enabled
 
 
-## Lock-on facing: ease the rig onto the body heading (RIG_BASE_YAW), i.e.
-## the mesh looks at whatever the body looks at — the enemy. Same rate as
-## the travel ease so handoffs in/out of LockOn never pop.
-func _face_lock(delta: float) -> void:
-	rig_root.rotation.y = lerp_angle(rig_root.rotation.y, RIG_BASE_YAW, minf(RIG_TURN * delta, 1.0))
-
-
-## Visual facing only: ease the rig toward the body-local travel direction
-## (strafe turns the rig sideways, body stays — old model.look_at rule).
-func _face_rig(delta: float) -> void:
-	var planar := Vector3(velocity.x, 0.0, velocity.z)
-	if planar.length() < 0.5:
+## Souls turn (P2 single facing): ease the body toward a world direction,
+## camera world-yaw preserved via shift_yaw (reset_camera convention).
+## No-op on degenerate input. Free locomotion + free rolls own the heading
+## through this; locked states use track_lock_target instead.
+func turn_body_to(dir: Vector3, delta: float, rate := FREE_FACE) -> void:
+	var f := Vector3(dir.x, 0.0, dir.z)
+	if f.length_squared() < 0.0001:
 		return
-	var local: Vector3 = global_transform.basis.inverse() * planar
-	var want := RIG_BASE_YAW + atan2(-local.x, -local.z)
-	rig_root.rotation.y = lerp_angle(rig_root.rotation.y, want, minf(RIG_TURN * delta, 1.0))
+	var before := rotation.y
+	rotation.y = lerp_angle(before, atan2(-f.x, -f.z), minf(rate * delta, 1.0))
+	camera.shift_yaw(rotation.y - before)
 
 
 func _resolve_anim() -> void:

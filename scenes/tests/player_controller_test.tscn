@@ -2,6 +2,8 @@
 
 [ext_resource type="Environment" path="res://scenes/editors/env_default.tres" id="4"]
 [ext_resource type="PackedScene" uid="uid://cqk7playerp21" path="res://scenes/prefabs/player.tscn" id="5"]
+[ext_resource type="Script" path="res://scenes/tests/fake_enemy.gd" id="6"]
+[ext_resource type="Script" path="res://src/runtime/impact_host.gd" id="7"]
 
 [sub_resource type="BoxMesh" id="ground_mesh"]
 size = Vector3(40, 0.2, 40)
@@ -127,6 +129,7 @@ shape = SubResource("stair_shape_3")
 
 [node name="FakeEnemy" type="StaticBody3D" parent="." unique_id=2100000001 groups=["lockable"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -2)
+script = ExtResource("6")
 
 [node name="EnemyBody" type="CollisionShape3D" parent="FakeEnemy" unique_id=2100000002]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
@@ -144,6 +147,9 @@ mesh = SubResource("marker_mesh")
 [node name="Player" parent="." unique_id=1970426363 instance=ExtResource("5")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 6)
 
+[node name="ImpactHost" type="Node3D" parent="." unique_id=2200000001]
+script = ExtResource("7")
+
 [node name="HUD" type="CanvasLayer" parent="." unique_id=1667120283]
 
 [node name="State" type="Label" parent="HUD" unique_id=1908280367]
@@ -153,6 +159,14 @@ offset_right = 600.0
 offset_bottom = 44.0
 theme_override_font_sizes/font_size = 18
 text = "boot"
+
+[node name="Enemy" type="Label" parent="HUD" unique_id=2200000002]
+offset_left = 16.0
+offset_top = 44.0
+offset_right = 600.0
+offset_bottom = 68.0
+theme_override_font_sizes/font_size = 18
+text = "enemy"
 
 [node name="Hint" type="Label" parent="HUD" unique_id=757889275]
 anchors_preset = 12

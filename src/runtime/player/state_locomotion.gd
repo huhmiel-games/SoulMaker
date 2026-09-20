@@ -1,16 +1,18 @@
 class_name StateLocomotion
 extends PlayerState
 
-## Moving, body-relative (old feel): enter snaps the camera behind the body,
-## then RS-X / mouse-X turns the BODY (camera yaw follow off, pitch still
-## live). Stick tilt scales sneak/walk/run; keyboard saturates to run.
+## Moving, souls frame (P2): the wish is camera-relative, the body turns
+## toward it (turn_body_to — camera world-yaw preserved), the mesh is the
+## body (single facing, no strafe-profile). Camera yaw follow stays on —
+## orbiting while moving bends the run, souls standard. Stick tilt scales
+## sneak/walk/run; keyboard saturates to run. At rest the body keeps its
+## facing (decel branch turns nothing).
 var _air := 0.0
 
 
 func enter() -> void:
 	_air = 0.0
-	ctrl.reset_camera()
-	ctrl.set_cam_yaw(false)
+	ctrl.set_cam_yaw(true)
 
 
 func exit() -> void:
@@ -43,10 +45,6 @@ func step(delta: float) -> int:
 	# Light attack (after dodge — defense wins ties): clip + stamina gate.
 	if intent.attack_light_pressed() and ctrl.is_on_floor() and ctrl.attack_clip() != &"" and ctrl.spend_stamina(float(ctrl.attack_phases().get("stamina_cost", 20.0))):
 		return PlayerStateMachine.ATTACK
-	# Turn the body with the shared turn feed (same value/units as the
-	# camera orbit, so Idle-orbit and Move-turn feel identical). Degrees
-	# in, radians out (rotation.y is radians).
-	ctrl.rotation.y -= deg_to_rad(intent.turn_axis() * PlayerController.TURN_RATE * delta)
 	if raw == Vector2.ZERO:
 		var planar := Vector3(ctrl.velocity.x, 0.0, ctrl.velocity.z)
 		planar = planar.move_toward(Vector3.ZERO, PlayerController.DECEL * delta)
@@ -58,6 +56,9 @@ func step(delta: float) -> int:
 	var cap := PlayerController.RUN_SPEED if force >= PlayerIntent.RUN_TRIGGER else PlayerController.WALK_SPEED
 	ctrl.anim_state = &"run" if force >= PlayerIntent.RUN_TRIGGER else &"walk"
 	var wish := intent.wish_direction(raw)
+	# Single facing: the body turns toward the wish (free only — this state
+	# never runs locked), then the wish accelerates the body.
+	ctrl.turn_body_to(wish, delta)
 	var target := wish * cap * clampf(force, PlayerIntent.SNEAK_TRIGGER, 1.0)
 	var planar := Vector3(ctrl.velocity.x, 0.0, ctrl.velocity.z)
 	planar = planar.move_toward(target, PlayerController.ACCEL * delta)
