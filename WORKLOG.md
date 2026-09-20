@@ -7,9 +7,16 @@
 - **Objective**: P2 fighter core — locomotion rewrite body-relative, nodess state machine (Idle/Locomotion/Fall), uncommitted
 - **Expected mode**: build
 - Next step: human locomotion recipe (below); commit AFTER human OK (not requested yet).
-- **Last step done**: lock tracking mid-roll (UNCOMMITTED) — `track_lock_target()` partagé (body ease + caméra), appelé par LockOn/Roll/Backstep ; plus de freeze caméra pendant la roulade, no-op hors lock. Boot clean ; feel à valider humain.
+- **Last step done**: round-trip éditeur ⇄ jeu (UNCOMMITTED) — section `spawn` au format, `MapBuilder` partagé (éditeur refactoré dessus), prefab `player.tscn`, scène `run.tscn` + runner (live dict GameState, Esc retour), rows pause PLAYTEST/SET SPAWN, prouveur `roundtrip_harness` PASS. Boot éditeur/test/run + audit clean ; boucle humaine à valider.
 
-## Test recipe (human) — EDIT_FLOOR relief
+## Test recipe (human) — round-trip editor ⇄ game
+
+1. Launch → Map editor → open a map (place 1-2 assets if empty, sculpt a mound WITHOUT saving).
+2. Start → pause now has SET SPAWN HERE + PLAYTEST rows. SET SPAWN HERE → toast "spawn set".
+3. PLAYTEST → game boots ON the live map: unsaved mound present, spawn where set (drop 2 m, lands → Idle). Move/dodge/lock (no cylinder here — FakeEnemy is test-scene only).
+4. Esc → back in the editor, map reopened FROM FILE by name. Expected: the unsaved mound is GONE (it only lived in the freed editor + the consumed live dict) — the file is intact. If you SAVE before PLAYTEST, everything persists across the loop.
+5. Report: relief/placements identical editor vs game, spawn facing, Esc return, any `[Run]`/`[MapBuilder]` lines, placements walkable or ghost (collision as-authored).
+
 
 1. Launch (boots the hub now) → Map editor → library → New (or open a map): ground flat gray as before.
 2. Press Y (gamepad) or P (keyboard) → floor mode: HUD shows `FLOOR (__,__) h=+0.0` + hint line, crosshair hidden, flat yellow quad = cell cursor.

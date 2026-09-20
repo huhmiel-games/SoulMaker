@@ -24,6 +24,11 @@ const MAPS_DIR := "user://maps"
 ## over the map to open ("" = none, boot empty as usual).
 const MENU_SCENE := "res://scenes/editors/map_editor_menu.tscn"
 const PENDING_KEY := "editor/pending_map"
+## Game run scene (PLAYTEST hands it the live map) + the GameState key for
+## the symmetric handover. The run returns here via PENDING_KEY (existing
+## boot path — unsaved playtest edits never touch the file).
+const RUN_SCENE := "res://scenes/game/run.tscn"
+const RUN_PENDING_KEY := "game/pending_map"
 ## Single generic menu scene, configured at runtime (pause + quit-confirm
 ## are just entries + Callables — zero menu-specific scenes).
 const GENERIC_MENU_SCENE := preload("res://scenes/ui/generic_menu.tscn")
@@ -93,6 +98,10 @@ var catalog := Catalog.new()
 var _placements: Array[Dictionary] = []
 var _selected: Node3D = null
 var current_map_name := "corridor_01"
+## Player spawn ({position: Vector3, yaw: float}, may be empty = origin +
+## drop): set by SET SPAWN HERE at the asset spawn point, serialized as the
+## map's spawn section. Dirty-tracked like any edit.
+var _spawn := {}
 ## Ambiance override (flat MapIO dict): live values driving the viewport.
 ## _amb_has_section tracks whether the map OWNS a section (user-edited,
 ## preset-applied, or loaded) — only then does save serialize it.
@@ -243,19 +252,13 @@ func _on_asset_selected(id: String) -> void:
 
 
 ## Instances one catalog scene under a fresh placement node + a physics
-## selector (AABB box) used for click-picking later.
+## selector (AABB box) used for click-picking later. Asset + toon come from
+## the shared MapBuilder (same build as the game run); group + selector stay
+## editor-only.
 func _instance_placement(packed: PackedScene, id: String, iid: String) -> Node3D:
-	var placement := Node3D.new()
-	placement.name = "Placement_%s" % iid
+	var placement := MapBuilder.instantiate_prefab(packed, id, iid)
 	placement.add_to_group(PLACEMENT_GROUP)
-	placement.set_meta("prefab_id", id)
-	placement.set_meta("instance_id", iid)
 	placement_root.add_child(placement)
-
-	var asset := packed.instantiate()
-	placement.add_child(asset)
-	# ADR-019: every 3D asset renders toon (GIMP textures carry through).
-	ToonKit.apply_to(placement)
 
 	var box: AABB = _find_mesh_aabb(placement)
 	var selector := StaticBody3D.new()
@@ -582,65 +585,11 @@ func _vertex_height(ix: int, iz: int) -> float:
 	return float(_ground.get(c, 0.0))
 
 
+## Relief rebuild through the shared MapBuilder (same mesh + collision as
+## the game run); the editor assigns them to its scaffold nodes.
 func _rebuild_ground() -> void:
-	var n := MapIO.GROUND_N
-	var v := n + 1
-	var verts := PackedVector3Array()
-	verts.resize(v * v)
-	var heights := PackedFloat32Array()
-	heights.resize(v * v)
-	for iz in range(v):
-		for ix in range(v):
-			var h := _vertex_height(ix, iz)
-			var i := ix + iz * v
-			verts[i] = Vector3(ix - n * 0.5, h, iz - n * 0.5)
-			heights[i] = h
-	# (a,b,d) + (a,d,c) per quad: clockwise seen from above = Godot front
-	# (CCW renders from below only — caught 2026-09-18: floor invisible
-	# from above, gray from below).
-	var indices := PackedInt32Array()
-	indices.resize(n * n * 6)
-	var k := 0
-	for cz in range(n):
-		for cx in range(n):
-			var a := cx + cz * v
-			var b := (cx + 1) + cz * v
-			var c := cx + (cz + 1) * v
-			var d := (cx + 1) + (cz + 1) * v
-			indices[k] = a
-			indices[k + 1] = b
-			indices[k + 2] = d
-			indices[k + 3] = a
-			indices[k + 4] = d
-			indices[k + 5] = c
-			k += 6
-	var normals := PackedVector3Array()
-	normals.resize(v * v)
-	for t in range(0, indices.size(), 3):
-		var p0 := verts[indices[t]]
-		var p1 := verts[indices[t + 1]]
-		var p2 := verts[indices[t + 2]]
-		# Operand order mirrors the flipped winding so normals stay +Y-up.
-		var fn := (p2 - p0).cross(p1 - p0)
-		normals[indices[t]] += fn
-		normals[indices[t + 1]] += fn
-		normals[indices[t + 2]] += fn
-	for i in range(normals.size()):
-		normals[i] = normals[i].normalized()
-	var arrays := []
-	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = verts
-	arrays[Mesh.ARRAY_NORMAL] = normals
-	arrays[Mesh.ARRAY_INDEX] = indices
-	var mesh := ArrayMesh.new()
-	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-	mesh.surface_set_material(0, ToonKit.material_for(null, Color(0.35, 0.36, 0.4)))
-	ground_mesh.mesh = mesh
-	var shape := HeightMapShape3D.new()
-	shape.map_width = v
-	shape.map_depth = v
-	shape.map_data = heights
-	ground_shape.shape = shape
+	ground_mesh.mesh = MapBuilder.build_ground_mesh(_ground)
+	ground_shape.shape = MapBuilder.build_ground_shape(_ground)
 
 
 ## Physics ray against the relief (spawn point, floor cursor). Empty when the
@@ -946,7 +895,7 @@ func save_map() -> bool:
 	if name.is_empty():
 		_user_status("save aborted: empty map name")
 		return false
-	var data := MapIO.serialize(name, _placements, _ground, _ambiance if _amb_has_section else {})
+	var data := MapIO.serialize(name, _placements, _ground, _ambiance if _amb_has_section else {}, _spawn)
 	var issues := MapIO.validate_map(data)
 	issues.append_array(MapIO.validate_refs(data, catalog))
 	if not issues.is_empty():
@@ -976,6 +925,7 @@ func load_map(name: String) -> void:
 	_sync_iid_counter()
 	_ground = MapIO.ground_from_data(data)
 	_rebuild_ground()
+	_spawn = MapIO.spawn_from_data(data)
 	# Ambiance override overlays the boot defaults (absent = defaults stay);
 	# the section owns itself from here until save.
 	_ambiance = (MapIO.AMBIANCE_DEFAULTS as Dictionary).duplicate()
@@ -1115,9 +1065,37 @@ func _pause_entries() -> Array:
 	return [
 		{"label": "SAVE", "call": _on_pause_save},
 		{"label": "AMBIANCE", "call": _on_pause_ambiance},
+		{"label": "SET SPAWN HERE", "call": _on_pause_set_spawn},
+		{"label": "PLAYTEST", "call": _on_pause_playtest},
 		{"label": "CANCEL", "call": _on_pause_cancel},
 		{"label": "QUIT", "call": _on_pause_quit},
 	]
+
+
+## Player spawn at the asset spawn point, facing the editor camera yaw.
+## Dirty-tracked, serialized as the map's spawn section. Stays in pause
+## (toast fires behind — visible after close, 5 s).
+func _on_pause_set_spawn() -> void:
+	_spawn = {"position": _spawn_point(), "yaw": editor_camera.global_rotation.y}
+	_dirty = true
+	_user_status("spawn set %s" % str(_spawn.get("position")))
+
+
+## Round-trip playtest: hands the LIVE map (dirty allowed — unsaved edits
+## playtest without touching the file) to the run scene via GameState, then
+## switches. Structural issues abort (pause stays open); the run returns
+## here through PENDING_KEY.
+func _on_pause_playtest() -> void:
+	var name := current_map_name.strip_edges()
+	if name.is_empty():
+		name = "playtest"
+	var data := MapIO.serialize(name, _placements, _ground, _ambiance if _amb_has_section else {}, _spawn)
+	var issues := MapIO.validate_map(data)
+	if not issues.is_empty():
+		_user_status("PLAYTEST ISSUES: %s" % ", ".join(issues))
+		return
+	GameState.set_value(RUN_PENDING_KEY, {"name": name, "map": data})
+	get_tree().change_scene_to_file(RUN_SCENE)
 
 
 func _on_pause_ambiance() -> void:
@@ -1271,23 +1249,7 @@ func _amb_reset(key: String) -> void:
 ## Pushes live values to the viewport (clamped — files may carry anything
 ## until validation reports). Sun keeps its azimuth, takes the elevation.
 func _apply_ambiance() -> void:
-	var env := world_env.environment as Environment
-	if env == null:
-		return
-	var get := func(key: String) -> float:
-		var bounds: Array = MapIO.AMBIANCE_BOUNDS.get(key, [0.0, 1.0])
-		return clampf(float(_ambiance.get(key, (MapIO.AMBIANCE_DEFAULTS as Dictionary).get(key, 0.0))), float(bounds[0]), float(bounds[1]))
-	env.fog_enabled = bool(_ambiance.get("fog_enabled", false))
-	env.fog_mode = Environment.FOG_MODE_DEPTH
-	env.fog_depth_begin = get.call("fog_begin")
-	env.fog_depth_end = maxf(get.call("fog_end"), env.fog_depth_begin + 1.0)
-	env.fog_height = get.call("fog_height")
-	env.fog_height_density = get.call("fog_hdensity")
-	env.tonemap_mode = clampi(int(_ambiance.get("tonemap_mode", 2.0)), 0, 4) as Environment.ToneMapper
-	env.tonemap_exposure = get.call("tonemap_exposure")
-	env.ambient_light_energy = get.call("ambient_energy")
-	sun.light_energy = get.call("sun_energy")
-	sun.rotation_degrees = Vector3(-get.call("sun_elev"), _sun_azimuth, 0.0)
+	MapBuilder.apply_ambiance(world_env.environment as Environment, sun, _ambiance, _sun_azimuth)
 
 
 func _on_pause_save() -> void:

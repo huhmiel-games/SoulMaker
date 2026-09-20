@@ -109,6 +109,15 @@
 		  }
 		},
 		"ambiance": { "$ref": "#/$defs/ambiance", "description": "Optional per-map override of the world defaults (e.g. a dark cave inside a sunny world)." },
+		"spawn": {
+		  "type": "object",
+		  "description": "Optional player spawn (round-trip playtest). Absent = origin + drop.",
+		  "properties": {
+			"position": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+			"yaw": { "type": "number" }
+		  },
+		  "additionalProperties": true
+		},
 		"lights": { "type": "object", "description": "Per-map embedded lights (bounded, editor counter).", "additionalProperties": true }
 	  },
 	  "additionalProperties": true

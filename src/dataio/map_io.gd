@@ -63,7 +63,8 @@ const AMBIANCE_NEST := {
 ## into a schema-conform map object. ground is the sparse relief
 ## {Vector2i cell: float height} (may be empty = flat, section omitted).
 ## ambiance is the flat override dict (may be empty = defaults, omitted).
-static func serialize(name: String, placements: Array, ground := {}, ambiance := {}) -> Dictionary:
+## spawn is {position: Vector3, yaw: float} (may be empty = origin + drop, omitted).
+static func serialize(name: String, placements: Array, ground := {}, ambiance := {}, spawn := {}) -> Dictionary:
 	var prefabs := []
 	for p in placements:
 		var t: Dictionary = p.get("transform", {})
@@ -81,6 +82,8 @@ static func serialize(name: String, placements: Array, ground := {}, ambiance :=
 		out["ground"] = {"cell": GROUND_CELL, "cells": _ground_to_data(ground)}
 	if not (ambiance as Dictionary).is_empty():
 		out["ambiance"] = ambiance_to_data(ambiance)
+	if not (spawn as Dictionary).is_empty():
+		out["spawn"] = spawn_to_data(spawn)
 	return out
 
 
@@ -140,6 +143,7 @@ static func validate_map(map: Dictionary) -> PackedStringArray:
 				issues.append("transform.%s must be 3 numbers (%s)" % [key, pid])
 	issues.append_array(validate_ground(map))
 	issues.append_array(validate_ambiance(map))
+	issues.append_array(validate_spawn(map))
 	return issues
 
 
@@ -158,8 +162,41 @@ static func validate_refs(map: Dictionary, catalog: Catalog) -> PackedStringArra
 	return issues
 
 
-## Decodes the ground section back into a sparse relief {Vector2i: float}.
-## Tolerant (bad entries skipped); validate_ground reports them separately.
+## Player spawn section (round-trip playtest): {position: Vector3, yaw: float}
+## in, {position: [3 numbers], yaw: float} out. Empty dict = absent.
+static func spawn_to_data(spawn: Dictionary) -> Dictionary:
+	var p: Vector3 = spawn.get("position", Vector3.ZERO)
+	return {"position": _vec3_to_array(p), "yaw": float(spawn.get("yaw", 0.0))}
+
+
+## Decodes the spawn section back ({position: Vector3, yaw: float}).
+## Absent/malformed = {} (caller defaults to origin + drop).
+static func spawn_from_data(map: Dictionary) -> Dictionary:
+	var s: Variant = map.get("spawn", {})
+	if not s is Dictionary:
+		return {}
+	var pos := _array_to_vec3((s as Dictionary).get("position", [0, 0, 0]))
+	var yaw: Variant = (s as Dictionary).get("yaw", 0.0)
+	if not yaw is float and not yaw is int:
+		return {}
+	return {"position": pos, "yaw": float(yaw)}
+
+
+## Structural checks for the spawn section (absent = default = valid).
+static func validate_spawn(map: Dictionary) -> PackedStringArray:
+	var issues := PackedStringArray()
+	if not map.has("spawn"):
+		return issues
+	var s: Variant = map.get("spawn")
+	if not s is Dictionary:
+		issues.append("spawn must be an object")
+		return issues
+	if (s as Dictionary).has("position") and not _is_float_triple((s as Dictionary)["position"]):
+		issues.append("spawn.position must be 3 numbers")
+	var yaw: Variant = (s as Dictionary).get("yaw", 0.0)
+	if not yaw is float and not yaw is int:
+		issues.append("spawn.yaw must be a number")
+	return issues
 static func ground_from_data(map: Dictionary) -> Dictionary:
 	var out := {}
 	var g: Variant = map.get("ground", {})
