@@ -45,23 +45,22 @@ const BACKSTEP_SEEK := 0.8
 ## Light attack (P2 single swing): forward step during the attack section
 ## (the swing carries through — features/01), planted otherwise.
 const ATTACK_STEP := 2.0
-## Debug blade (P2 stand-in for the 04 weapon visual): grey box on the right
-## hand via BoneAttachment3D, long axis computed at boot from the
-## elbow→wrist rest direction (no blind axis guess). Replaced by the real
-## weapon mesh on the same attachment when 04 lands.
-const BLADE_LEN := 0.95
-const BLADE_GRIP := 0.10
-const BLADE_WIDTH := 0.07
-const BLADE_THICK := 0.16
-## Sweep hitbox (P2): frontal volume armed with a delay INTO the attack
-## section (sweep_start fraction — the blade must travel down first), swept
-## through space by the body's own forward step. Sized to blade+arm reach
-## (~1.7 m); tuned against the debug blade in the slam recipe.
-const SWEEP_W := 1.6
-const SWEEP_H := 1.4
-const SWEEP_D := 1.2
-const SWEEP_Y := 1.1
-const SWEEP_FWD := 0.9
+## Weapon (P2): the real mesh (VikingSwordBS) is authored in player.tscn
+## under the BladeAttach BoneAttachment3D (oriented in the editor). The
+## sweep auto-sizes from the weapon mesh AABB — daggers to great hammers
+## need no code change: the longest AABB axis is the blade direction and
+## the sweep inherits the attach orientation, so any mesh orientation works.
+## Sweep hitbox (P2): blade-sized box riding the blade every physics poll
+## during the armed attack section — repositioned from the BladeAttach
+## frame, target = inter-frame center delta in sweep-local space (tunneling
+## guard: the cast covers the motion between two frames, not just the
+## current pose). SWEEP_EXTRA pads the blade axis for the arc between
+## frames; a red debug box (child of the sweep) shows the detected bounds
+## in-game.
+const SWEEP_EXTRA := 0.1
+## Fallback sweep when no weapon mesh is found under BladeAttach.
+const SWEEP_FALLBACK_SIZE := Vector3(0.07, 1.05, 0.16)
+const SWEEP_FALLBACK_CENTER := Vector3(0.0, 0.375, 0.0)
 
 ## Locomotion clips resolve from data/characters/player_moveset.json (packs
 ## + slots + active variant); FALLBACK lives in Moveset, not here.
@@ -94,9 +93,18 @@ var _anim_cur := &""
 ## Resolved attack phases per attack slot (Moveset.phases_for at boot).
 var _attack_phases := {}
 ## Sweep hitbox + per-swing connect registry (strongest-once rule: one
-## connect per body per swing; the chain fires on the first).
+## connect per body per swing; the chain fires on the first). The sweep
+## rides the blade (child of BladeAttach) — _update_sweep repositions it
+## every poll from the BladeAttach frame; _prev_mid tracks the inter-frame
+## center delta, primed on swing_begin. _sweep_center is the AABB center in
+## attach space (auto-detected); _sweep_debug is the red bounds box.
 var _sweep: ShapeCast3D = null
 var _swing_hits := {}
+var _blade_attach: BoneAttachment3D = null
+var _sweep_center := SWEEP_FALLBACK_CENTER
+var _prev_mid := Vector3.ZERO
+var _sweep_primed := false
+var _sweep_debug: MeshInstance3D = null
 
 
 ## Light-attack clip ("" = unresolved, attack refused — never T-poses).
@@ -122,83 +130,131 @@ func impact_host() -> ImpactHost:
 	return get_tree().get_first_node_in_group(&"impact") as ImpactHost
 
 
-## Debug blade on the right hand (see consts): BoneAttachment3D follows the
-## bone through the swing; the long axis is derived from the rest pose
-## (elbow→wrist = finger direction for a fist), so no editor eyeballing.
-func _build_blade() -> void:
+## Blade-riding sweep, armed only during the attack section (StateAttack
+## calls swing_begin/poll/end). Child of BladeAttach so it inherits the
+## hand motion; size + center auto-detected from the weapon mesh AABB (see
+## _find_weapon_mesh) so any weapon size works; _update_sweep snaps it onto
+## the blade every poll. Self excluded; only bodies carrying take_hit()
+## connect — the ground and stairs never do. A red debug box (child of the
+## sweep) shows the detected bounds in-game.
+func _build_sweep() -> void:
 	var skel := rig_root.get_node_or_null("Armature/GeneralSkeleton") as Skeleton3D
 	if skel == null:
-		push_warning("[Player] blade skipped (no skeleton)")
+		push_warning("[Player] sweep skipped (no skeleton)")
 		return
-	var hand := skel.find_bone("RightHand")
-	var lower := skel.find_bone("RightLowerArm")
-	if hand == -1 or lower == -1:
-		push_warning("[Player] blade skipped (no RightHand bone)")
+	_blade_attach = skel.get_node_or_null("BladeAttach") as BoneAttachment3D
+	if _blade_attach == null:
+		push_warning("[Player] sweep skipped (no BladeAttach — create it in player.tscn)")
 		return
-	var hr := skel.get_bone_global_rest(hand)
-	var lr := skel.get_bone_global_rest(lower)
-	var dir_skel: Vector3 = (hr.origin - lr.origin)
-	if dir_skel.length() < 0.001:
-		push_warning("[Player] blade skipped (degenerate hand rest)")
-		return
-	var y: Vector3 = (hr.basis.inverse() * dir_skel).normalized()
-	var ref := Vector3.UP if absf(y.dot(Vector3.UP)) < 0.9 else Vector3.RIGHT
-	var x: Vector3 = y.cross(ref).normalized()
-	var z: Vector3 = x.cross(y).normalized()
-	var attach := BoneAttachment3D.new()
-	attach.name = "BladeAttach"
-	attach.bone_name = "RightHand"
-	skel.add_child(attach)
-	var blade := MeshInstance3D.new()
-	blade.name = "DebugBlade"
-	var box := BoxMesh.new()
-	box.size = Vector3(BLADE_WIDTH, BLADE_LEN, BLADE_THICK)
-	var steel := StandardMaterial3D.new()
-	steel.albedo_color = Color(0.75, 0.78, 0.85)
-	steel.metallic = 0.6
-	steel.roughness = 0.35
-	box.material = steel
-	blade.mesh = box
-	blade.transform = Transform3D(Basis(x, y, z), y * (BLADE_LEN * 0.5 - BLADE_GRIP))
-	attach.add_child(blade)
-	print("[Player] blade on RightHand dir=%s" % str(y))
-
-
-## Frontal sweep volume, armed only during the attack section (StateAttack
-## calls swing_begin/poll/end). Self excluded; only bodies carrying
-## take_hit() connect — the ground and stairs never do.
-func _build_sweep() -> void:
+	var sweep_size := SWEEP_FALLBACK_SIZE
+	var sweep_pos := SWEEP_FALLBACK_CENTER
+	_sweep_center = SWEEP_FALLBACK_CENTER
+	var weapon := _find_weapon_mesh(_blade_attach)
+	if weapon != null:
+		var aabb: AABB = weapon.get_aabb()
+		if aabb.size.length() > 0.001:
+			# Mesh-local AABB -> BladeAttach space (the mesh carries its own
+			# rotation; the longest AABB axis is the blade direction).
+			var rel: Transform3D = _blade_attach.global_transform.affine_inverse() * weapon.global_transform
+			var sz: Vector3 = rel.basis * aabb.size
+			var longest := 0
+			if absf(sz.y) >= absf(sz.x) and absf(sz.y) >= absf(sz.z):
+				longest = 1
+			elif absf(sz.z) >= absf(sz.x) and absf(sz.z) >= absf(sz.y):
+				longest = 2
+			sweep_size = Vector3(absf(sz.x), absf(sz.y), absf(sz.z))
+			sweep_size[longest] += SWEEP_EXTRA
+			var center: Vector3 = rel * (aabb.position + aabb.size * 0.5)
+			sweep_pos = center
+			_sweep_center = center
+			print("[Player] sweep from AABB size=%.3f x %.3f x %.3f center=(%.3f, %.3f, %.3f) blade_axis=%s" % [sweep_size.x, sweep_size.y, sweep_size.z, center.x, center.y, center.z, "XYZ"[longest]])
+		else:
+			push_warning("[Player] sweep using fallback size (weapon AABB empty)")
+	else:
+		push_warning("[Player] sweep using fallback size (no weapon mesh under BladeAttach)")
 	_sweep = ShapeCast3D.new()
 	_sweep.name = "Sweep"
 	var box := BoxShape3D.new()
-	box.size = Vector3(SWEEP_W, SWEEP_H, SWEEP_D)
+	box.size = sweep_size
 	_sweep.shape = box
-	_sweep.position = Vector3(0, SWEEP_Y, -SWEEP_FWD)
-	_sweep.target_position = Vector3(0, 0, -0.2)
+	_sweep.position = sweep_pos
+	_sweep.target_position = Vector3.ZERO
 	_sweep.enabled = false
 	_sweep.add_exception(self)
-	add_child(_sweep)
+	_blade_attach.add_child(_sweep)
+	_sweep_debug = MeshInstance3D.new()
+	_sweep_debug.name = "SweepDebug"
+	var dbox := BoxMesh.new()
+	dbox.size = sweep_size
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(1.0, 0.0, 0.0, 0.25)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.no_depth_test = true
+	dbox.material = mat
+	_sweep_debug.mesh = dbox
+	_sweep.add_child(_sweep_debug)
 
 
-## Open a swing: clear the connect registry and arm the sweep.
+## First MeshInstance3D under the given node (recursive — GLB instances
+## nest meshes deeper). Skips the sweep itself and its debug box. Null
+## when no mesh is equipped (fallback sweep size used).
+func _find_weapon_mesh(node: Node) -> MeshInstance3D:
+	for child in node.get_children():
+		if child == _sweep or child == _sweep_debug:
+			continue
+		if child is MeshInstance3D:
+			return child as MeshInstance3D
+		var found := _find_weapon_mesh(child)
+		if found != null:
+			return found
+	return null
+
+
+## Snap the sweep onto the blade for this poll: the sweep inherits the
+## BladeAttach orientation (the box is already blade-aligned in attach
+## space) and sits at the detected AABB center (world space); target =
+## inter-frame center delta in sweep-local space (covers the motion between
+## two frames — the tunneling guard). First poll of a swing primes
+## _prev_mid (zero delta, overlap test only).
+func _update_sweep() -> void:
+	if _sweep == null or _blade_attach == null:
+		return
+	var ag: Transform3D = _blade_attach.global_transform
+	var mid: Vector3 = ag * _sweep_center
+	if not _sweep_primed:
+		_prev_mid = mid
+		_sweep_primed = true
+	var world_delta: Vector3 = mid - _prev_mid
+	_sweep.global_transform = Transform3D(ag.basis, mid)
+	_sweep.target_position = ag.basis.inverse() * world_delta
+	_prev_mid = mid
+
+
+## Open a swing: clear the connect registry, unprime the inter-frame delta
+## (first poll overlaps only), and arm the sweep.
 func swing_begin() -> void:
 	_swing_hits.clear()
+	_sweep_primed = false
 	if _sweep != null:
 		_sweep.enabled = true
 
 
 ## Close a swing: disarm the sweep (registry clears on the next begin).
 func swing_end() -> void:
+	_sweep_primed = false
 	if _sweep != null:
 		_sweep.enabled = false
 
 
 ## New connects this physics tick: [{body, point}] for take_hit carriers
-## not yet touched by this swing. Empty when disarmed.
+## not yet touched by this swing. Empty when disarmed. Snaps the sweep
+## onto the blade first so the cast covers the current bone pose.
 func sweep_poll() -> Array:
 	var out: Array = []
 	if _sweep == null or not _sweep.enabled:
 		return out
+	_update_sweep()
 	_sweep.force_shapecast_update()
 	for i in _sweep.get_collision_count():
 		var body := _sweep.get_collider(i) as Object
@@ -222,7 +278,7 @@ func _ready() -> void:
 	_player = RigKit.build_player(rig_root, Moveset.packs_of(ms))
 	_clips = Moveset.resolve_clips(ms, _player)
 	_attack_phases[&"attack_light_1"] = Moveset.phases_for(ms, &"attack_light_1")
-	_build_blade()
+	# Sweep resolves _blade_attach and auto-sizes from the weapon mesh.
 	_build_sweep()
 	# Single facing: the rig never yaws (nailed once — mesh = body heading).
 	rig_root.rotation.y = RIG_BASE_YAW
@@ -424,6 +480,33 @@ func play_phase(clip: StringName, sec_from: StringName, sec_to: StringName, spee
 		return
 	anim_manual = true
 	_player.play_section_with_markers(clip, sec_from, sec_to, ANIM_BLEND, speed)
+	_anim_cur = str(clip)
+
+
+## Direct AnimationPlayer access for states that drive playback themselves
+## (blade rebound reversal) — null before the rig is built.
+func anim_player() -> AnimationPlayer:
+	return _player
+
+
+## Playback speed override (blade rebound: 0.0 freezes the section player
+## while the state scrubs the cursor with seek). Pass 1.0 to restore —
+## states own the restore.
+func set_anim_speed(speed: float) -> void:
+	if _player != null:
+		_player.speed_scale = speed
+
+
+## Idle-clip crossfade with a custom blend (blade rebound recovery): hands
+## playback back to the auto-resolve and starts the named slot clip over
+## the given blend time. No-op when the slot has no resolved clip.
+func play_slot_blend(slot: StringName, blend: float) -> void:
+	var clip := StringName(str(_clips.get(slot, &"")))
+	if _player == null or clip == &"":
+		return
+	anim_manual = false
+	anim_state = slot
+	_player.play(clip, maxf(blend, 0.01))
 	_anim_cur = str(clip)
 
 

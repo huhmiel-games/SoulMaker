@@ -3,6 +3,7 @@
 [ext_resource type="Script" uid="uid://dugw803h5xx2v" path="res://src/runtime/player_controller.gd" id="1"]
 [ext_resource type="Script" uid="uid://dyfsnw8p84abw" path="res://src/runtime/player_camera.gd" id="2"]
 [ext_resource type="PackedScene" uid="uid://uedsfngbxgvc" path="res://assets/meshes/characters/Superhero_Male_FullBody.gltf" id="3"]
+[ext_resource type="PackedScene" uid="uid://veku4j1edq0q" path="res://assets/weapons_meshes/VikingSwordBS.glb" id="3_8cdkg"]
 
 [sub_resource type="CapsuleShape3D" id="body_shape"]
 radius = 0.3
@@ -11,28 +12,38 @@ height = 1.29
 [sub_resource type="BoxShape3D" id="wedge_shape"]
 size = Vector3(0.313095, 0.596767, 0.436127)
 
-[node name="Player" type="CharacterBody3D"]
+[node name="Player" type="CharacterBody3D" unique_id=952971318]
 floor_max_angle = 1.0472
 floor_snap_length = 1.0
 script = ExtResource("1")
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=143494794]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.06, 0)
 shape = SubResource("body_shape")
 
-[node name="FootWedge" type="CollisionShape3D" parent="."]
+[node name="FootWedge" type="CollisionShape3D" parent="." unique_id=1163069333]
 transform = Transform3D(1, 0, 0, 0, 0.71934, 0.694658, 0, -0.694658, 0.71934, -0.0129165, 0.367499, -0.0473027)
 shape = SubResource("wedge_shape")
 
-[node name="RigRoot" parent="." instance=ExtResource("3")]
+[node name="RigRoot" parent="." unique_id=1149735124 instance=ExtResource("3")]
 
-[node name="CamPivot" type="Node3D" parent="."]
+[node name="BladeAttach" type="BoneAttachment3D" parent="RigRoot/Armature/GeneralSkeleton" parent_id_path=PackedInt32Array(1149735124, 1456039140) index="3" unique_id=2095000066]
+transform = Transform3D(0, -1, 0, 0, 0, -1, 1, 0, 0, -0.70648694, 1.4555, -0.06539998)
+bone_name = "RightHand"
+bone_idx = 34
+
+[node name="VikingSwordBS" parent="RigRoot/Armature/GeneralSkeleton/BladeAttach" unique_id=1952396557 instance=ExtResource("3_8cdkg")]
+transform = Transform3D(-0.015785558, 0.9998754, 0, -0.03178483, -0.00050180376, -0.9994946, -0.9993701, -0.01577758, 0.03178879, 0.10271631, 0.11662543, 0.030665755)
+
+[node name="CamPivot" type="Node3D" parent="." unique_id=191442021]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.6, 0)
 script = ExtResource("2")
 
-[node name="SpringArm3D" type="SpringArm3D" parent="CamPivot"]
+[node name="SpringArm3D" type="SpringArm3D" parent="CamPivot" unique_id=251311734]
 spring_length = 4.5
 margin = 0.3
 
-[node name="Camera3D" type="Camera3D" parent="CamPivot/SpringArm3D"]
+[node name="Camera3D" type="Camera3D" parent="CamPivot/SpringArm3D" unique_id=370940538]
 current = true
+
+[editable path="RigRoot"]

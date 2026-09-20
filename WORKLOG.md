@@ -1,13 +1,13 @@
 # SoulMaker — Worklog & current state
 
-**Updated**: 2026-09-18
+**Updated**: 2026-09-20
 
 ## Current thread
 
-- **Objective**: P2 fighter core — locomotion rewrite body-relative, nodess state machine (Idle/Locomotion/Fall), uncommitted
+- **Objective**: P2 fighter core — blade rebound on blocked hits (shield / heavy armor), UNCOMMITTED
 - **Expected mode**: build
-- Next step: human locomotion recipe (below); commit AFTER human OK (not requested yet).
-- **Last step done**: facing unique souls (UNCOMMITTED) — split body/rig supprimé : rig cloué à PI, wish caméra-relative en free (le body tourne vers le wish via `turn_body_to`, yaw follow toujours on), body-relative en lock (track ennemi), roll free tourne vers `_dir`, `align_body_to_mesh`/`_face_rig`/`_face_lock` supprimés. Boot + audit clean, recette free/lock attendue. Connu : strafe locké joue le clip walk avant en glissade (aucun clip strafe dans les packs — futur slot).
+- Next step: human rebound recipe (below); commit AFTER human OK (not requested yet).
+- **Last step done**: sweep data-driven auto-AABB codé (UNCOMMITTED, rebound mis de côté) — `DebugBlade` supprimé, `_build_blade()` supprimée, sweep auto-dimensionné depuis `get_aabb()` du premier mesh sous `BladeAttach` (VikingSwordBS détectée : `1.009 x 0.113 x 0.040 blade_axis=X`), `SWEEP_EXTRA` sur le plus grand axe, box rouge debug semi-transparente enfant du sweep, `_update_sweep` hérite l'orientation de l'attach (aucune hypothèse d'axe), fallback `SWEEP_FALLBACK_*` si pas d'arme. Constantes `BLADE_*` supprimées. Boot + audit clean. Recette : vérifier la box rouge épouse la VikingSword + connects latéraux.
 
 ## Test recipe (human) — round-trip editor ⇄ game
 

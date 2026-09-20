@@ -5,6 +5,8 @@ extends StaticBody3D
 ## flash + micro-knockback per connect, DOWN fall at zero with auto reset.
 ## Placeholder for the enemy archetype (05) — real poise/flinch/stagger
 ## arrive with it; this dummy only proves the player's connect stack reads.
+## blocked_mode emulates a shielded / heavily armored enemy (blade rebound):
+## connects deal no damage and report blocked=true.
 
 const MAX_HP := 30.0
 const KNOCKBACK := 0.22
@@ -16,6 +18,9 @@ const TIP_RATE := 8.0
 var hp := MAX_HP
 var hits := 0
 var down := false
+## Shield/armor stand-in (blade rebound): blocks every connect, no damage,
+## no knockback, reports blocked=true so the attacker recoils.
+@export var blocked_mode := false
 
 var _home := Transform3D.IDENTITY
 var _mesh: MeshInstance3D = null
@@ -50,10 +55,19 @@ func _ready() -> void:
 
 
 ## Player connect: damage + reaction. Ignored while DOWN (no chain spam on
-## a fallen dummy). Returns true on the killing blow (overlay text).
-func take_hit(power: float, from: Vector3) -> bool:
+## a fallen dummy). Blocked mode (shield/armor stand-in): no damage, no
+## knockback, still flashes + counts the hit. Returns {killed, blocked} —
+## the attacker fires the full chain on first connect and recoils (blade
+## rebound) on any blocked connect that did not kill.
+func take_hit(power: float, from: Vector3) -> Dictionary:
 	if down:
-		return false
+		return {"killed": false, "blocked": false}
+	if blocked_mode:
+		hits += 1
+		_flash = FLASH_TIME
+		print("[Enemy] blocked %d" % hits)
+		_update_label()
+		return {"killed": false, "blocked": true}
 	hp = maxf(hp - power, 0.0)
 	hits += 1
 	_flash = FLASH_TIME
@@ -68,7 +82,7 @@ func take_hit(power: float, from: Vector3) -> bool:
 	else:
 		print("[Enemy] hit %d hp %.0f" % [hits, hp])
 	_update_label()
-	return down
+	return {"killed": down, "blocked": false}
 
 
 func _process(delta: float) -> void:
@@ -112,4 +126,4 @@ func _reset() -> void:
 
 func _update_label() -> void:
 	if _label != null:
-		_label.text = "enemy hp %.0f%s" % [hp, " DOWN" if down else ""]
+		_label.text = "enemy %s%.0f%s" % ["BLOCKED " if blocked_mode else "hp ", hp, " DOWN" if down else ""]

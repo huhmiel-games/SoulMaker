@@ -2,8 +2,8 @@
 
 [ext_resource type="Environment" path="res://scenes/editors/env_default.tres" id="4"]
 [ext_resource type="PackedScene" uid="uid://cqk7playerp21" path="res://scenes/prefabs/player.tscn" id="5"]
-[ext_resource type="Script" path="res://scenes/tests/fake_enemy.gd" id="6"]
-[ext_resource type="Script" path="res://src/runtime/impact_host.gd" id="7"]
+[ext_resource type="Script" uid="uid://bbafwoae82175" path="res://scenes/tests/fake_enemy.gd" id="6"]
+[ext_resource type="Script" uid="uid://djnughxi6e4qg" path="res://src/runtime/impact_host.gd" id="7"]
 
 [sub_resource type="BoxMesh" id="ground_mesh"]
 size = Vector3(40, 0.2, 40)
@@ -85,7 +85,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.1, 0)
 shape = SubResource("ground_shape")
 
 [node name="Ramp" type="StaticBody3D" parent="." unique_id=1117252832]
-transform = Transform3D(0.9396926, 0, -0.34202015, 0, 1, 0, 0.34202015, 0, 0.9396926, 8, 1, -6)
+transform = Transform3D(1, 0, 0, 0, 0.7890841, -0.6142852, 0, 0.6142852, 0.7890841, 8, 1, -6)
 
 [node name="RampMesh" type="MeshInstance3D" parent="Ramp" unique_id=841718889]
 mesh = SubResource("ramp_mesh")
@@ -147,7 +147,7 @@ mesh = SubResource("marker_mesh")
 [node name="Player" parent="." unique_id=1970426363 instance=ExtResource("5")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 6)
 
-[node name="ImpactHost" type="Node3D" parent="." unique_id=2200000001]
+[node name="ImpactHost" type="Node3D" parent="." unique_id=-2094967295]
 script = ExtResource("7")
 
 [node name="HUD" type="CanvasLayer" parent="." unique_id=1667120283]
@@ -160,7 +160,7 @@ offset_bottom = 44.0
 theme_override_font_sizes/font_size = 18
 text = "boot"
 
-[node name="Enemy" type="Label" parent="HUD" unique_id=2200000002]
+[node name="Enemy" type="Label" parent="HUD" unique_id=-2094967294]
 offset_left = 16.0
 offset_top = 44.0
 offset_right = 600.0

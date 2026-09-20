@@ -8,7 +8,7 @@
 	"slots": {
 		"idle": {
 			"clips": [
-				"adventure__idle",
+				"adventure__idle (2)",
 				"adventure__idle (3)"
 			],
 			"active": 0,
@@ -63,6 +63,12 @@
 				"release_speed": 1.0,
 				"stamina_cost": 20.0,
 				"sweep_start": 0.4,
+				"rebound": {
+					"frames": 16,
+					"speed": 2.0,
+					"hold_time": 0.15,
+					"reblend_time": 0.30
+				},
 				"impact": {
 					"damage": 10.0,
 					"hitstop_frames": 4,

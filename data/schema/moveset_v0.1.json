@@ -44,6 +44,18 @@
 			  "attack_speed": { "type": "number", "exclusiveMinimum": 0 },
 			  "release_speed": { "type": "number", "exclusiveMinimum": 0 },
 			  "stamina_cost": { "type": "number", "minimum": 0 },
+			  "sweep_start": { "type": "number", "minimum": 0, "maximum": 0.9 },
+			  "rebound": {
+				"type": "object",
+				"description": "Blade rebound on blocked connects (features/01): seek-driven rewind once hitstop ends, frozen hold of the recoiled pose, then blend to idle. Absent = committed swing with no recoil.",
+				"properties": {
+				  "frames": { "type": "number", "minimum": 3, "maximum": 16 },
+				  "speed": { "type": "number", "exclusiveMinimum": 0 },
+				  "hold_time": { "type": "number", "minimum": 0 },
+				  "reblend_time": { "type": "number", "minimum": 0 }
+				},
+				"additionalProperties": true
+			  },
 			  "impact": {
 				"type": "object",
 				"description": "Connect payload (features/01 game feel): damage per connect, hitstop frames (2-10 by power), shake scale (camera trauma multiplier). Whiff = dry, no chain.",

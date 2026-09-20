@@ -36,6 +36,13 @@ const IMPACT_DEFAULTS := {
 	"damage": 10.0, "hitstop_frames": 4, "shake_scale": 1.0,
 }
 
+## Default blade rebound (features/01): reverse N frames at negative speed
+## once hitstop ends, then blend to idle over reblend_time. Absent from the
+## JSON = committed swing with no recoil (current behavior).
+const REBOUND_DEFAULTS := {
+	"frames": 4, "speed": 3.0, "hold_time": 0.15, "reblend_time": 0.15,
+}
+
 
 ## Structural checks against schema v0.1. Returns the issue list (empty =
 ## clean); unknown slots are tolerated but reported.
@@ -85,6 +92,14 @@ static func validate_moveset(obj: Dictionary) -> PackedStringArray:
 				var v: Variant = (impact as Dictionary).get(key, 0.0)
 				if not v is float and not v is int:
 					issues.append("moveset slot '%s' phases.impact.%s must be a number" % [name, key])
+		var rebound: Variant = (phases as Dictionary).get("rebound", {})
+		if not rebound is Dictionary:
+			issues.append("moveset slot '%s' phases.rebound must be an object" % name)
+		elif not (rebound as Dictionary).is_empty():
+			for key in ["frames", "speed", "hold_time", "reblend_time"]:
+				var v: Variant = (rebound as Dictionary).get(key, 0.0)
+				if not v is float and not v is int:
+					issues.append("moveset slot '%s' phases.rebound.%s must be a number" % [name, key])
 	return issues
 
 
@@ -170,11 +185,12 @@ static func _set_markers(player: AnimationPlayer, clip: StringName, phases: Vari
 
 
 ## Attack phases for a slot (defaults when absent): absolute section bounds +
-## per-section speeds + stamina cost + impact payload. Read once by the
-## controller at boot.
+## per-section speeds + stamina cost + impact payload + rebound params. Read
+## once by the controller at boot.
 static func phases_for(obj: Dictionary, slot: StringName) -> Dictionary:
 	var out := (PHASE_DEFAULTS as Dictionary).duplicate()
 	out["impact"] = (IMPACT_DEFAULTS as Dictionary).duplicate()
+	out["rebound"] = (REBOUND_DEFAULTS as Dictionary).duplicate()
 	var slots: Dictionary = obj.get("slots", {})
 	var entry: Variant = slots.get(String(slot), {})
 	if entry is Dictionary:
@@ -190,6 +206,13 @@ static func phases_for(obj: Dictionary, slot: StringName) -> Dictionary:
 					if (impact as Dictionary).has(key):
 						merged[key] = float((impact as Dictionary)[key])
 				out["impact"] = merged
+			var rebound: Variant = (phases as Dictionary).get("rebound", {})
+			if rebound is Dictionary and not (rebound as Dictionary).is_empty():
+				var rmerged := (REBOUND_DEFAULTS as Dictionary).duplicate()
+				for key in rmerged:
+					if (rebound as Dictionary).has(key):
+						rmerged[key] = float((rebound as Dictionary)[key])
+				out["rebound"] = rmerged
 	return out
 
 
