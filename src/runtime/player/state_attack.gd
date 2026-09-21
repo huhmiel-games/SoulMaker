@@ -167,17 +167,23 @@ func _poll_sweep() -> void:
 		return
 	var impact := ctrl.attack_impact()
 	var damage := float(impact.get("damage", 10.0))
+	var crit_mult := float(impact.get("critical_multiplier", 1.5))
 	var host := ctrl.impact_host()
 	for c in connects:
 		if bool(c.get("is_wall", false)):
 			continue
 		var body: Object = c["body"]
 		var point: Vector3 = c["point"]
-		var raw: Variant = body.call("take_hit", damage, ctrl.global_position)
+		var raw: Variant = body.call("take_hit", damage, ctrl.global_position, crit_mult)
 		var result: Dictionary = raw if raw is Dictionary else {"killed": bool(raw), "blocked": false}
 		var killed := bool(result.get("killed", false))
 		var blocked := bool(result.get("blocked", false)) and not killed
-		print("[SM] Attack connect %s dmg %.0f%s%s" % [body, 0.0 if blocked else damage, " KILL" if killed else "", " BLOCKED" if blocked else ""])
+		var crit := bool(result.get("crit", false))
+		print("[SM] Attack connect %s dmg %.0f%s%s%s" % [body, 0.0 if blocked else (damage * crit_mult if crit else damage), " KILL" if killed else "", " BLOCKED" if blocked else "", " BACKSTAB" if crit else ""])
+		if crit:
+			# Crit readability (graybox, no dedicated anim yet): boosted
+			# shake below + brief attacker invulnerability (features/17).
+			ctrl.crit_iframes = PlayerController.CRIT_IFRAMES
 		if blocked and not _rebound:
 			# Rebound trigger: the reversal starts when the freeze ends
 			# (see step). Duration from the data so host-less scenes still
@@ -188,7 +194,11 @@ func _poll_sweep() -> void:
 			continue
 		if not _chained:
 			_chained = true
-			host.impact(point, int(impact.get("hitstop_frames", 4)), float(impact.get("shake_scale", 1.0)), ctrl.camera)
+			# Crit readability (graybox): 1 s freeze + boosted shake — the
+			# dedicated crit anim arrives with the shared rig (P4).
+			var stop := 60 if crit else int(impact.get("hitstop_frames", 4))
+			var shake := float(impact.get("shake_scale", 1.0)) * (1.5 if crit else 1.0)
+			host.impact(point, stop, shake, ctrl.camera)
 		else:
 			host.spark_at(point)
 	for c in connects:

@@ -71,6 +71,7 @@
 				},
 				"impact": {
 					"damage": 10.0,
+					"critical_multiplier": 1.5,
 					"hitstop_frames": 4,
 					"shake_scale": 1.0
 				}

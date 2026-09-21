@@ -63,7 +63,7 @@ static func merged(enemy_id: String) -> Dictionary:
 		var over: Dictionary = obj.get(section, {})
 		for key in over:
 			base[key] = over[key]
-	for key in ["display_name", "behavior_pattern_id", "boss_level"]:
+	for key in ["display_name", "behavior_pattern_id", "boss_level", "backstab_vulnerable"]:
 		if obj.has(key):
 			out[key] = obj[key]
 	return out
@@ -80,4 +80,5 @@ const FALLBACK := {
 	"locomotion": {"walk_speed": 2.2, "hurry_speed": 3.2, "hurry_range": 5.0, "turn_rate": 6.0},
 	"attack": {"range": 2.2, "windup_time": 0.7, "strike_time": 0.25, "recover_time": 0.9, "flinch_time": 0.45, "shielded": true, "shield_half_angle": 45.0},
 	"boss_level": false,
+	"backstab_vulnerable": true,
 }

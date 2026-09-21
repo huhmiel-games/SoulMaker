@@ -59,7 +59,7 @@ func _ready() -> void:
 ## knockback, still flashes + counts the hit. Returns {killed, blocked} —
 ## the attacker fires the full chain on first connect and recoils (blade
 ## rebound) on any blocked connect that did not kill.
-func take_hit(power: float, from: Vector3) -> Dictionary:
+func take_hit(power: float, from: Vector3, _crit_mult := 1.0) -> Dictionary:
 	if down:
 		return {"killed": false, "blocked": false}
 	if blocked_mode:

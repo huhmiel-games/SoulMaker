@@ -90,6 +90,10 @@ const GUARD_WALK_MULT := 0.5
 const GUARD_BREAK_TIME := 1.2
 const GUARD_BREAK_NOREGEN := 1.0
 
+## Backstab crit window (P3 S2, features/17): brief attacker
+## invulnerability after landing a backstab, set by StateAttack.
+const CRIT_IFRAMES := 0.6
+
 ## Locomotion clips resolve from data/characters/player_moveset.json (packs
 ## + slots + active variant); FALLBACK lives in Moveset, not here.
 
@@ -113,6 +117,9 @@ var stamina := STAMINA_MAX
 ## Invulnerability countdown (seconds left): set by StateDodge on enter,
 ## ticked here, read by future enemy hitboxes via is_invulnerable().
 var iframes := 0.0
+## Backstab crit invulnerability (seconds left): set by StateAttack on a
+## crit connect, ticked here, honored by take_hit (features/17).
+var crit_iframes := 0.0
 var _regen_wait := 0.0
 ## Damage state (P2 minimal): hp/poise pools, dead flag + respawn timer,
 ## _home spawn transform captured at ready.
@@ -389,6 +396,8 @@ func _physics_process(delta: float) -> void:
 		guard_release_needed = false
 	if iframes > 0.0:
 		iframes = maxf(iframes - delta, 0.0)
+	if crit_iframes > 0.0:
+		crit_iframes = maxf(crit_iframes - delta, 0.0)
 	if _poise_wait > 0.0:
 		_poise_wait -= delta
 		if _poise_wait <= 0.0 and not dead:
@@ -426,7 +435,7 @@ func is_invulnerable() -> bool:
 ## stamina_damage defaults to power (damage x 1.0 baseline). Returns
 ## {killed, staggered, blocked} (+ broken on guard break) for bookkeeping.
 func take_hit(power: float, hit_poise: float, _from: Vector3, stamina_damage := -1.0) -> Dictionary:
-	if dead or is_invulnerable():
+	if dead or is_invulnerable() or crit_iframes > 0.0:
 		return {"killed": false, "staggered": false, "blocked": false}
 	if is_guarding() and _guard_covers(_from):
 		var g: Dictionary = guard_cfg.get("class", {})

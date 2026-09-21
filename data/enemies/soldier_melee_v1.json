@@ -37,5 +37,6 @@
     "shielded": true,
     "shield_half_angle": 45.0
   },
-  "boss_level": false
+  "boss_level": false,
+  "backstab_vulnerable": true
 }

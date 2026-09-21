@@ -26,6 +26,8 @@ const HOME_ARRIVE := 0.5
 ## (1st flank → slow turn → 2nd flank → FLINCH).
 const TURN_SUPPRESS_TIME := 0.5
 const TURN_SUPPRESS_MULT := 0.3
+## Backstab rear cone half-angle (features/17: ±30° off the back axis).
+const BACKSTAB_HALF_ANGLE := 30.0
 
 enum { IDLE, CHASE, WINDUP, STRIKE, RECOVER, FLINCH, DEAD }
 const NAMES := {IDLE: "IDLE", CHASE: "CHASE", WINDUP: "WINDUP", STRIKE: "STRIKE", RECOVER: "RECOVER", FLINCH: "FLINCH", DEAD: "DEAD"}
@@ -79,18 +81,45 @@ func _physics_process(delta: float) -> void:
 	_update_label()
 
 
-## Player connect: damage + poise, FakeEnemy contract {killed, blocked}.
+## Player connect: damage + poise, FakeEnemy contract {killed, blocked}
+## (+ crit on backstab). Resolution order: backstab first (rear arc +
+## eligible state + flag — bypasses the shield, which only covers the
+## front), then the shield block, then the normal hit.
+## Backstab (P3 S2, features/17): attacker inside the rear cone (±30° off
+## the back axis) while the soldier is neutral (IDLE/CHASE) or committed
+## (WINDUP/STRIKE/RECOVER — the state IS the ~0.6 s window) and the config
+## flag allows it → immediate critical: damage x crit_mult, poise damage
+## scaled the same way (the mult IS the "high poise damage"). FLINCH/DEAD
+## are not eligible (no chain-crit on a stagger). Ignored while DEAD.
 ## Shielded + attacker inside the frontal shield cone + guard up = blocked
 ## (no damage, no poise damage — the attacker's blade rebounds, 01). Guard
 ## is up in IDLE/CHASE/WINDUP only: once the swing is committed
 ## (STRIKE/RECOVER) or the soldier flinches, the shield is down — readable
 ## souls rule, flank-or-punish. Poise break = FLINCH, which cancels an
 ## in-flight windup (05). Ignored while DEAD.
-func take_hit(power: float, from: Vector3) -> Dictionary:
+func take_hit(power: float, from: Vector3, crit_mult := 1.0) -> Dictionary:
 	if state == DEAD:
 		return {"killed": false, "blocked": false}
 	var to_you: Vector3 = from - global_position
 	to_you.y = 0.0
+	if crit_mult > 1.0 and to_you.length_squared() > 0.0001 and _backstab_open(to_you):
+		var dmg := power * crit_mult
+		hp = maxf(hp - dmg, 0.0)
+		poise = maxf(poise - dmg * POISE_FACTOR, 0.0)
+		_poise_wait = float((cfg.get("stats", {}) as Dictionary).get("poise_reset_time", 3.5))
+		_turn_suppress = TURN_SUPPRESS_TIME
+		hits += 1
+		_flash(Color(1.0, 0.8, 0.2))
+		print("[EnemyAI] BACKSTAB x%.1f dmg %.0f hp %.0f poise %.0f" % [crit_mult, dmg, hp, poise])
+		if hp <= 0.0:
+			_die()
+			return {"killed": true, "blocked": false, "crit": true}
+		if poise <= 0.0:
+			poise = float((cfg.get("stats", {}) as Dictionary).get("poise", 40.0))
+			_enter(FLINCH)
+			print("[EnemyAI] flinched (%d)" % hits)
+		_update_label()
+		return {"killed": false, "blocked": false, "crit": true}
 	var guard_up := state == IDLE or state == CHASE or state == WINDUP
 	if _is_shielded() and guard_up and to_you.length_squared() > 0.0001:
 		var fwd := -global_transform.basis.z
@@ -127,6 +156,20 @@ func take_hit(power: float, from: Vector3) -> Dictionary:
 
 func _is_shielded() -> bool:
 	return bool((cfg.get("attack", {}) as Dictionary).get("shielded", false))
+
+
+## Backstab eligibility (P3 S2): config flag + neutral/committed state +
+## attacker inside the ±30° rear cone. to_you = attacker - self, planar.
+func _backstab_open(to_you: Vector3) -> bool:
+	if not bool(cfg.get("backstab_vulnerable", true)):
+		return false
+	if not (state == IDLE or state == CHASE or state == WINDUP or state == STRIKE or state == RECOVER):
+		return false
+	var back := global_transform.basis.z
+	back.y = 0.0
+	if back.length_squared() < 0.0001:
+		return false
+	return back.normalized().dot(to_you.normalized()) > cos(deg_to_rad(BACKSTAB_HALF_ANGLE))
 
 
 func _enter(next: int) -> void:
