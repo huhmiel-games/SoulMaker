@@ -27,7 +27,7 @@ Legend per column: *Phase* refers to the roadmap phase (P0-P13); *Ref* points to
 | Dodge + i-frames | 🔒 | P2 | roadmap P2 | |
 | Stamina economy | 🔒 | P2 | roadmap P2 | Endurance-based |
 | Combat feel: windup/attack/release markers | 🔒 | P2 | roadmap P2, idea.txt | |
-| Upper/lower body layers (combos) | 🔒 | P2 | roadmap P2 | P0 spike FAIL 15/09/2026 — Blend2 somme des poids = 1, pas de superposition bas/haut ; à retester en P2 |
+| Upper/lower body layers (combos) | 🔒 | hors V1 | roadmap P2 | P0 spike FAIL 15/09/2026 — Blend2 somme des poids = 1, pas de superposition bas/haut ; décision sortie P2 (21/09/2026) : reporté hors V1 |
 | Hitstop, screen shake, hit reactions | 🔒 | P2 | roadmap P2 | |
 | Blade rebound, easing, variation | 🔒 | P2 | roadmap P2 | |
 | Swept `ShapeCast3D` hitbox, masked off-attack | 🔒 | P2 | roadmap P2 | spike P0 REPORTED — technique déjà choisie, validation en amont de P2 |
@@ -229,7 +229,7 @@ Legend per column: *Phase* refers to the roadmap phase (P0-P13); *Ref* points to
 | Godot 4.7 + Jolt + GDScript | 🔒 | P0 | ADR-001 | |
 | Forward+ only (no Compatibility fallback) | 🔒 | P0 | ADR-002 | Vulkan required |
 | Quality tiers + auto-drop heavy features | 🔒 | P13 | ADR-002, ADR-019 | PCSS, SSAO, volumetrics, light cap; real shadow maps on the toon look |
-| HD4600 low-end calibration (skinning + shadows spike) | 🔒 | P2/P13 | ADR-002 | Re-bench on real rig |
+| HD4600 low-end calibration (skinning + shadows spike) | 🔒 | P13 | ADR-002 | Spike P2 droppé 21/09/2026 — tiers calibrés sur le bench primitives uniquement, risque résiduel accepté |
 | Save/run serialization (GameState) | 🔒 | P6/P7 | screens* save/run, ADR-012 | |
 | Multiple parallel runs per world | 🔒 | P7 | ADR-015 | Load lists runs |
 | Save integrity / crash recovery | 🔒 | P7 | ADR-016 | Atomic write, corruption detection |

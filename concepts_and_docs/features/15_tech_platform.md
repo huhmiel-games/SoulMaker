@@ -21,7 +21,7 @@
 ## Quality tiers (ADR-002 low-end)
 
 **Goal** — the low-end target (~30 fps stable) via presets, not buried options.
-**Behaviors** — render scale, MSAA, shadow quality, per-zone light cap, heavy-feature auto-drop (PCSS, SSAO, volumetrics) based on detected hardware floor; benchmark on real HD4600; Forward+ low ≈ 55 avg / 32 p95 @720p on the 12/09 bench; re-confirm post-skinning + shadows (P2 spike, ADR-019).
+**Behaviors** — render scale, MSAA, shadow quality, per-zone light cap, heavy-feature auto-drop (PCSS, SSAO, volumetrics) based on detected hardware floor; benchmark on real HD4600; Forward+ low ≈ 55 avg / 32 p95 @720p on the 12/09 bench (primitives only — P2 skinning + shadows spike dropped 21/09/2026, residual risk accepted).
 **Parameters / bounds** — tier-safe combinations.
 **Data / JSON** — settings + auto-detect.
 **Interactions** — `06` light cap, `02` char perf, `11` Options.
@@ -106,7 +106,7 @@
 ## HD4600 low-end calibration
 
 **Goal** — the minimum hardware is a real, benchmarked target.
-**Behaviors** — 12/09 bench (this repo's machine): Forward+ low ≈ 55 avg / 32 p95 fps @720p; Compatibility worse on every metric; skinning + shadows spike at P2 is the remaining renderer unknown.
+**Behaviors** — 12/09 bench (this repo's machine): Forward+ low ≈ 55 avg / 32 p95 fps @720p; Compatibility worse on every metric; the skinning + shadows spike was dropped at P2 exit (21/09/2026) — tiers rest on the primitives bench.
 **Data / JSON** — bench notes in ADR-002.
 **Sources** — ADR-002.
 

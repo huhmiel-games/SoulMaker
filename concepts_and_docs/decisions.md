@@ -22,7 +22,7 @@
 | Compatibility high | 34.8 | 23.2 | 18.9 | 17.0 |
 | Compatibility low | 40.5 | 22.7 | 17.8 | 13.3 |
 
-**Reading** : Forward+ wins on every setting, and the gap widens precisely where it matters for a souls-like — stability (p95/p99, % slow frames). The "Compatibility safety net" was not a net: it was the worse option. (Bench on primitives only; the **skinning** cost still to be measured at P2 on the real rig.)
+**Reading** : Forward+ wins on every setting, and the gap widens precisely where it matters for a souls-like — stability (p95/p99, % slow frames). The "Compatibility safety net" was not a net: it was the worse option. (Bench on primitives only; the planned skinning + shadows spike was **dropped at P2 exit, 21/09/2026** — the low-end tiers rest on this primitives bench, residual risk accepted and tracked at P13.)
 
 **Decision** : **Forward+ is the project's only renderer — no Compatibility fallback, neither in dev nor at export.** Permanent hardware requirement: **Vulkan required** (no OpenGL path). The low-end target is served exclusively by **quality tiers** (render scale, MSAA, shadow quality, per-zone light cap, automatic dropping of heavy features — PCSS, SSAO, volumetrics — according to the detected hardware floor). No intersection constraint: all features are developed in Forward+.
 **History (trace)** : the Compatibility path (hardening pass, then export fallback for Vulkan-less GPUs) was dropped on 12/09/2026: slower, less stable, never better at any setting.

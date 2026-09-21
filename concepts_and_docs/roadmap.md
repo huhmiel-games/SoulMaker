@@ -71,16 +71,16 @@ A game that is not a game: a base that lets anyone create their own souls-like w
 - 3rd-person controller: locomotion, orbit camera, lock-on, dodge + i-frames, stamina
 - Maker round-trip: editor ⇄ game on the current map (symmetric `pending_map` handover — replaces the deleted P1 fly playtest) + return to the editor
 - **Game feel**:
-  - Markers windup/attack/release; upper/lower body layers (animation combos)
+  - Markers windup/attack/release; ~~upper/lower body layers (animation combos)~~ — **dropped out of V1 at P2 exit (21/09/2026)**: Blend2 FAIL stands as decision, topology rework post-V1 only
   - Hitstop, screen shake, VFX, hit reactions, controller rumble (haptics) — sound/audio deferred to vault (ADR-014): the "slam" jury reads **without audio**, keep that in mind when judging the P2 baseline
   - Blade rebound (reverse 3-6 frames + blend to idle), easing, variation
   - Swept `ShapeCast3D` hitbox (no inflated volumes), masked on non-offensive frames
 - 1 simple enemy archetype (aggro, telegraph, hit reaction, poise)
-- **Skinning + shadows spike** (complement to the HD4600 bench of 12/09, done on primitives only): measure GPU skinning (Forward+) with N skinned characters on the real re-targeted rig **and** the real shadow maps on the toon shader (ADR-019) — the last renderer unknowns before locking the low-end tiers (P13)
+- ~~**Skinning + shadows spike** (complement to the HD4600 bench of 12/09, done on primitives only): measure GPU skinning (Forward+) with N skinned characters on the real re-targeted rig **and** the real shadow maps on the toon shader (ADR-019) — the last renderer unknowns before locking the low-end tiers (P13)~~ — **dropped at P2 exit (21/09/2026)**: tiers rest on the primitives bench, residual risk accepted (tracked at P13)
 
 > **Note** : the full martial toolkit (block, criticals, ranged, damage types, movement depth) ships in the next phase — **P3, Combat depth slice** (ADR-018). P2 proves the base swing honest and readable.
 
-**Done** : playable/testable criterion — readable impact, honest dodge, the combat is felt.
+**Done** : playable/testable criterion — readable impact, honest dodge, the combat is felt. **P2 closed 21/09/2026** (fighter core + soldier_melee_v1 validated over 3 human combat sessions; bench dropped, upper/lower out of V1 — see above).
 
 ---
 
@@ -264,11 +264,11 @@ A game that is not a game: a base that lets anyone create their own souls-like w
 **Goal** : the low-end target (Forward+ low), the polish.
 
 **Deliverables**
-- **Quality tiers** calibrated on the **real HD4600** — bench of 12/09: Forward+ low ≈ 55 avg / 32 p95 fps → the "low-end" tier holds the ~30 fps stable target; re-confirmed with the skinning + shadows spike (P2)
+- **Quality tiers** calibrated on the **real HD4600** — bench of 12/09: Forward+ low ≈ 55 avg / 32 p95 fps → the "low-end" tier holds the ~30 fps stable target (primitives bench only — the P2 skinning + shadows spike was dropped 21/09/2026, residual risk accepted)
 - Automatic dropping of heavy features if a hardware floor is detected (PCSS, SSAO, volumetrics, per-zone light cap)
 - Various polish (LOD, draw call splitting, batching of cloned mobs)
 
-**Done** : quality tiers operational; the game holds ~30 fps stable on the HD4600 in Forward+ low (briefing updated after the P2 spike).
+**Done** : quality tiers operational; the game holds ~30 fps stable on the HD4600 in Forward+ low (calibrated on the primitives bench — P2 spike dropped 21/09/2026).
 
 ---
 
@@ -276,7 +276,7 @@ A game that is not a game: a base that lets anyone create their own souls-like w
 
 - **Assets = bottleneck** (we are dev, not artist): stylistic consistency between disparate sources (e.g. Quaternius = low-poly, not "anime"). Mitigation: **1st-party starter catalog as a V1 deliverable (P10/P11, ADR-017)** + cohesion through the base toon shader + imposed palette (ADR-019); community submissions are post-V1 augmentative, never a release dependency (P1 in temporary low-poly accepted).
 - **Data format drift** → versioning + validator from P0/P1, never a silent deletion.
-- **Low-end tier drift** → the only remaining renderer risk after dropping Compatibility (12/09): the low settings, now with **real shadow maps** (ADR-019), must stay sustainable. Mitigation: refresh the P13 bench when the real game (P2 skinning + shadows spike) exists.
+- **Low-end tier drift** → the only remaining renderer risk after dropping Compatibility (12/09): the low settings, now with **real shadow maps** (ADR-019), must stay sustainable. The P2 skinning + shadows spike was dropped (21/09/2026), so tiers rest on the primitives bench. Mitigation: re-bench at P13 on the real game if the HD4600 is still the floor target.
 - **Over-scoping** → each phase has a measurable "done" criterion; the maker is the product, not the gameplay nor the cinematics.
 - **Toolkit scope pressure (ADR-018)** → the V1 combat toolkit has its own gray-box phase (P3) with a hard "done" criterion; its integrations spread across P5 (narrative verbs), P7 (progression/HUD/resists) and P8 (equipment/ammo). Mitigation: 🟡 items settled at the P3 design pass; a prototype/deep-pass split at P3 exit; re-slim during P3 is allowed — the net (`features.md`) keeps completeness either way, only phase placement moves.
 - **Visual-style drift (ADR-019)** → the cel/toon look is a V1 identity element, not a preference. Mitigation: base shader + palette live in P1 and are enforced at intake on every catalog stream; face light treatment gray-boxed at P4 (with the face system).

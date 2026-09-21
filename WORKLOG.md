@@ -4,10 +4,10 @@
 
 ## Current thread
 
-- **Objective**: P2 fighter core — 1st enemy archetype `soldier_melee_v1` (sword+shield, capsule placeholder), UNCOMMITTED
+- **Objective**: ~~P2 fighter core~~ **DONE 21/09/2026** — fighter core + `soldier_melee_v1` validated (3 human combat sessions: kill + death + FLINCH per session) ; bench skinning+shadows droppé, upper/lower reporté hors V1 (décisions tracées roadmap/decisions/features).
 - **Expected mode**: build
-- Next step: human enemy recipe (below); commit AFTER human OK (not requested yet).
-- **Last step done**: flinch rendu faisable A+B (UNCOMMITTED) — `poise_reset_time` 2.5→3.5 (fenêtre double-flanc, JSON+fallback) + facing stagger comportemental (`_turn_suppress` 0.5 s à 0.3× après hit reçu — le soldat "accuse le coup", pas de conflit avec le gel garde). Difficulté validée OK-souls par humain (kill + mort par session, damage 10 gardé). Boot clean 2 scènes. Recette : 1er flanc → il tourne lentement → 2e flanc → `FLINCH` visible.
+- Next step: ouvrir P3 (Combat depth slice, ADR-018) — design pass kickoff, valeurs `features/17` ; commit du lot P2 en attente d'ordre explicite.
+- **Last step done**: clôture P2 (UNCOMMITTED) — traçage drop bench + report upper/lower hors V1 (`decisions.md` ADR-002, `roadmap.md` P2/P13/risques, `features.md`, `features/01`, `features/15`, `godot47_api_notes.md`) ; tuning flinch A+B validé humain.
 - **Previous**: wall rebound DS3 committé (`b713efb`) + `planar` hoist fix + cam `spring_length` 2.5 (committés par humain).
 
 ## Test recipe (human) — enemy archetype (scene `scenes/tests/enemy_archetype_test.tscn`)

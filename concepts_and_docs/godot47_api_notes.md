@@ -101,7 +101,7 @@ The spike (roadmap:33) was abandoned; these are the verified facts it uncovered:
   `walk × (1−amount) + attack × amount` (weights sum to 1). It CANNOT keep two
   disjoint body layers (e.g. lower=walk, upper=attack) at full intensity
   simultaneously. Layering different body parts needs an additive node or
-  per-bone masking — a different topology, deferred to P2.
+   per-bone masking — a different topology, deferred out of V1 (decision at P2 exit, 21/09/2026).
 - **`get_animation_list()` returns `Array[StringName]`** (not `Array[String]`)
   on AnimationLibrary.
 - **`event.keycode` is keyboard-layout dependent** (AZERTY digits 1-5 do not

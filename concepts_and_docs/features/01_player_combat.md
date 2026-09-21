@@ -125,7 +125,7 @@
 **Open questions** — whether weapon-swing state also freezes lower (usually yes in souls).
 **Sources** — idea.txt 1337-1401.
 
-**Status** : spike FAIL 15/09/2026 — section conservée comme intent ; l'option « blend upper body nodes onto lower locomotion, masked by bone sets » via `AnimationNodeBlend2` est écartée (somme des poids = 1 → pas de superposition bas/haut à pleine intensité). Rework de topologie (additive / masques par os) à réévaluer en P2.
+**Status** : spike FAIL 15/09/2026 — l'option « blend upper body nodes onto lower locomotion, masked by bone sets » via `AnimationNodeBlend2` est écartée (somme des poids = 1 → pas de superposition bas/haut à pleine intensité). **Décision 21/09/2026 (sortie P2) : reporté hors V1** — le FAIL devient décision, pas un « à retester » qui traîne ; un rework de topologie (additive / masques par os) ne sera réévalué que post-V1.
 
 ## Foot IK (SkeletonModifier3D)
 
