@@ -1,30 +1,32 @@
 # 17 — Combat depth (guard, criticals, ranged, damage types & status)
 
 > The V1 martial toolkit under ADR-018: the systems that make a souls-like *feel correct* beyond the base swing — blocking, criticals, ranged weapons, damage-type/status layers, movement and tooling depth. Companion to `01_player_combat.md` (base locomotion/attack/impact), `03_progression.md` (stamina, equip load, resistances, roll tiers), `04_inventory.md` (shield/ammo/accessory payloads), `05_enemies.md` (weaknesses, poise). Neutral spec — status lives in `features.md`; the 🟡 open items are settled at the P3 design pass (ADR-018).
+>
+> **Scope cut 21/09/2026 (P3 kickoff, testability)** : kick, parry and riposte move to **V2** (post-V1 vault) — the dev never parries (no feel jury) and the kick-as-universal-guard-break reads arbitrary next to heavy blades. What stays in P3: block/guard, **backstab as a direct critical hit** (positional, human-testable), blade shove on heavy classes (the heavies' guard-break answer), and everything else below. Critical stance + riposte return with parry in V2.
 
 ## Block / guard with shields
 
 **Goal** — a readable defensive option: blocking commits stamina, breaks when exhausted, and converts a hit into a cost instead of damage.
 **Behaviors** — guard raises the **blocking instrument**: a shield (offhand slot `04`) or **any weapon's own guard values** (one- or two-handed); while guarding, incoming hits convert into **stamina damage** on the blocker (based on the instrument's `stability`, attacker's hit stamina damage) and apply reduced HP damage (flat `guard_absorb`); stamina exhausted → **guard break**: posture collapses, shield-pushed, brief vulnerability window, no stamina regen during recovery; blocking faces must respect an **arc** (camera-facing frontal cone) — hits from outside the arc bypass the guard.
 **Parameters / bounds** — stat block bounded and **identical between weapons and shields**: every weapon carries guard values, every shield carries attack values (damage/damage_type), the distinction is the value profile (weapon = high damage / weak guard; shield = strong guard / weak damage); payload: `guard_absorb` (0-100% flat reduction), `stability` (stamina-cost multiplier per hit), `block_arc` (front cone), `hit_stamina_damage` upper bound from attackers; guard recovery (cannot re-block during own recover).
-**Data / JSON** — **shared stat block for weapons AND shields**: `{damage, damage_type, guard_absorb, stability, block_arc, weight, poise}`; shields add `parry_window` (0 = cannot parry); validated at import (ADR-009/012).
-**Interactions** — stamina economy (`01`/`03`), poise break (`01`), enemy attacks deliver `hit_stamina_damage` (`05`), guard break feeds the critical stance (`05`/below).
+**Data / JSON** — **shared stat block for weapons AND shields**: `{damage, damage_type, guard_absorb, stability, block_arc, weight, poise}`; shields carry `parry_window` **reserved (0 in V1, active in V2 with parry)**; validated at import (ADR-009/012).
+**Interactions** — stamina economy (`01`/`03`), poise break (`01`), enemy attacks deliver `hit_stamina_damage` (`05`), guard break feeds an extended punish stagger in V1 (critical stance returns with riposte in V2).
 **Edge cases** — blocking while stamina is 0 (blocked input / delayed guard), mid-combo guard (from block-eligible state only), shield struck while breaking (double-tax avoided — one resolution), guard vs boss heavy (absorb capped so bosses remain threatening).
-**Open questions** — guard/parry targeting tuned at P3 (see Two-handed grip below): two-handing **keeps guard** (via the weapon's own guard values, weaker than a good shield) and **cancels parry**; parry requires a shield only — light (ideal window), medium (shorter window), great shields cannot parry. (Corrected 13/09/2026 — the earlier "two-hand disables guard" was wrong against actual souls behavior.)
+**Open questions** — guard/parry targeting tuned at P3 (see Two-handed grip below): two-handing **keeps guard** (via the weapon's own guard values, weaker than a good shield). Parry requires a shield — **V2** (light/medium/great windows below are the frozen V2 spec, kept here so V2 starts from pinned values). (Corrected 13/09/2026 — the earlier "two-hand disables guard" was wrong against actual souls behavior; cut 21/09/2026 — parry to V2.)
 **Sources** — ADR-018, features.md §1.
 
-## Criticals: parry / backstab / riposte
+## Criticals: backstab (P3) / parry + riposte (V2)
 
 **Goal** — the high-risk, high-reward resolution: it must read as a *temporary window of truth* after a correctly timed defense.
-**Behaviors** — two routes to a **critical stance** on a target (a bounded post-stagger state):
-- **Parry**: a quick timed action **available only with a shield in hand** — **light shields** (ideal: **8-12 frames ≈ 135-200 ms**), **medium shields** (shorter: **6-8 frames ≈ 100-135 ms**), **great shields cannot parry** (`parry_window: 0`); **two-handing cancels parry** (shield sheathed). Attacks flagged `parryable` (bounded base set — normal melee; heavy attacks parryable with a narrower window; jump/plunge/moves excluded) that land **within the parry window** → target enters critical stance; wrong timing (**whiff**) → reduced defensive coverage + stamina cost **and a longer recover (~0.5 s)** — a miss is punishable.
-- **Backstab**: an attack input on a target caught in neutral **or in animation-commit**, **within the rear arc** (**±30° off the target's back axis**) → critical stance. The window holds **~0.6 s** while the target is animation-caught (attack/slow-recovery states); it resolves on the trigger or clears when the state does.
-- In critical stance (**~1.5 s** max), a **riposte** input deals the critical hit with the weapon's **`critical_multiplier`** (**×1.5 light weapons … ×2 heavy**, bounded) on a dedicated shared-rig animation, with brief invulnerability and high poise damage; the stance also opens on **guard break** (above, and kick below); the target shakes it off when the window expires (no chain-crit lock).
-**Parameters / bounds** — parry window per shield class at 60 fps reference: **light 8-12 f / medium 6-8 f / great 0**; whiff recover **~0.5 s** + stamina cost; `parryable` list bounded (base catalog); backstab cone **±30°** behind / window **~0.6 s**; stance window **~1.5 s**; `critical_multiplier` **×1.5-×2** (weapon payload); one crit at a time.
-**Data / JSON** — attack entries: `parryable: bool` (+ optional `parry_window_shrink` for heavy attacks); weapon entry: `critical_multiplier` (×1.5-×2); shield entry: `parry_window` (frames, 0 for great shields); critical animation via the shared rig (`02`).
-**Interactions** — guard break (above) also feeds critical stance (posture broken → same stance); poise/stagger (`05`); boss immunity policy (bosses resist guard-break-to-crit per bounded resist — ADR-018 keeps bosses fair).
-**Edge cases** — parry vs projectile (not parryable in V1 — ranged uses dodge), two opponents in stance (take the nearest), enemy in stance while the player dies, parry during hitstop (input buffered).
-**Open questions** — **resolved in-doc** (values above); residual: the exact base-catalog `parryable` list is finalized with the starter catalog (feel-tuned at P3).
+**Behaviors** —
+- **Backstab (P3)** : an attack input on a target caught in neutral **or in animation-commit**, **within the rear arc** (**±30° off the target's back axis**) → **immediate critical hit** with the weapon's **`critical_multiplier`** (**×1.5 light weapons … ×2 heavy**, bounded) on a dedicated shared-rig animation, with brief invulnerability and high poise damage. The window holds **~0.6 s** while the target is animation-caught (attack/slow-recovery states); it resolves on the trigger or clears when the state does. No stance two-step in V1 — positional trigger, direct resolution (human-testable, no frame timing).
+- **Parry + riposte (V2, spec frozen below so V2 starts from pinned values)** : a quick timed action **available only with a shield in hand** — **light shields** (ideal: **8-12 frames ≈ 135-200 ms**), **medium shields** (shorter: **6-8 frames ≈ 100-135 ms**), **great shields cannot parry** (`parry_window: 0`); **two-handing cancels parry** (shield sheathed). Attacks flagged `parryable` (bounded base set — normal melee; heavy attacks parryable with a narrower window; jump/plunge/moves excluded) that land **within the parry window** → target enters critical stance; wrong timing (**whiff**) → reduced defensive coverage + stamina cost **and a longer recover (~0.5 s)** — a miss is punishable.
+- In critical stance (**~1.5 s** max, V2), a **riposte** input deals the critical hit on a dedicated shared-rig animation, with brief invulnerability and high poise damage; the stance also opens on **guard break**; the target shakes it off when the window expires (no chain-crit lock). In V1, guard break instead yields an **extended punish stagger** (long vulnerability window, no stamina regen during recovery — no stance, no riposte input).
+**Parameters / bounds** — parry window per shield class at 60 fps reference (V2): **light 8-12 f / medium 6-8 f / great 0**; whiff recover **~0.5 s** + stamina cost; `parryable` list bounded (base catalog, finalized with the starter catalog at V2); backstab cone **±30°** behind / window **~0.6 s** (P3); stance window **~1.5 s** (V2); `critical_multiplier` **×1.5-×2** (weapon payload, P3 backstab + V2 riposte); one crit at a time.
+**Data / JSON** — weapon entry: `critical_multiplier` (×1.5-×2, P3); attack entries: `parryable: bool` (+ optional `parry_window_shrink` for heavy attacks, V2); shield entry: `parry_window` (frames, reserved 0 in V1); critical animation via the shared rig (`02`).
+**Interactions** — guard break (above) yields an extended punish stagger in V1 (critical stance in V2); poise/stagger (`05`); boss immunity policy (bosses resist guard-break-to-crit per bounded resist — ADR-018 keeps bosses fair; in V1 bosses take the extended stagger, no stance).
+**Edge cases** — two opponents stance-eligible in one tick (take the nearest, V2); enemy in stance while the player dies (V2); backstab vs projectile (melee only); backstab during hitstop (input buffered).
+**Open questions** — **cut 21/09/2026**: parry + stance + riposte → V2 (values above frozen as the V2 spec); residual P3: backstab crit feel + the base-catalog `critical_multiplier` per weapon class.
 **Sources** — ADR-018, features.md §1.
 
 ## Ranged weapons (bow / crossbow) & ammo
@@ -109,7 +111,7 @@
 ## Two-handed grip (moveset + strength scaling)
 
 **Goal** — a commitment toggle that trades shield/options for raw power — a *build choice* inside V1 (no new system).
-**Behaviors** — toggle (same binding as guard's alternate): **two-hand** the main weapon (shield sheathed/removed from the offhand **visually**); the weapon switches to its **two-hand moveset variant** (a data-parallel attack set — slower windups, bigger multipliers, or distinct combo) and gains a **Strength-scaling modifier**: two-handing counts Strength **×1.5** for both the **minimum-attribute requirement** and the **damage-scaling contribution** (souls convention, bounded base value). **Stamina costs are unchanged** (no monopole tax). **Guard is NOT disabled**: two-handing blocks with the weapon's own guard values (usually weaker than a good shield). **Parry is unavailable** (the shield is out of hand).
+**Behaviors** — toggle (same binding as guard's alternate): **two-hand** the main weapon (shield sheathed/removed from the offhand **visually**); the weapon switches to its **two-hand moveset variant** (a data-parallel attack set — slower windups, bigger multipliers, or distinct combo) and gains a **Strength-scaling modifier**: two-handing counts Strength **×1.5** for both the **minimum-attribute requirement** and the **damage-scaling contribution** (souls convention, bounded base value). **Stamina costs are unchanged** (no monopole tax). **Guard is NOT disabled**: two-handing blocks with the weapon's own guard values (usually weaker than a good shield). (Parry is a V2 system — nothing to cancel in V1.)
 **Parameters / bounds** — two-hand variant per weapon (catalog data, falls back to base moveset if absent), scaling modifier **×1.5** (base-owned, not creator-tunable), toggle from neutral/guard states only (no mid-combo).
 **Data / JSON** — weapon payload: `{moveset_one_hand, moveset_two_hand, two_hand_strength_scale: 1.5}` — falls back gracefully at import; guard values shared with the unified stat block (above).
 **Interactions** — Strength scaling (`03`), shield slot (`04`), guard via the weapon's own guard values (no extra penalty); parry unavailable while two-handing.
@@ -117,19 +119,19 @@
 **Open questions** — **resolved in-doc**: ×1.5 STR (min-req + scaling), stamina unchanged, guard = the weapon's raw guard values with no extra tax; residual: moveset balance/personalization per starter-catalog weapon (feel, P3).
 **Sources** — ADR-018, features.md §1.
 
-## Kick / push (guard-break tool — per weapon class)
+## Push / shove (guard-break tool — heavy classes in V1, kick in V2)
 
-**Goal** — a cheap, single-purpose tool that cracks turtle-blockers without a full critical; the *move itself* depends on the equipped weapon.
-**Behaviors** — input is **universal**: **forward-direction + light attack** (buffered, distinct from chained combos); the resolved move comes from the weapon class's **`push_move`** data. Two move types in V1:
-- **Kick** (light/quick classes — daggers, straight swords, thrusting swords, curved swords, katanas, spears): quick shove, **~2 m reach**, **very low damage** (~5% of base light), **~40 stability-equivalent** guard-break (cracks a mid-cap stability block in one kick, a great shield in two); recovery **~0.4 s**; tiny knockback.
-- **Blade shove** (heavy classes — greatswords, ultra greatswords, curved greatswords, great axes, great hammers, halberds, twinblades): slower shove, same ~2 m reach, **higher guard-break** (~60-80 stability-equivalent — cracks great shields in one), recovery **~0.6 s**, small forward lunge.
-- **None** (bows, crossbows, torch, and any weapon without a defined `push_move`): the input is a no-op.
+**Goal** — a cheap, single-purpose tool that cracks turtle-blockers without a full critical.
+**Behaviors** — input is **universal**: **forward-direction + light attack** (buffered, distinct from chained combos); the resolved move comes from the weapon class's **`push_move`** data. In V1 only one move type ships:
+- **Blade shove** (heavy classes — greatswords, ultra greatswords, curved greatswords, great axes, great hammers, halberds, twinblades): slower shove, ~2 m reach, **higher guard-break** (~60-80 stability-equivalent — cracks great shields in one), recovery **~0.6 s**, small forward lunge.
+- **None** (every other class in V1 — light weapons, bows, crossbows, torch, and any weapon without a defined `push_move`): the input is a no-op. Light classes answer turtles with stamina pressure + backstab, not with a shove.
+- **Kick (V2)** : quick shove for light/quick classes (daggers, straight swords, thrusting swords, curved swords, katanas, spears) — ~2 m reach, very low damage (~5% of base light), ~40 stability-equivalent, recovery ~0.4 s, tiny knockback. Cut 21/09/2026: a foot breaking a guard that heavy blades cannot break reads arbitrary; V2 re-evaluates with real anims and a feel jury.
 Whiff or vs non-blockers = near-useless (spacing risk). Pairs with the block/guard-break system (above).
-**Parameters / bounds** — per-class `push_move {type: kick|blade_shove|none, reach, guard_break (stability-equivalent, bound shared with `05`), recovery}`; values validated at import (ADR-009); forward-only; no damage scaling.
+**Parameters / bounds** — per-class `push_move {type: blade_shove|none, reach, guard_break (stability-equivalent, bound shared with `05`), recovery}` (`kick` rejoins the enum in V2); values validated at import (ADR-009); forward-only; no damage scaling.
 **Data / JSON** — weapon payload: `push_move: {type, reach, guard_break, recovery}` (base defaults per class; a creator can override within bounds); `hit_stamina_damage` bound shared with `05`.
-**Interactions** — block/guard break (above), critical stance (above — a broken guard opens the stance).
+**Interactions** — block/guard break (above); V2: broken guard opens the critical stance.
 **Edge cases** — push into a rolling target (miss), push a boss (bounded-resist → small effect), push while out of stamina (blocked), weapon with no `push_move` (input no-op).
-**Open questions** — **resolved in-doc** (types + class mapping, 13/09/2026); residual: the shove's visual readability is feel-validated at P3 — it must read as a *shove*, not an attack.
+**Open questions** — **cut 21/09/2026**: kick → V2 (see above); residual P3: the shove's visual readability is feel-validated at P3 — it must read as a *shove*, not an attack.
 **Sources** — ADR-018, features.md §1.
 
 ## Ladders (climb locomotion)
@@ -158,9 +160,9 @@ Whiff or vs non-blockers = near-useless (spacing risk). Pairs with the block/gua
 
 ## Open questions (whole domain — pending decisions)
 
-- ~~Parry window per shield class + `parryable` list~~ — resolved in-doc (light 8-12 f / medium 6-8 f / great none; backstab ±30° / 0.6 s; stance 1.5 s; crit ×1.5-×2); residual `parryable` catalog list at P3.
+- ~~Parry window per shield class + `parryable` list~~ — cut to V2 21/09/2026 (frozen spec in §Criticals above: light 8-12 f / medium 6-8 f / great none; stance ~1.5 s; crit ×1.5-×2; `parryable` catalog list at V2).
 - Ranged lock-on/aim + ammo-economy feel (→ P3 design pass; ammo economy at P8).
-- ~~Two-handed grip Strength-scaling~~ (×1.5 in-doc); ~~kick feel~~ (push_move bounds in-doc); ~~backstep i-frames~~ (0 — spacing tool only, resolved 13/09/2026); ~~roll-tier thresholds~~ (<30/<70/≥70, resolved 13/09/2026).
+- ~~Two-handed grip Strength-scaling~~ (×1.5 in-doc); ~~kick feel~~ (cut to V2 21/09/2026 — blade shove stays, readability feel-validated at P3); ~~backstep i-frames~~ (0 — spacing tool only, resolved 13/09/2026); ~~roll-tier thresholds~~ (<30/<70/≥70, resolved 13/09/2026).
 - Buff/debuff duration bounds (→ P3).
 - Status roster/values for the three V1 statuses (bleed/poison/frost) and possible 4th (→ P3).
 - ~~Elemental damage-type balance — physical-vs-elemental armor philosophy, 7-type rosette exposure~~ — **resolved 13/09/2026**: armor-dominant 7-pool + per-type stat baseline + additive accessory `resist-push`; rosette = fixed 4-band tags (×0.5 / ×0.75 / ×1.0 / ×1.25), boss band narrowed to ×0.85–×1.15 (→ P3).

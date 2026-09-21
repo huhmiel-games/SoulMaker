@@ -273,6 +273,9 @@ func _play_phase() -> void:
 
 
 func _finish() -> int:
+	# Guard still held through the swing = back behind the shield (souls).
+	if ctrl.guard_wanted() and ctrl.is_on_floor():
+		return PlayerStateMachine.GUARD
 	if ctrl.lock_target != null and ctrl.lock_valid():
 		return PlayerStateMachine.LOCKON
 	if intent.move_raw() != Vector2.ZERO:

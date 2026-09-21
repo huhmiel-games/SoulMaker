@@ -26,7 +26,7 @@ static func validate_config(obj: Dictionary) -> PackedStringArray:
 	for section in ["stats", "sliders", "senses", "locomotion", "attack"]:
 		if not (obj.get(section, {}) is Dictionary):
 			issues.append("enemy config: section '%s' must be an object" % section)
-	for key in ["hp", "damage", "hit_poise", "poise", "poise_reset_time"]:
+	for key in ["hp", "damage", "hit_poise", "hit_stamina_damage", "poise", "poise_reset_time"]:
 		var v: Variant = (obj.get("stats", {}) as Dictionary).get(key, -1.0)
 		if not v is float and not v is int:
 			issues.append("enemy config stats.%s must be a number" % key)
@@ -74,7 +74,7 @@ const FALLBACK := {
 	"id": "soldier_melee_v1",
 	"display_name": "Hollow Soldier",
 	"behavior_pattern_id": "soldier_melee_v1",
-	"stats": {"hp": 60.0, "damage": 10.0, "hit_poise": 20.0, "poise": 30.0, "poise_reset_time": 3.5},
+	"stats": {"hp": 60.0, "damage": 10.0, "hit_poise": 20.0, "hit_stamina_damage": 30.0, "poise": 30.0, "poise_reset_time": 3.5},
 	"sliders": {"aggression": 0.6, "telegraph_scale": 1.0, "cadence": 1.0},
 	"senses": {"activation_radius": 14.0, "aggro_radius": 12.0, "deaggro_radius": 20.0},
 	"locomotion": {"walk_speed": 2.2, "hurry_speed": 3.2, "hurry_range": 5.0, "turn_rate": 6.0},

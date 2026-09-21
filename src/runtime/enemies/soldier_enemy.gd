@@ -233,8 +233,8 @@ func _connect() -> void:
 	if _player_dist() > _attack("range") + STRIKE_REACH_PAD:
 		print("[EnemyAI] strike whiffed (%.1fm)" % _player_dist())
 		return
-	var res: Dictionary = _player.take_hit(float((cfg.get("stats", {}) as Dictionary).get("damage", 12.0)), float((cfg.get("stats", {}) as Dictionary).get("hit_poise", 25.0)), global_position)
-	print("[EnemyAI] strike connected killed=%s staggered=%s" % [str(res.get("killed", false)), str(res.get("staggered", false))])
+	var res: Dictionary = _player.take_hit(float((cfg.get("stats", {}) as Dictionary).get("damage", 12.0)), float((cfg.get("stats", {}) as Dictionary).get("hit_poise", 25.0)), global_position, float((cfg.get("stats", {}) as Dictionary).get("hit_stamina_damage", 30.0)))
+	print("[EnemyAI] strike connected killed=%s staggered=%s blocked=%s" % [str(res.get("killed", false)), str(res.get("staggered", false)), str(res.get("blocked", false))])
 
 
 func _die() -> void:

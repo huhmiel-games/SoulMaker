@@ -80,6 +80,15 @@ const POISE_MAX := 50.0
 const POISE_RESET := 3.5
 const HURT_TIME := 0.5
 const RESPAWN_DELAY := 2.0
+## Guard (P3 S1 graybox, features/17 block/guard): held Shift/L1 raises the
+## equipped shield (GuardConfig class values). Blocked hits convert damage
+## into stamina cost (stability_mult) + chip HP (1 - absorb) and skip poise
+## entirely — stamina is the guard's pool. A hit exceeding the remaining
+## stamina breaks the guard: extended HURT (GUARD_BREAK_TIME) + no regen
+## (GUARD_BREAK_NOREGEN). Hits outside the frontal block_arc bypass.
+const GUARD_WALK_MULT := 0.5
+const GUARD_BREAK_TIME := 1.2
+const GUARD_BREAK_NOREGEN := 1.0
 
 ## Locomotion clips resolve from data/characters/player_moveset.json (packs
 ## + slots + active variant); FALLBACK lives in Moveset, not here.
@@ -113,6 +122,14 @@ var dead := false
 var _poise_wait := 0.0
 var _respawn_in := -1.0
 var _home := Transform3D.IDENTITY
+## Guard state (P3 S1): resolved shield class (GuardConfig.merged at boot),
+## harness seam (guard_hold_override forces the held read without input —
+## test scenes only, never gameplay), one-shot HURT duration override set
+## by a guard break and consumed by StateHurt.exit.
+var guard_cfg := {}
+var guard_hold_override := false
+var hurt_time_override := -1.0
+var guard_release_needed := false
 
 var _player: AnimationPlayer = null
 var _clips := {}
@@ -331,6 +348,8 @@ func _ready() -> void:
 	_player = RigKit.build_player(rig_root, Moveset.packs_of(ms))
 	_clips = Moveset.resolve_clips(ms, _player)
 	_attack_phases[&"attack_light_1"] = Moveset.phases_for(ms, &"attack_light_1")
+	guard_cfg = GuardConfig.merged()
+	print("[Player] guard %s %s" % [str(guard_cfg.get("equipped_shield", "?")), str(guard_cfg.get("class", {}))])
 	# Sweep resolves _blade_attach and auto-sizes from the weapon mesh.
 	_build_sweep()
 	# Single facing: the rig never yaws (nailed once — mesh = body heading).
@@ -348,7 +367,8 @@ func _ready() -> void:
 	var lockon := StateLockOn.new()
 	var attack := StateAttack.new()
 	var hurt := StateHurt.new()
-	for st in [idle, loco, fall, roll, backstep, lockon, attack, hurt]:
+	var guard := StateGuard.new()
+	for st in [idle, loco, fall, roll, backstep, lockon, attack, hurt, guard]:
 		(st as PlayerState).setup(self, intent)
 	machine.add_state(PlayerStateMachine.IDLE, idle)
 	machine.add_state(PlayerStateMachine.LOCOMOTION, loco)
@@ -358,12 +378,15 @@ func _ready() -> void:
 	machine.add_state(PlayerStateMachine.LOCKON, lockon)
 	machine.add_state(PlayerStateMachine.ATTACK, attack)
 	machine.add_state(PlayerStateMachine.HURT, hurt)
+	machine.add_state(PlayerStateMachine.GUARD, guard)
 	machine.start(PlayerStateMachine.IDLE)
 	print("[Player] ready — profile %s, body-relative, nodess SM" % InputManager.get_profile())
 
 
 func _physics_process(delta: float) -> void:
 	_tick_stamina(delta)
+	if not intent.guard_held():
+		guard_release_needed = false
 	if iframes > 0.0:
 		iframes = maxf(iframes - delta, 0.0)
 	if _poise_wait > 0.0:
@@ -393,14 +416,47 @@ func is_invulnerable() -> bool:
 	return iframes > 0.0
 
 
-## Enemy connect (P2 minimal): damage + poise. Ignored while dead or
-## invulnerable (dodge i-frames). Poise break staggers (forced HURT — the
-## only thing that breaks a committed attack, souls rule, 05); HP zero
-## kills (respawn timer, test flow). Returns {killed, staggered} for the
-## attacker's bookkeeping.
-func take_hit(power: float, hit_poise: float, _from: Vector3) -> Dictionary:
+## Enemy connect (P2 damage/poise + P3 S1 guard): ignored while dead or
+## invulnerable (dodge i-frames). Guard raised + attacker inside the frontal
+## block_arc = blocked: stamina cost (stability_mult) + chip HP, poise
+## untouched; a hit exceeding the remaining stamina breaks the guard
+## (extended HURT, no regen — features/17). Otherwise damage + poise; poise
+## break staggers (forced HURT — the only thing that breaks a committed
+## attack, souls rule, 05); HP zero kills (respawn timer, test flow).
+## stamina_damage defaults to power (damage x 1.0 baseline). Returns
+## {killed, staggered, blocked} (+ broken on guard break) for bookkeeping.
+func take_hit(power: float, hit_poise: float, _from: Vector3, stamina_damage := -1.0) -> Dictionary:
 	if dead or is_invulnerable():
-		return {"killed": false, "staggered": false}
+		return {"killed": false, "staggered": false, "blocked": false}
+	if is_guarding() and _guard_covers(_from):
+		var g: Dictionary = guard_cfg.get("class", {})
+		var sdmg := (power if stamina_damage < 0.0 else stamina_damage) * float(g.get("stability_mult", 1.0))
+		var chip := power * (1.0 - float(g.get("guard_absorb", 0.9)))
+		hp = maxf(hp - chip, 0.0)
+		if hp <= 0.0:
+			dead = true
+			_respawn_in = RESPAWN_DELAY
+			machine.start(PlayerStateMachine.HURT)
+			print("[Player] DIED through guard (chip)")
+			return {"killed": true, "staggered": true, "blocked": true}
+		if stamina < sdmg:
+			stamina = 0.0
+			hurt_time_override = GUARD_BREAK_TIME
+			_regen_wait = GUARD_BREAK_NOREGEN
+			guard_release_needed = true
+			# Break readability (graybox, no anim): the full impact stack at
+			# the chest — hitstop + shake + rumble + spark. Without it the
+			# break is a silent idle-freeze (log 21/09).
+			var host := impact_host()
+			if host != null:
+				host.impact(global_position + Vector3(0.0, 1.2, 0.0), 4, 1.5, camera)
+			machine.start(PlayerStateMachine.HURT)
+			print("[Player] GUARD BREAK stam 0 hp %.0f (release + re-hold to re-raise)" % hp)
+			return {"killed": false, "staggered": true, "blocked": true, "broken": true}
+		stamina -= sdmg
+		_regen_wait = REGEN_DELAY
+		print("[Player] blocked stam %.0f hp %.0f" % [stamina, hp])
+		return {"killed": false, "staggered": false, "blocked": true}
 	hp = maxf(hp - power, 0.0)
 	poise = maxf(poise - hit_poise, 0.0)
 	_poise_wait = POISE_RESET
@@ -409,14 +465,47 @@ func take_hit(power: float, hit_poise: float, _from: Vector3) -> Dictionary:
 		_respawn_in = RESPAWN_DELAY
 		machine.start(PlayerStateMachine.HURT)
 		print("[Player] DIED")
-		return {"killed": true, "staggered": true}
+		return {"killed": true, "staggered": true, "blocked": false}
 	if poise <= 0.0:
 		poise = POISE_MAX
 		machine.start(PlayerStateMachine.HURT)
 		print("[Player] staggered hp %.0f" % hp)
-		return {"killed": false, "staggered": true}
+		return {"killed": false, "staggered": true, "blocked": false}
 	print("[Player] hit hp %.0f poise %.0f" % [hp, poise])
-	return {"killed": false, "staggered": false}
+	return {"killed": false, "staggered": false, "blocked": false}
+
+
+## Guard raised = machine in GUARD (held input or harness override).
+func is_guarding() -> bool:
+	return machine.state_id() == PlayerStateMachine.GUARD
+
+
+## Guard entry = held (or harness override) AND no forced drop pending. A
+## guard break sets guard_release_needed — the shield only re-raises after
+## the hold is released once (souls rule, no chain-breaks at 0 stamina).
+func guard_wanted() -> bool:
+	if guard_hold_override:
+		return true
+	return intent.guard_held() and not guard_release_needed
+
+
+## HURT duration: guard-break override (one-shot, consumed by StateHurt.exit)
+## or the standard flinch time.
+func hurt_duration() -> float:
+	return hurt_time_override if hurt_time_override >= 0.0 else HURT_TIME
+
+
+## Frontal arc check: attacker position inside block_arc/2 of the body
+## forward (-Z, flattened). Same cone convention as the soldier shield.
+func _guard_covers(from: Vector3) -> bool:
+	var to: Vector3 = from - global_position
+	to.y = 0.0
+	if to.length_squared() < 0.0001:
+		return true
+	var fwd := -global_transform.basis.z
+	fwd.y = 0.0
+	var half := deg_to_rad(float((guard_cfg.get("class", {}) as Dictionary).get("block_arc", 75.0)) * 0.5)
+	return fwd.normalized().dot(to.normalized()) > cos(half)
 
 
 ## Test-flow respawn: restore spawn transform, pools and machine (bonfire
@@ -438,6 +527,12 @@ func _respawn() -> void:
 func _tick_stamina(delta: float) -> void:
 	if _regen_wait > 0.0:
 		_regen_wait -= delta
+		return
+	# Shield up = no regen (S1 turtle tax — log 21/09: 45/s refilled the
+	# 10-stamina blocks between swings, stamina sat at 90 forever and the
+	# guard never broke). Regen resumes on release (after REGEN_DELAY, set
+	# by spends and blocked hits alike).
+	if is_guarding():
 		return
 	stamina = minf(stamina + STAMINA_REGEN * delta, STAMINA_MAX)
 

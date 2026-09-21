@@ -4,6 +4,7 @@
 [ext_resource type="PackedScene" uid="uid://cqk7playerp21" path="res://scenes/prefabs/player.tscn" id="5"]
 [ext_resource type="Script" uid="uid://bbafwoae82175" path="res://scenes/tests/fake_enemy.gd" id="6"]
 [ext_resource type="Script" uid="uid://djnughxi6e4qg" path="res://src/runtime/impact_host.gd" id="7"]
+[ext_resource type="Script" path="res://scenes/tests/test_bars.gd" id="8"]
 
 [sub_resource type="BoxMesh" id="ground_mesh"]
 size = Vector3(40, 0.2, 40)
@@ -174,22 +175,65 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 6)
 script = ExtResource("7")
 
 [node name="HUD" type="CanvasLayer" parent="." unique_id=1667120283]
+script = ExtResource("8")
 
 [node name="State" type="Label" parent="HUD" unique_id=1908280367]
 offset_left = 16.0
 offset_top = 16.0
 offset_right = 600.0
-offset_bottom = 44.0
+offset_bottom = 60.0
 theme_override_font_sizes/font_size = 18
 text = "boot"
 
 [node name="Enemy" type="Label" parent="HUD" unique_id=-2094967294]
 offset_left = 16.0
-offset_top = 44.0
+offset_top = 64.0
 offset_right = 600.0
-offset_bottom = 68.0
+offset_bottom = 88.0
 theme_override_font_sizes/font_size = 18
 text = "enemy"
+
+[node name="HPBg" type="ColorRect" parent="HUD"]
+offset_left = 16.0
+offset_top = 92.0
+offset_right = 316.0
+offset_bottom = 102.0
+color = Color(0.05, 0.05, 0.05, 0.8)
+
+[node name="HP" type="ColorRect" parent="HUD"]
+offset_left = 16.0
+offset_top = 92.0
+offset_right = 316.0
+offset_bottom = 102.0
+color = Color(0.2, 0.8, 0.2, 1)
+
+[node name="STBg" type="ColorRect" parent="HUD"]
+offset_left = 16.0
+offset_top = 104.0
+offset_right = 316.0
+offset_bottom = 114.0
+color = Color(0.05, 0.05, 0.05, 0.8)
+
+[node name="ST" type="ColorRect" parent="HUD"]
+offset_left = 16.0
+offset_top = 104.0
+offset_right = 316.0
+offset_bottom = 114.0
+color = Color(0.9, 0.8, 0.2, 1)
+
+[node name="ENBg" type="ColorRect" parent="HUD"]
+offset_left = 16.0
+offset_top = 116.0
+offset_right = 316.0
+offset_bottom = 126.0
+color = Color(0.05, 0.05, 0.05, 0.8)
+
+[node name="EN" type="ColorRect" parent="HUD"]
+offset_left = 16.0
+offset_top = 116.0
+offset_right = 316.0
+offset_bottom = 126.0
+color = Color(0.8, 0.2, 0.2, 1)
 
 [node name="Hint" type="Label" parent="HUD" unique_id=757889275]
 anchors_preset = 12

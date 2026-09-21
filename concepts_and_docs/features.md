@@ -33,17 +33,17 @@ Legend per column: *Phase* refers to the roadmap phase (P0-P13); *Ref* points to
 | Swept `ShapeCast3D` hitbox, masked off-attack | 🔒 | P2 | roadmap P2 | spike P0 REPORTED — technique déjà choisie, validation en amont de P2 |
 | Controller rumble (haptics) | 🔒 | P2 | roadmap P2 | On/off + intensity in Options (P2) |
 | Foot IK | 🔒 | P0 | roadmap P0 spike | spike FAIL 15/09/2026, abandonné — à retester en V1 |
-| Block / guard (stability, stamina drain, guard break) | 🔒 | P3 | features/17 | Guard via shield or weapon (shared stat block — every item carries guard values); two-handing keeps guard (weapon values), cancels parry |
-| Criticals: parry / backstab / riposte (stance break + critical animation) | 🔒 | P3 | features/17 | Parry = shield only (light 8-12 f / medium 6-8 f / great none); backstab ±30° rear cone / 0.6 s; riposte ×1.5-×2; feel validated at P3 |
+| Block / guard (stability, stamina drain, guard break) | 🔒 | P3 | features/17 | Guard via shield or weapon (shared stat block — every item carries guard values); two-handing keeps guard (weapon values); break = extended punish stagger (stance/riposte = V2) |
+| Criticals: backstab direct (P3) ; parry / riposte (V2) | 🔒 | P3 / V2 | features/17 | Backstab = positional trigger ±30° / 0.6 s → immediate crit ×1.5-×2, feel validated at P3 ; parry+stance+riposte cut to V2 21/09/2026 (frozen spec: light 8-12 f / medium 6-8 f / great none, stance 1.5 s) |
 | Ranged weapons (bow/crossbow): draw/hold, ranged lock-on, ammo economy | 🔒 | P3 | features/17 | Ammo = base item (`§3`, P8); feel settled at P3 |
 | Damage types (physical slash/thrust/strike + elemental fire/lightning/magic/dark) + status build-up (bleed/poison/frost) + resistances | 🔒 | P3/P7 | features/17 | 7 types (elemental joins V1 via resins/bundles — ADR-018); **armor-dominant philosophy + additive `resist-push`** (resolved 13/09/2026); mechanics at P3; derived resists at P7; feeds weaknesses (`§4`, P9) |
 | Player poise / hyper-armor (heavy weapons trade through hits) | 🔒 | P3 | features/17 | |
 | Equip-load roll tiers (fast / mid / fat) | 🔒 | P3 | features/17 | Derived from equip load (ADR-011) |
 | Backstep | 🔒 | P3 | features/17 | |
 | Plunging attacks (drop on a target below) | 🔒 | P3 | features/17 | |
-| Two-handed grip (moveset + strength scaling) | 🔒 | P3 | features/17 | STR ×1.5 (min-req + scaling); keeps guard via weapon values, cancels parry, stamina unchanged; delivers with STR at P7 |
-| Kick / push guard-break (per weapon class) | 🔒 | P3 | features/17 | Forward + light attack (universal input); `push_move` per class: kick ~40 / blade-shove ~60-80 stability-equivalent on a blocker → guard break → critical stance; feel validated at P3 |
-| Weapon / shield stat block (unified — every weapon guards, every shield attacks) | 🔒 | P3 | features/17, features/04 | `{damage, damage_type, guard_absorb, stability, block_arc, weight, poise}` + `parry_window` on shields |
+| Two-handed grip (moveset + strength scaling) | 🔒 | P3 | features/17 | STR ×1.5 (min-req + scaling); keeps guard via weapon values, stamina unchanged; delivers with STR at P7 (parry = V2, nothing to cancel in V1) |
+| Push / shove guard-break (heavy classes P3, kick V2) | 🔒 | P3 / V2 | features/17 | Forward + light attack (universal input); blade-shove ~60-80 stability-equivalent on heavies → guard break → extended punish stagger ; kick cut to V2 21/09/2026 ; shove readability feel-validated at P3 |
+| Weapon / shield stat block (unified — every weapon guards, every shield attacks) | 🔒 | P3 | features/17, features/04 | `{damage, damage_type, guard_absorb, stability, block_arc, weight, poise}` + `parry_window` reserved on shields (0 in V1, active V2) |
 | Ladders (climb up/down locomotion) | 🔒 | P3 | features/17, features/07 | Interactive level object |
 | Held torch (player-attached light) | 🔒 | P3 | features/17 | Tool slot, distinct from world fixtures |
 | Weapon arts | 🔵 | — | roadmap P7 V2 note | |
@@ -293,10 +293,10 @@ Captured in `roadmap.md` → Open questions; mirrored here as status ❔/🟡 ro
 - ~~Equip-load roll-tier thresholds (🟡 `§1` — P3)~~ — **resolved 13/09/2026**: <30% / <70% / ≥70% (fast/mid/fat).
 - ~~Backstep i-frames (🟡 `§1` — P3)~~ — **resolved 13/09/2026**: none — spacing only, the dodge stays the unique invuln tool.
 - ~~Plunging attack input (🟡 `§1` — P3)~~ — **resolved 13/09/2026**: attack key buffered mid-fall (no auto-trigger).
-- ~~Kick per-weapon scope (🟡 `§1` — P3)~~ — **resolved 13/09/2026**: per-weapon-class `push_move` (kick / blade shove / none) under a universal input.
+- ~~Kick per-weapon scope (🟡 `§1` — P3)~~ — **cut 21/09/2026**: kick → V2 (reads arbitrary next to heavy blades); blade shove on heavy classes stays in P3 under the universal forward+light input.
 - ~~Torch: water + darkness knob (🟡 `§1`/`§7`)~~ — **resolved 13/09/2026**: torch stays lit in water; darkness purely visual in V1.
 - ~~Accessory slot (single vs share-offhand, 🟡 `§3`)~~ — **resolved 13/09/2026**: 4 slots, no same-id, no rig visual; world display name `accessory_name` (default "ring").
-- ~~Parry window + critical stance tuning (🟡 `§1` — P3 design pass)~~ — resolved: light 8-12 f / medium 6-8 f / great none; stance ~1.5 s; crit ×1.5-×2.
+- ~~Parry window + critical stance tuning (🟡 `§1` — P3 design pass)~~ — **cut 21/09/2026**: parry + stance + riposte → V2 (no feel jury — dev never parries; frozen spec kept in `features/17`); backstab stays P3 as a direct positional crit.
 - ~~Ranged lock-on/aim feel (🟡 `§1` — P3 design pass)~~ — **resolved 13/09/2026**: lock-on follows the target (souls-style); residual reticle/ammo feel tuned at P3.
 - ~~Two-handed grip scaling modifier (🟡 `§1` — P3 design pass)~~ — resolved: STR ×1.5 (min-req + scaling); stamina unchanged.
 - ~~Temporary buff/debuff duration bounds (🟡 `§3` — P7)~~ — **resolved 13/09/2026**: duration is a per-object config field, no global preset list; `has_buff` excluded from the V1 `08` condition grammar.

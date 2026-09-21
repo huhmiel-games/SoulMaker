@@ -89,9 +89,9 @@ A game that is not a game: a base that lets anyone create their own souls-like w
 **Goal** : prove the whole martial toolkit reads correctly — a gray-box slice before the systems land in their owning phases.
 
 **Deliverables**
-- **Design pass at kickoff** validates the **values pinned in `features/17`** (parry windows light 8-12 f / medium 6-8 f / great none; backstab cone/window; riposte ×1.5-×2; two-hand STR ×1.5; push_move per class — kick ~40 / blade-shove ~60-80 stability-equivalent) and settles the rest: **push-move visual feel**. (Resolved in-doc 13/09/2026: buff duration + `has_buff`, ranged lock-on, roll-tier thresholds <30/<70/≥70, backstep no i-frames, plunging buffered input, torch/darkness visual-only, accessory ×4, elemental balance — armor-dominant 7-pool + per-type stat baseline + additive `resist-push`, rosette 4-band tags ×0.5…×1.25, boss ×0.85–×1.15.)
+- **Design pass at kickoff** validates the **values pinned in `features/17`** (backstab cone/window; two-hand STR ×1.5; push_move — blade-shove ~60-80 stability-equivalent on heavies only, kick cut to V2 21/09/2026) and settles the rest: **blade-shove visual feel**. (Resolved in-doc 13/09/2026: buff duration + `has_buff`, ranged lock-on, roll-tier thresholds <30/<70/≥70, backstep no i-frames, plunging buffered input, torch/darkness visual-only, accessory ×4, elemental balance — armor-dominant 7-pool + per-type stat baseline + additive `resist-push`, rosette 4-band tags ×0.5…×1.25, boss ×0.85–×1.15. Cut 21/09/2026: parry/riposte → V2.)
 - **Block/guard with shields** (stability, stamina drain, guard break) — mechanics proven here; the offhand shield slot binds with the inventory at P8
-- **Criticals**: parry / backstab / riposte (critical stance + critical animation, shared rig) — **parry via shields only** (light ideal / medium shorter / great none); two-handing cancels parry
+- **Criticals**: backstab only (positional trigger ±30° / 0.6 s → direct critical hit ×1.5-×2, no stance two-step) — **parry / riposte cut to V2 21/09/2026** (frozen spec kept in `features/17`)
 - **Ranged weapons** (bow/crossbow): draw/hold, charge tiers, ranged lock-on, ammo consumption — the ammunition item and economy land with the inventory at P8
 - **Damage types** (slash/thrust/strike + fire/lightning/magic/dark — 7 in V1) + **status build-up** (bleed/poison/frost): mechanics, meters and procs proven here; derived resistances integrate at P7, per-enemy weakness tables at P9
 - **Player poise / hyper-armor**; **equip-load roll tiers** (fast/mid/fat, thresholds <30/<70/≥70 resolved in `features/17`); backstep; plunging attacks; two-handed grip (STR ×1.5 scaling — resolved in `features/17`; **keeps guard via the weapon's own guard values, cancels parry**); kick/push guard-break (per weapon class `push_move`, values resolved, feel-validated at P3); ladder climb up/down; held torch
@@ -99,7 +99,7 @@ A game that is not a game: a base that lets anyone create their own souls-like w
 
 > **Note** : if the slice grows out of shape, a **prototype → deep-pass split** is allowed at P3 exit (re-slim is healthy — ADR-018 keeps the net complete).
 
-**Done** : a small arena fight where each toolkit system reads correctly — block breaks, parries land, statuses proc, roll tiers move differently — and the slice feels like a souls-like.
+**Done** : a small arena fight where each toolkit system reads correctly — block breaks, backstabs land, statuses proc, roll tiers move differently — and the slice feels like a souls-like.
 
 ---
 
@@ -290,5 +290,5 @@ A game that is not a game: a base that lets anyone create their own souls-like w
 - Flags registry granularity (single global = retained).
 - Exact boss editor scope (post-V1, vault).
 - Starter catalog **pack selection** (which exact CC0 kits + Mixamo actions) — decided at P1/P10 (sourcing direction settled: CC0 + Mixamo re-targeted, ADR-017).
-- Post-V1 vault (deferred by decision, not forgotten): NPC vendor shops, magic spells, weapon arts, audio (system/music/SFX — ADR-014), cinematics — area cards, boss intro, cutscenes (ADR-014), **boss editor** (state machine, phases), emotes, elevators/moving platforms, weather, respec, **fast travel (bonfire warp — design kept for post-V1)**, NG+, ink outlines (ADR-019), CI workflow (headless import check + export smoke test) once the repo has real content.
-- Combat depth open items (ADR-018, → P3 design pass, values pinned in `features/17`): ~~parry window + critical stance~~; ~~two-handing strength-scaling~~; ~~kick guard-break feel~~; ranged lock-on/aim + ammo-economy feel; temporary buff/debuff duration bounds.
+- Post-V1 vault (deferred by decision, not forgotten): NPC vendor shops, magic spells, weapon arts, audio (system/music/SFX — ADR-014), cinematics — area cards, boss intro, cutscenes (ADR-014), **boss editor** (state machine, phases), emotes, elevators/moving platforms, weather, respec, **fast travel (bonfire warp — design kept for post-V1)**, NG+, ink outlines (ADR-019), CI workflow (headless import check + export smoke test) once the repo has real content, **kick, parry + riposte + critical stance** (cut from P3 21/09/2026 — frozen spec in `features/17`).
+- Combat depth open items (ADR-018, → P3 design pass, values pinned in `features/17`): ~~parry window + critical stance~~ (cut to V2 21/09/2026); ~~two-handing strength-scaling~~; ~~kick guard-break feel~~ (kick cut to V2 — blade-shove readability stays at P3); ranged lock-on/aim + ammo-economy feel; temporary buff/debuff duration bounds.

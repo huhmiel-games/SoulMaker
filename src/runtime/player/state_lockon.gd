@@ -47,6 +47,9 @@ func step(delta: float) -> int:
 	# Light attack (after dodge): same clip + stamina gate, lock preserved.
 	if intent.attack_light_pressed() and ctrl.is_on_floor() and ctrl.attack_clip() != &"" and ctrl.spend_stamina(float(ctrl.attack_phases().get("stamina_cost", 20.0))):
 		return PlayerStateMachine.ATTACK
+	# Guard hold (after attack — a tap attacks, a hold guards).
+	if ctrl.guard_wanted() and ctrl.is_on_floor():
+		return PlayerStateMachine.GUARD
 	var planar := Vector3(ctrl.velocity.x, 0.0, ctrl.velocity.z)
 	if raw == Vector2.ZERO:
 		ctrl.anim_state = &"idle"

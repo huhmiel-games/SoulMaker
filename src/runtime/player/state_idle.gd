@@ -46,6 +46,9 @@ func step(delta: float) -> int:
 	# Light attack (after dodge — defense wins ties): clip + stamina gate.
 	if intent.attack_light_pressed() and ctrl.is_on_floor() and ctrl.attack_clip() != &"" and ctrl.spend_stamina(float(ctrl.attack_phases().get("stamina_cost", 20.0))):
 		return PlayerStateMachine.ATTACK
+	# Guard hold (after attack — a tap attacks, a hold guards).
+	if ctrl.guard_wanted() and ctrl.is_on_floor():
+		return PlayerStateMachine.GUARD
 	if raw != Vector2.ZERO and ctrl.is_on_floor():
 		return PlayerStateMachine.LOCOMOTION
 	return PlayerStateMachine.KEEP

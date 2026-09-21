@@ -61,6 +61,12 @@ func attack_light_pressed() -> bool:
 	return InputManager.is_just_pressed(&"attack_light")
 
 
+## Guard hold (Shift / L1 per frozen game table): polled hold, read by the
+## grounded states to enter StateGuard.
+func guard_held() -> bool:
+	return InputManager.is_pressed(&"guard")
+
+
 func _axis(pos: StringName, neg: StringName) -> float:
 	var out := 0.0
 	if InputManager.is_pressed(pos):
