@@ -4,9 +4,9 @@ extends RefCounted
 ## Nodess state machine (P2): owns PlayerState instances keyed by enum ID,
 ## runs enter/exit around transitions, logs every change (old debug habit).
 ## Created and stepped by PlayerController — never a scene node.
-enum { IDLE, LOCOMOTION, FALL, ROLL, BACKSTEP, LOCKON, ATTACK, KEEP }
+enum { IDLE, LOCOMOTION, FALL, ROLL, BACKSTEP, LOCKON, ATTACK, HURT, KEEP }
 
-const NAMES := {IDLE: "Idle", LOCOMOTION: "Locomotion", FALL: "Fall", ROLL: "Roll", BACKSTEP: "Backstep", LOCKON: "LockOn", ATTACK: "Attack"}
+const NAMES := {IDLE: "Idle", LOCOMOTION: "Locomotion", FALL: "Fall", ROLL: "Roll", BACKSTEP: "Backstep", LOCKON: "LockOn", ATTACK: "Attack", HURT: "Hurt"}
 
 var _states: Dictionary = {}
 var _current_id := -1

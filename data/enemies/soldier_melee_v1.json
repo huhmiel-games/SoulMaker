@@ -1,0 +1,40 @@
+{
+  "schema": "enemy_v0.1",
+  "id": "soldier_melee_v1",
+  "display_name": "Hollow Soldier",
+  "behavior_pattern_id": "soldier_melee_v1",
+  "comment": "P2 first archetype (roadmap l.78): aggro, telegraph, hit reaction, poise. The behavior_pattern_id is the future-proof hook — in P2 the registry holds this one hardcoded pattern; at P9 the same field points at data-driven patterns without changing this shape (05_enemies, 09_editors).",
+  "stats": {
+    "hp": 60.0,
+    "damage": 10.0,
+    "hit_poise": 20.0,
+    "poise": 30.0,
+    "poise_reset_time": 3.5
+  },
+  "sliders": {
+    "aggression": 0.6,
+    "telegraph_scale": 1.0,
+    "cadence": 1.0
+  },
+  "senses": {
+    "activation_radius": 14.0,
+    "aggro_radius": 12.0,
+    "deaggro_radius": 20.0
+  },
+  "locomotion": {
+    "walk_speed": 2.2,
+    "hurry_speed": 3.2,
+    "hurry_range": 5.0,
+    "turn_rate": 6.0
+  },
+  "attack": {
+    "range": 2.2,
+    "windup_time": 0.7,
+    "strike_time": 0.25,
+    "recover_time": 0.9,
+    "flinch_time": 0.45,
+    "shielded": true,
+    "shield_half_angle": 45.0
+  },
+  "boss_level": false
+}

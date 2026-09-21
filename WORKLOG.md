@@ -1,13 +1,23 @@
 # SoulMaker — Worklog & current state
 
-**Updated**: 2026-09-20
+**Updated**: 2026-09-21
 
 ## Current thread
 
-- **Objective**: P2 fighter core — blade rebound on blocked hits (shield / heavy armor), UNCOMMITTED
+- **Objective**: P2 fighter core — 1st enemy archetype `soldier_melee_v1` (sword+shield, capsule placeholder), UNCOMMITTED
 - **Expected mode**: build
-- Next step: human rebound recipe (below); commit AFTER human OK (not requested yet).
-- **Last step done**: wall rebound DS3 implémenté (UNCOMMITTED) — `sweep_poll()` retourne `{body, point, is_wall}` (mur = solide sans `take_hit`), `blade_contact_ratio()` (position contact sur l'axe lame [0=garde, 1=bout], weapon-agnostic), `WALL_REBOUND_RATIO 0.5` + garde anti-sol `WALL_GROUND_Y 0.25`, `StateAttack` 2e passe : bas de lame → rebound (full chain hitstop+shake+sparks, 1/swing) / haut → `spark_at` seul, attaque continue. Scène : FakeEnemy layer 3 + mur `Wall` (2.2, 0, 2.0). Boot + audit clean. Recette : rebound collé au mur ? scrape à distance ?
+- Next step: human enemy recipe (below); commit AFTER human OK (not requested yet).
+- **Last step done**: flinch rendu faisable A+B (UNCOMMITTED) — `poise_reset_time` 2.5→3.5 (fenêtre double-flanc, JSON+fallback) + facing stagger comportemental (`_turn_suppress` 0.5 s à 0.3× après hit reçu — le soldat "accuse le coup", pas de conflit avec le gel garde). Difficulté validée OK-souls par humain (kill + mort par session, damage 10 gardé). Boot clean 2 scènes. Recette : 1er flanc → il tourne lentement → 2e flanc → `FLINCH` visible.
+- **Previous**: wall rebound DS3 committé (`b713efb`) + `planar` hoist fix + cam `spring_length` 2.5 (committés par humain).
+
+## Test recipe (human) — enemy archetype (scene `scenes/tests/enemy_archetype_test.tscn`)
+
+1. Boot: soldat à 16 m, IDLE (pas d'aggro au spawn — avance pour déclencher, activation 14 m). Il marche vers toi (capsule gris-bleu + slab bouclier).
+2. Laisse-le arriver (portée 2.2 m) : `WINDUP` — rouge en ~0.7 s. Règle : **strafe pendant le rouge** (tracking lent), dodge ou encaisse (10 dmg, stagger au 3e coup rapproché). Report lisibilité.
+3. Bouclier levé en garde (IDLE/CHASE/WINDUP, cône 90°) : frontal = `blocked` + rebound. **Baissé quand il swingue** (STRIKE/RECOVER) : punis la fin de son attaque, ou flanque pendant son windup → dégâts + `hit/hp`, 2 coups flanc rapprochés → `FLINCH` (casse son windup), 6 coups → `KILLED` (reset 4 s). Garde GELÉE (stand-in binaire jusqu'au stat block P3).
+4. MMB/R3 : lock-on (marker jaune). Reste immobile pour voir : 2 coups → poise 10, 3e → `[SM] Hurt` stagger → Idle.
+5. Flinch = l'interruption poise (lui comme toi) : jauge vidée → attaque annulée + freeze 0.45 s (lui) / 0.5 s (toi). Au P9 ce sera des anims ; ici freeze + flash, le timing est la spec.
+6. Labels : joueur `hp/poise`, 2e ligne `soldier ÉTAT hp poise hits`. Report logs + feel.
 
 ## Test recipe (human) — round-trip editor ⇄ game
 

@@ -31,6 +31,8 @@
 **Interactions** — `01` combat clock sync (hitbox fairness), `08` events (miniboss), `04` drops.
 **Edge cases** — behavior loops, unreachable idsle, missing return-to-state.
 **Open questions** — slider set exact list (aggression, telegraph duration, poise, hitbox forgiveness per enemy).
+**P9 pattern requirement (logged 21/09/2026)** — spear-behind-shield archetypes need an `attacks_while_guarding` pattern flag (guard-up + strike simultaneously is inexpressible in a guard-XOR-swing model); guard temperament (turtle-vs-aggressive, advance-while-guarding speed tax) is pattern data, never stats.
+**P3 migration (logged 21/09/2026)** — the P2 `shielded` / `shield_half_angle` config fields merge into the unified `{damage, damage_type, guard_absorb, stability, block_arc}` stat block (`17`/`04`); `take_hit → {killed, blocked}` stays the resolution seam, only its internals become a stat lookup. No guard-depth code until the P3 stat block lands.
 **Sources** — idea.txt 100, 496, 134, 527; roadmap P2/P9.
 
 ## Enemy activation (proximity)

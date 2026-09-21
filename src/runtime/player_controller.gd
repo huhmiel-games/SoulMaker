@@ -68,6 +68,18 @@ const WALL_REBOUND_RATIO := 0.3
 ## Wall contacts below this world height are ground-plane grazes, not
 ## walls (the sweep rides at blade height; the floor is y=0).
 const WALL_GROUND_Y := 0.25
+## Player damage (P2 minimal — hyper-armor/guard/stance are P3/P7 per
+## features/17): HP pool, poise pool (hits accumulate, stagger at zero,
+## refills after POISE_RESET), HURT flinch interrupts everything including
+## committed attacks (souls rule — only enemy hits break attacks, 05),
+## death respawns at the spawn transform (test flow — bonfire flow later).
+const HP_MAX := 100.0
+const POISE_MAX := 50.0
+## Sustained-pressure window: must exceed one enemy attack cycle (~2.7 s)
+## or poise always refills between swings and HURT never triggers.
+const POISE_RESET := 3.5
+const HURT_TIME := 0.5
+const RESPAWN_DELAY := 2.0
 
 ## Locomotion clips resolve from data/characters/player_moveset.json (packs
 ## + slots + active variant); FALLBACK lives in Moveset, not here.
@@ -93,6 +105,14 @@ var stamina := STAMINA_MAX
 ## ticked here, read by future enemy hitboxes via is_invulnerable().
 var iframes := 0.0
 var _regen_wait := 0.0
+## Damage state (P2 minimal): hp/poise pools, dead flag + respawn timer,
+## _home spawn transform captured at ready.
+var hp := HP_MAX
+var poise := POISE_MAX
+var dead := false
+var _poise_wait := 0.0
+var _respawn_in := -1.0
+var _home := Transform3D.IDENTITY
 
 var _player: AnimationPlayer = null
 var _clips := {}
@@ -303,6 +323,8 @@ func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	InputManager.set_profile(&"game")
 	ToonKit.apply_to(self)
+	add_to_group("player")
+	_home = global_transform
 	var ms := Moveset.load_object()
 	for issue in Moveset.validate_moveset(ms):
 		push_warning("[Moveset] %s" % issue)
@@ -325,7 +347,8 @@ func _ready() -> void:
 	var backstep := StateBackstep.new()
 	var lockon := StateLockOn.new()
 	var attack := StateAttack.new()
-	for st in [idle, loco, fall, roll, backstep, lockon, attack]:
+	var hurt := StateHurt.new()
+	for st in [idle, loco, fall, roll, backstep, lockon, attack, hurt]:
 		(st as PlayerState).setup(self, intent)
 	machine.add_state(PlayerStateMachine.IDLE, idle)
 	machine.add_state(PlayerStateMachine.LOCOMOTION, loco)
@@ -334,6 +357,7 @@ func _ready() -> void:
 	machine.add_state(PlayerStateMachine.BACKSTEP, backstep)
 	machine.add_state(PlayerStateMachine.LOCKON, lockon)
 	machine.add_state(PlayerStateMachine.ATTACK, attack)
+	machine.add_state(PlayerStateMachine.HURT, hurt)
 	machine.start(PlayerStateMachine.IDLE)
 	print("[Player] ready — profile %s, body-relative, nodess SM" % InputManager.get_profile())
 
@@ -342,6 +366,14 @@ func _physics_process(delta: float) -> void:
 	_tick_stamina(delta)
 	if iframes > 0.0:
 		iframes = maxf(iframes - delta, 0.0)
+	if _poise_wait > 0.0:
+		_poise_wait -= delta
+		if _poise_wait <= 0.0 and not dead:
+			poise = POISE_MAX
+	if _respawn_in > 0.0:
+		_respawn_in -= delta
+		if _respawn_in <= 0.0:
+			_respawn()
 	machine.step(delta)
 	move_and_slide()
 	_resolve_anim()
@@ -359,6 +391,48 @@ func spend_stamina(amount: float) -> bool:
 
 func is_invulnerable() -> bool:
 	return iframes > 0.0
+
+
+## Enemy connect (P2 minimal): damage + poise. Ignored while dead or
+## invulnerable (dodge i-frames). Poise break staggers (forced HURT — the
+## only thing that breaks a committed attack, souls rule, 05); HP zero
+## kills (respawn timer, test flow). Returns {killed, staggered} for the
+## attacker's bookkeeping.
+func take_hit(power: float, hit_poise: float, _from: Vector3) -> Dictionary:
+	if dead or is_invulnerable():
+		return {"killed": false, "staggered": false}
+	hp = maxf(hp - power, 0.0)
+	poise = maxf(poise - hit_poise, 0.0)
+	_poise_wait = POISE_RESET
+	if hp <= 0.0:
+		dead = true
+		_respawn_in = RESPAWN_DELAY
+		machine.start(PlayerStateMachine.HURT)
+		print("[Player] DIED")
+		return {"killed": true, "staggered": true}
+	if poise <= 0.0:
+		poise = POISE_MAX
+		machine.start(PlayerStateMachine.HURT)
+		print("[Player] staggered hp %.0f" % hp)
+		return {"killed": false, "staggered": true}
+	print("[Player] hit hp %.0f poise %.0f" % [hp, poise])
+	return {"killed": false, "staggered": false}
+
+
+## Test-flow respawn: restore spawn transform, pools and machine (bonfire
+## flow arrives later — this only proves the death loop closes).
+func _respawn() -> void:
+	global_transform = _home
+	velocity = Vector3.ZERO
+	hp = HP_MAX
+	poise = POISE_MAX
+	dead = false
+	_poise_wait = 0.0
+	_respawn_in = -1.0
+	clear_lock()
+	anim_state = &"idle"
+	machine.start(PlayerStateMachine.IDLE)
+	print("[Player] respawned")
 
 
 func _tick_stamina(delta: float) -> void:
@@ -585,12 +659,14 @@ func marker_time(clip: StringName, marker: StringName) -> float:
 func _process(_delta: float) -> void:
 	if state_label != null:
 		var planar := Vector2(velocity.x, velocity.z).length()
-		state_label.text = "%s · speed %.1f · floor %s · anim %s · stam %.0f%s%s\nprofile %s · raw %s" % [
+		state_label.text = "%s · speed %.1f · floor %s · anim %s · stam %.0f · hp %.0f · poise %.0f%s%s\nprofile %s · raw %s" % [
 			machine.state_name(),
 			planar,
 			"yes" if is_on_floor() else "NO",
 			_anim_cur,
 			stamina,
+			hp,
+			poise,
 			" INVULN" if is_invulnerable() else "",
 			" LOCK %.1fm" % lock_distance() if lock_target != null else "",
 			InputManager.get_profile(),
