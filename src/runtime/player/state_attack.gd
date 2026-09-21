@@ -10,12 +10,10 @@ extends PlayerState
 ## by the caller. Grounded only. Locked: facing + camera keep tracking;
 ## free: heading frozen like a roll. Missing clip = instant finish.
 ## Blade rebound (features/01): a blocked connect (shield / heavy armor,
-## take_hit reports blocked) recoils the swing — a seek-driven rewind of the
-## section once the hitstop ends (the freeze masks the transition), then a
-## frozen hold of the recoiled pose (souls beat — the victim reads the stop),
-## then a data-timed blend to idle. The native section player never runs
-## backwards, so the reversal freezes it (speed 0) and scrubs the cursor
-## from the connect pose back over frames*speed animation-seconds. Sweep
+## take_hit reports blocked) recoils the swing — native reverse playback of
+## the clip from the impact position back to the clip start once the
+## hitstop ends (the freeze masks the transition), then a frozen hold of
+## the recoiled pose (souls beat), then a data-timed blend to idle. Sweep
 ## disarms at reversal start; killed wins over blocked.
 const SECTIONS := [&"windup_start", &"attack_start", &"release_start", &"anim_end"]
 const SPEEDS := ["windup_speed", "attack_speed", "release_speed"]
@@ -39,16 +37,16 @@ var _section_frac := 0.4
 var _armed := false
 ## Blade rebound driver (real seconds — hitstop must not stretch the
 ## recoil): _rebound latches on a blocked connect, _hitstop_left counts
-## down the freeze, then _reversing rewinds the section, _holding freezes
-## the recoiled pose for the souls beat, and _blending crossfades to idle
-## over the data reblend time before _finish().
+## down the freeze, then _reversing replays the clip backwards from the
+## impact position, _holding freezes the recoiled pose for the souls beat,
+## and _blending crossfades to idle over the data reblend time before
+## _finish().
 var _rebound := false
 var _hitstop_left := 0.0
+## Wall rebound latch: one wall recoil per swing (the sweep registry
+## already dedupes bodies, this gates the rebound trigger itself).
+var _wall_rebounded := false
 var _reversing := false
-var _reversal_t := 0.0
-var _reversal_dur := 0.0
-var _rewind_from := 0.0
-var _rewind_to := 0.0
 var _holding := false
 var _hold_t := 0.0
 var _hold_dur := 0.0
@@ -62,10 +60,10 @@ func enter() -> void:
 	_chained = false
 	_rebound = false
 	_hitstop_left = 0.0
+	_wall_rebounded = false
 	_reversing = false
 	_holding = false
 	_blending = false
-	_reversal_t = 0.0
 	_hold_t = 0.0
 	_reblend_t = 0.0
 	# Single facing: nothing to realign — the body already looks where the
@@ -123,12 +121,10 @@ func step(delta: float) -> int:
 		if _hitstop_left <= 0.0:
 			_start_reversal()
 	if _reversing:
-		_reversal_t += delta / maxf(Engine.time_scale, 0.001)
-		var progress := clampf(_reversal_t / _reversal_dur, 0.0, 1.0)
+		# Native reverse runs to the clip start on its own (LOOP_NONE) —
+		# when the player stops, the recoil pose is reached: hold it.
 		var player := ctrl.anim_player()
-		if player != null and player.is_playing():
-			player.seek(lerpf(_rewind_from, _rewind_to, progress), true)
-		if progress >= 1.0 or player == null or not player.is_playing():
+		if player == null or not player.is_playing():
 			_start_hold()
 	elif _holding:
 		_hold_t += delta / maxf(Engine.time_scale, 0.001)
@@ -155,12 +151,16 @@ func step(delta: float) -> int:
 	return PlayerStateMachine.KEEP
 
 
-## Connect loop: every new take_hit carrier takes damage; the first connect
-## of the swing fires the full chain (hitstop + shake + rumble + spark),
-## later ones spark + damage only (spec: strongest once, never stacked).
-## take_hit reports {killed, blocked} — a blocked connect that did not kill
-## latches the blade rebound (recoil once hitstop ends); legacy bool
-## carriers are read as killed-only. Blocked hits deal no damage.
+## Connect loop, two passes. Enemies: every new take_hit carrier takes
+## damage; the first connect of the swing fires the full chain (hitstop +
+## shake + rumble + spark), later ones spark + damage only (spec:
+## strongest once, never stacked). take_hit reports {killed, blocked} —
+## a blocked connect that did not kill latches the blade rebound (recoil
+## once hitstop ends); legacy bool carriers are read as killed-only.
+## Blocked hits deal no damage. Walls (solid bodies without take_hit):
+## a contact on the guard half of the blade (< WALL_REBOUND_RATIO)
+## recoils the swing exactly like a blocked enemy; a contact on the tip
+## half scrapes through with sparks only and the attack continues.
 func _poll_sweep() -> void:
 	var connects := ctrl.sweep_poll()
 	if connects.is_empty():
@@ -169,6 +169,8 @@ func _poll_sweep() -> void:
 	var damage := float(impact.get("damage", 10.0))
 	var host := ctrl.impact_host()
 	for c in connects:
+		if bool(c.get("is_wall", false)):
+			continue
 		var body: Object = c["body"]
 		var point: Vector3 = c["point"]
 		var raw: Variant = body.call("take_hit", damage, ctrl.global_position)
@@ -189,31 +191,45 @@ func _poll_sweep() -> void:
 			host.impact(point, int(impact.get("hitstop_frames", 4)), float(impact.get("shake_scale", 1.0)), ctrl.camera)
 		else:
 			host.spark_at(point)
+	for c in connects:
+		if not bool(c.get("is_wall", false)):
+			continue
+		var point: Vector3 = c["point"]
+		if point.y < PlayerController.WALL_GROUND_Y:
+			continue
+		var ratio := ctrl.blade_contact_ratio(point)
+		if ratio < PlayerController.WALL_REBOUND_RATIO and not _rebound and not _wall_rebounded:
+			_wall_rebounded = true
+			_rebound = true
+			_hitstop_left = float(impact.get("hitstop_frames", 4)) / 60.0
+			print("[SM] Attack wall rebound ratio %.2f" % ratio)
+			if host != null and not _chained:
+				_chained = true
+				host.impact(point, int(impact.get("hitstop_frames", 4)), float(impact.get("shake_scale", 1.0)), ctrl.camera)
+		elif host != null:
+			# Scrape: sparks only, the attack continues normally (no
+			# hitstop, no chain consumption).
+			print("[SM] Attack wall scrape ratio %.2f" % ratio)
+			host.spark_at(point)
 
 
-## Reversal start: freeze the section player and scrub the cursor back
-## from the connect pose over frames*speed animation-seconds (seek-driven —
-## the native section player does not run sections backwards). The sweep is
-## already spent (no re-connects); the section-advance freeze holds until
-## the recovery blends out.
+## Reversal start: capture the impact position and replay the clip
+## backwards to the clip start at the data speed (native
+## play_section_backwards). The sweep is already spent (no re-connects);
+## the section-advance freeze holds until the recovery blends out.
 func _start_reversal() -> void:
 	var rb: Dictionary = ctrl.attack_phases().get("rebound", {})
-	var frames := clampi(int(rb.get("frames", 4)), 3, 16)
 	var speed := maxf(float(rb.get("speed", 3.0)), 0.5)
 	_hold_dur = maxf(float(rb.get("hold_time", 0.15)), 0.0)
 	_reblend_dur = maxf(float(rb.get("reblend_time", 0.15)), 0.05)
-	_reversal_dur = float(frames) / 60.0
-	_reversal_t = 0.0
 	_reversing = true
 	_armed = false
 	ctrl.swing_end()
 	var from := ctrl.anim_pos()
 	if from < 0.0:
 		from = ctrl.phase_end()
-	_rewind_from = from
-	_rewind_to = maxf(0.0, from - float(frames) / 60.0 * speed)
-	ctrl.set_anim_speed(0.0)
-	print("[SM] Attack rebound %df x%.1f (%.2f -> %.2f)" % [frames, speed, _rewind_from, _rewind_to])
+	ctrl.play_reverse(ctrl.attack_clip(), from, speed)
+	print("[SM] Attack rebound reverse from %.2f x%.1f" % [from, speed])
 
 
 ## Souls beat: freeze the recoiled pose so the stop reads before the

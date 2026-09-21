@@ -61,6 +61,13 @@ const SWEEP_EXTRA := 0.1
 ## Fallback sweep when no weapon mesh is found under BladeAttach.
 const SWEEP_FALLBACK_SIZE := Vector3(0.07, 1.05, 0.16)
 const SWEEP_FALLBACK_CENTER := Vector3(0.0, 0.375, 0.0)
+## Wall rebound threshold: a wall contact below this blade ratio (guard
+## third of the blade) recoils the swing; above it the blade scrapes
+## through with sparks only. Tuned per weapon feel, default 0.3.
+const WALL_REBOUND_RATIO := 0.3
+## Wall contacts below this world height are ground-plane grazes, not
+## walls (the sweep rides at blade height; the floor is y=0).
+const WALL_GROUND_Y := 0.25
 
 ## Locomotion clips resolve from data/characters/player_moveset.json (packs
 ## + slots + active variant); FALLBACK lives in Moveset, not here.
@@ -134,9 +141,9 @@ func impact_host() -> ImpactHost:
 ## calls swing_begin/poll/end). Child of BladeAttach so it inherits the
 ## hand motion; size + center auto-detected from the weapon mesh AABB (see
 ## _find_weapon_mesh) so any weapon size works; _update_sweep snaps it onto
-## the blade every poll. Self excluded; only bodies carrying take_hit()
-## connect — the ground and stairs never do. A red debug box (child of the
-## sweep) shows the detected bounds in-game.
+## the blade every poll. Self excluded; take_hit carriers connect as
+## enemies, solid bodies without it (ground, walls) as wall contacts.
+## A red debug box (child of the sweep) shows the detected bounds.
 func _build_sweep() -> void:
 	var skel := rig_root.get_node_or_null("Armature/GeneralSkeleton") as Skeleton3D
 	if skel == null:
@@ -247,9 +254,12 @@ func swing_end() -> void:
 		_sweep.enabled = false
 
 
-## New connects this physics tick: [{body, point}] for take_hit carriers
-## not yet touched by this swing. Empty when disarmed. Snaps the sweep
-## onto the blade first so the cast covers the current bone pose.
+## New connects this physics tick: [{body, point, is_wall}] for bodies
+## not yet touched by this swing. take_hit carriers are enemies;
+## solid bodies without it (ground, walls — layer 1) report is_wall=true
+## so the attack can spark or recoil off them. Empty when disarmed.
+## Snaps the sweep onto the blade first so the cast covers the current
+## bone pose.
 func sweep_poll() -> Array:
 	var out: Array = []
 	if _sweep == null or not _sweep.enabled:
@@ -258,14 +268,35 @@ func sweep_poll() -> Array:
 	_sweep.force_shapecast_update()
 	for i in _sweep.get_collision_count():
 		var body := _sweep.get_collider(i) as Object
-		if body == null or not body.has_method("take_hit"):
+		if body == null:
 			continue
 		var id := body.get_instance_id()
 		if _swing_hits.has(id):
 			continue
 		_swing_hits[id] = true
-		out.append({"body": body, "point": _sweep.get_collision_point(i)})
+		out.append({"body": body, "point": _sweep.get_collision_point(i), "is_wall": not body.has_method("take_hit")})
 	return out
+
+
+## Wall contact position on the blade [0.0, 1.0]: 0.0 = guard side,
+## 1.0 = blade tip. The world contact point goes to BladeAttach-local
+## space and is measured on the blade axis (longest sweep axis) against
+## the detected AABB center — weapon-size agnostic.
+func blade_contact_ratio(contact_point: Vector3) -> float:
+	if _blade_attach == null or _sweep == null or _sweep.shape == null:
+		return 0.5
+	var local: Vector3 = _blade_attach.global_transform.affine_inverse() * contact_point
+	var sweep_sz: Vector3 = (_sweep.shape as BoxShape3D).size
+	var axis := 0
+	if sweep_sz.y >= sweep_sz.x and sweep_sz.y >= sweep_sz.z:
+		axis = 1
+	elif sweep_sz.z >= sweep_sz.x and sweep_sz.z >= sweep_sz.y:
+		axis = 2
+	var blade_len: float = sweep_sz[axis]
+	if blade_len <= 0.001:
+		return 0.5
+	var half: float = blade_len * 0.5
+	return clampf((local[axis] - (_sweep_center[axis] - half)) / blade_len, 0.0, 1.0)
 
 
 func _ready() -> void:
@@ -483,15 +514,31 @@ func play_phase(clip: StringName, sec_from: StringName, sec_to: StringName, spee
 	_anim_cur = str(clip)
 
 
+## Native reverse playback for the StateAttack blade rebound: replays the
+## clip backwards from from_pos to the clip start at the data speed. Uses
+## play_section_backwards (verified headless: play_section+from_end stops
+## after one tick in 4.7.2, negative custom_speed never starts — only the
+## dedicated backwards method and negative speed_scale actually rewind).
+## The section stops by itself at 0 (clips are LOOP_NONE); the state
+## watches is_playing(). Sets anim_manual (cleared via play_slot_blend /
+## exit, which also restores speed_scale to 1.0).
+func play_reverse(clip: StringName, from_pos: float, speed: float) -> void:
+	if _player == null or clip == &"":
+		return
+	anim_manual = true
+	_player.play_section_backwards(clip, 0.0, maxf(from_pos, 0.01), ANIM_BLEND)
+	_player.speed_scale = maxf(speed, 0.5)
+	_anim_cur = str(clip)
+
+
 ## Direct AnimationPlayer access for states that drive playback themselves
 ## (blade rebound reversal) — null before the rig is built.
 func anim_player() -> AnimationPlayer:
 	return _player
 
 
-## Playback speed override (blade rebound: 0.0 freezes the section player
-## while the state scrubs the cursor with seek). Pass 1.0 to restore —
-## states own the restore.
+## Playback speed_scale override (states own the restore — exit() resets
+## to 1.0).
 func set_anim_speed(speed: float) -> void:
 	if _player != null:
 		_player.speed_scale = speed

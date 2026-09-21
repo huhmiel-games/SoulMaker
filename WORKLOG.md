@@ -7,7 +7,7 @@
 - **Objective**: P2 fighter core — blade rebound on blocked hits (shield / heavy armor), UNCOMMITTED
 - **Expected mode**: build
 - Next step: human rebound recipe (below); commit AFTER human OK (not requested yet).
-- **Last step done**: sweep data-driven auto-AABB codé (UNCOMMITTED, rebound mis de côté) — `DebugBlade` supprimé, `_build_blade()` supprimée, sweep auto-dimensionné depuis `get_aabb()` du premier mesh sous `BladeAttach` (VikingSwordBS détectée : `1.009 x 0.113 x 0.040 blade_axis=X`), `SWEEP_EXTRA` sur le plus grand axe, box rouge debug semi-transparente enfant du sweep, `_update_sweep` hérite l'orientation de l'attach (aucune hypothèse d'axe), fallback `SWEEP_FALLBACK_*` si pas d'arme. Constantes `BLADE_*` supprimées. Boot + audit clean. Recette : vérifier la box rouge épouse la VikingSword + connects latéraux.
+- **Last step done**: wall rebound DS3 implémenté (UNCOMMITTED) — `sweep_poll()` retourne `{body, point, is_wall}` (mur = solide sans `take_hit`), `blade_contact_ratio()` (position contact sur l'axe lame [0=garde, 1=bout], weapon-agnostic), `WALL_REBOUND_RATIO 0.5` + garde anti-sol `WALL_GROUND_Y 0.25`, `StateAttack` 2e passe : bas de lame → rebound (full chain hitstop+shake+sparks, 1/swing) / haut → `spark_at` seul, attaque continue. Scène : FakeEnemy layer 3 + mur `Wall` (2.2, 0, 2.0). Boot + audit clean. Recette : rebound collé au mur ? scrape à distance ?
 
 ## Test recipe (human) — round-trip editor ⇄ game
 

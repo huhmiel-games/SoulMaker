@@ -41,6 +41,16 @@ size = Vector3(3, 0.88, 0.6)
 [sub_resource type="BoxShape3D" id="stair_shape_3"]
 size = Vector3(3, 0.88, 0.6)
 
+[sub_resource type="StandardMaterial3D" id="wall_mat"]
+albedo_color = Color(0.45, 0.42, 0.38, 1)
+
+[sub_resource type="BoxMesh" id="wall_mesh"]
+material = SubResource("wall_mat")
+size = Vector3(0.4, 2.5, 4)
+
+[sub_resource type="BoxShape3D" id="wall_shape"]
+size = Vector3(0.4, 2.5, 4)
+
 [sub_resource type="CylinderShape3D" id="enemy_shape"]
 height = 1.8
 radius = 0.4
@@ -127,9 +137,22 @@ mesh = SubResource("stair_mesh_3")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0.44, 2.2)
 shape = SubResource("stair_shape_3")
 
+[node name="Wall" type="StaticBody3D" parent="." unique_id=1906112509]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.2, 0, 2)
+
+[node name="WallMesh" type="MeshInstance3D" parent="Wall" unique_id=917290966]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.25, 0)
+mesh = SubResource("wall_mesh")
+
+[node name="WallShape" type="CollisionShape3D" parent="Wall" unique_id=237650656]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.25, 0)
+shape = SubResource("wall_shape")
+
 [node name="FakeEnemy" type="StaticBody3D" parent="." unique_id=2100000001 groups=["lockable"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -2)
+collision_layer = 3
 script = ExtResource("6")
+blocked_mode = true
 
 [node name="EnemyBody" type="CollisionShape3D" parent="FakeEnemy" unique_id=2100000002]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
