@@ -45,7 +45,13 @@ const BACKSTEP_SEEK := 0.8
 ## Light attack (P2 single swing): forward step during the attack section
 ## (the swing carries through — features/01), planted otherwise.
 const ATTACK_STEP := 2.0
-## Weapon (P2): the real mesh (VikingSwordBS) is authored in player.tscn
+## Shove (P3 S3 graybox, features/17 push/shove): stamina cost of the
+## forward+attack shove attempt, flat (the push_move payload carries no
+## stamina field in V1). Whiff vs non-blockers = spacing risk only.
+const SHOVE_STAMINA := 10.0
+## Lunge speed during the shove (covers the 2 m reach over the recovery).
+const SHOVE_STEP := 3.0
+## Weapon (P2 mesh + P3 S3 data): the real mesh (VikingSwordBS) is authored in player.tscn
 ## under the BladeAttach BoneAttachment3D (oriented in the editor). The
 ## sweep auto-sizes from the weapon mesh AABB — daggers to great hammers
 ## need no code change: the longest AABB axis is the blade direction and
@@ -137,6 +143,11 @@ var guard_cfg := {}
 var guard_hold_override := false
 var hurt_time_override := -1.0
 var guard_release_needed := false
+## Weapon select (P3 S3): weapon id resolved via WeaponConfig at boot
+## (test scenes override the export — no inventory until P8). "light_sword"
+## = built-in fallback = pre-S3 behavior exactly.
+@export var weapon_id := "light_sword"
+var weapon_cfg := {}
 
 var _player: AnimationPlayer = null
 var _clips := {}
@@ -169,9 +180,40 @@ func attack_phases() -> Dictionary:
 
 
 ## Impact payload for the light attack (damage, hitstop frames, shake
-## scale — features/01 game feel). Weapon override point for 04.
+## scale — features/01 game feel). Weapon values overlay the moveset slot
+## at boot (S3) — the slot keeps clip timing, the weapon owns combat math.
 func attack_impact() -> Dictionary:
 	return attack_phases().get("impact", Moveset.IMPACT_DEFAULTS)
+
+
+## Weapon attack overlay (P3 S3): combat numbers come from the weapon, clip
+## timing (attack_start/release/sweep_start/rebound) stays on the moveset
+## slot. Applied once at boot — the light-sword fallback is identical to
+## the pre-S3 moveset values, so default behavior is unchanged.
+func _apply_weapon_attack() -> void:
+	var atk: Dictionary = weapon_cfg.get("attack", {})
+	var ph: Dictionary = _attack_phases.get(&"attack_light_1", {})
+	if ph.is_empty():
+		return
+	for key in ["windup_speed", "attack_speed", "release_speed", "stamina_cost"]:
+		if atk.has(key):
+			ph[key] = float(atk[key])
+	var imp: Dictionary = ph.get("impact", {})
+	for key in ["damage", "critical_multiplier", "hitstop_frames", "shake_scale"]:
+		if atk.has(key):
+			imp[key] = float(atk[key])
+
+
+## Blade-shove carrier (P3 S3, features/17): true when the equipped weapon
+## defines a blade_shove push_move. Light classes resolve "none" = normal
+## attack on forward+attack (no dead input — plan decision 21/09).
+func shove_available() -> bool:
+	return str((weapon_cfg.get("push_move", {}) as Dictionary).get("type", "none")) == "blade_shove"
+
+
+## Resolved push_move payload ({} = none — caller checks shove_available).
+func shove_move() -> Dictionary:
+	return weapon_cfg.get("push_move", {})
 
 
 ## Impact host of the current scene (test scenes carry one in group
@@ -202,6 +244,12 @@ func _build_sweep() -> void:
 	_sweep_center = SWEEP_FALLBACK_CENTER
 	var weapon := _find_weapon_mesh(_blade_attach)
 	if weapon != null:
+		# S3 greatsword: same model, scaled (the rel basis below carries the
+		# scale into the sweep size, so the hitbox grows with the blade).
+		var wscale := maxf(float(weapon_cfg.get("mesh_scale", 1.0)), 0.1)
+		if not is_equal_approx(wscale, 1.0):
+			weapon.scale = Vector3.ONE * wscale
+			print("[Player] weapon mesh scaled x%.2f" % wscale)
 		var aabb: AABB = weapon.get_aabb()
 		if aabb.size.length() > 0.001:
 			# Mesh-local AABB -> BladeAttach space (the mesh carries its own
@@ -355,6 +403,9 @@ func _ready() -> void:
 	_player = RigKit.build_player(rig_root, Moveset.packs_of(ms))
 	_clips = Moveset.resolve_clips(ms, _player)
 	_attack_phases[&"attack_light_1"] = Moveset.phases_for(ms, &"attack_light_1")
+	weapon_cfg = WeaponConfig.merged(weapon_id)
+	_apply_weapon_attack()
+	print("[Player] weapon %s %s" % [weapon_id, str((weapon_cfg.get("attack", {}) as Dictionary).get("damage", "?"))])
 	guard_cfg = GuardConfig.merged()
 	print("[Player] guard %s %s" % [str(guard_cfg.get("equipped_shield", "?")), str(guard_cfg.get("class", {}))])
 	# Sweep resolves _blade_attach and auto-sizes from the weapon mesh.
@@ -375,7 +426,8 @@ func _ready() -> void:
 	var attack := StateAttack.new()
 	var hurt := StateHurt.new()
 	var guard := StateGuard.new()
-	for st in [idle, loco, fall, roll, backstep, lockon, attack, hurt, guard]:
+	var shove := StateShove.new()
+	for st in [idle, loco, fall, roll, backstep, lockon, attack, hurt, guard, shove]:
 		(st as PlayerState).setup(self, intent)
 	machine.add_state(PlayerStateMachine.IDLE, idle)
 	machine.add_state(PlayerStateMachine.LOCOMOTION, loco)
@@ -386,6 +438,7 @@ func _ready() -> void:
 	machine.add_state(PlayerStateMachine.ATTACK, attack)
 	machine.add_state(PlayerStateMachine.HURT, hurt)
 	machine.add_state(PlayerStateMachine.GUARD, guard)
+	machine.add_state(PlayerStateMachine.SHOVE, shove)
 	machine.start(PlayerStateMachine.IDLE)
 	print("[Player] ready — profile %s, body-relative, nodess SM" % InputManager.get_profile())
 

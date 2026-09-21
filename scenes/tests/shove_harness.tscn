@@ -1,0 +1,54 @@
+[gd_scene format=3]
+
+[ext_resource type="Environment" path="res://scenes/editors/env_default.tres" id="4"]
+[ext_resource type="PackedScene" path="res://scenes/prefabs/player.tscn" id="5"]
+[ext_resource type="Script" path="res://src/runtime/enemies/soldier_enemy.gd" id="6"]
+[ext_resource type="Script" path="res://scenes/tests/shove_harness.gd" id="8"]
+
+[sub_resource type="BoxMesh" id="ground_mesh"]
+size = Vector3(40, 0.2, 40)
+
+[sub_resource type="BoxShape3D" id="ground_shape"]
+size = Vector3(40, 0.2, 40)
+
+[node name="ShoveHarness" type="Node3D"]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = ExtResource("4")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.81915206, -0.3686878, 0.43938506, 0, 0.76604444, 0.6427876, -0.57357645, -0.52654076, 0.62750685, 0, 0, 0)
+light_energy = 1.1
+shadow_enabled = true
+
+[node name="Ground" type="StaticBody3D" parent="."]
+collision_layer = 1
+collision_mask = 0
+
+[node name="GroundMesh" type="MeshInstance3D" parent="Ground"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.1, 0)
+mesh = SubResource("ground_mesh")
+
+[node name="GroundShape" type="CollisionShape3D" parent="Ground"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.1, 0)
+shape = SubResource("ground_shape")
+
+[node name="Soldier" type="CharacterBody3D" parent="." groups=["lockable", "shove_dummy"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+script = ExtResource("6")
+
+[node name="Player" parent="." instance=ExtResource("5")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 20)
+
+[node name="Harness" type="Node" parent="."]
+script = ExtResource("8")
+
+[node name="HUD" type="CanvasLayer" parent="."]
+
+[node name="State" type="Label" parent="HUD"]
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 700.0
+offset_bottom = 60.0
+theme_override_font_sizes/font_size = 18
+text = "boot"

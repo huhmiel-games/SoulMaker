@@ -40,6 +40,7 @@ script = ExtResource("6")
 
 [node name="Player" parent="." instance=ExtResource("5")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 6)
+weapon_id = "greatsword_test"
 
 [node name="ImpactHost" type="Node3D" parent="."]
 script = ExtResource("7")
@@ -117,4 +118,4 @@ offset_bottom = -12.0
 grow_horizontal = 2
 grow_vertical = 0
 theme_override_font_sizes/font_size = 14
-text = "ZQSD move · MMB/R3 lock-on · Shift/L1 guard (hold) · approach: soldier aggros, red windup = dodge or guard · frontal hits = your block (stamina) · flank it"
+text = "ZQSD move · MMB/R3 lock-on · Shift/L1 guard (hold) · greatsword: W+LMB = shove (cracks shields) · flank/backstab still works"

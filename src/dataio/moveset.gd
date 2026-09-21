@@ -33,7 +33,7 @@ const PHASE_DEFAULTS := {
 ## Default impact payload (features/01 game feel): damage per connect,
 ## hitstop frames (2-10 by power), shake scale (trauma multiplier).
 const IMPACT_DEFAULTS := {
-	"damage": 10.0, "hitstop_frames": 4, "shake_scale": 1.0,
+	"damage": 10.0, "critical_multiplier": 1.5, "hitstop_frames": 4, "shake_scale": 1.0,
 }
 
 ## Default blade rebound (features/01): reverse N frames at negative speed
@@ -88,7 +88,7 @@ static func validate_moveset(obj: Dictionary) -> PackedStringArray:
 		if not impact is Dictionary:
 			issues.append("moveset slot '%s' phases.impact must be an object" % name)
 		else:
-			for key in ["damage", "hitstop_frames", "shake_scale"]:
+			for key in ["damage", "critical_multiplier", "hitstop_frames", "shake_scale"]:
 				var v: Variant = (impact as Dictionary).get(key, 0.0)
 				if not v is float and not v is int:
 					issues.append("moveset slot '%s' phases.impact.%s must be a number" % [name, key])

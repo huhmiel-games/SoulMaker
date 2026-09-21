@@ -42,9 +42,14 @@ func step(delta: float) -> int:
 				return PlayerStateMachine.BACKSTEP
 		elif ctrl.spend_stamina(PlayerController.ROLL_COST):
 			return PlayerStateMachine.ROLL
-	# Light attack (after dodge — defense wins ties): clip + stamina gate.
-	if intent.attack_light_pressed() and ctrl.is_on_floor() and ctrl.attack_clip() != &"" and ctrl.spend_stamina(float(ctrl.attack_phases().get("stamina_cost", 20.0))):
-		return PlayerStateMachine.ATTACK
+	# Light attack (after dodge — defense wins ties): forward + shove carrier
+	# = blade shove (S3), otherwise the normal swing. Clip + stamina gates.
+	if intent.attack_light_pressed() and ctrl.is_on_floor() and ctrl.attack_clip() != &"":
+		if intent.forward_held() and ctrl.shove_available():
+			if ctrl.spend_stamina(PlayerController.SHOVE_STAMINA):
+				return PlayerStateMachine.SHOVE
+		elif ctrl.spend_stamina(float(ctrl.attack_phases().get("stamina_cost", 20.0))):
+			return PlayerStateMachine.ATTACK
 	# Guard hold (after attack — a tap attacks, a hold guards).
 	if ctrl.guard_wanted() and ctrl.is_on_floor():
 		return PlayerStateMachine.GUARD

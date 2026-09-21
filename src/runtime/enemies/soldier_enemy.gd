@@ -120,17 +120,12 @@ func take_hit(power: float, from: Vector3, crit_mult := 1.0) -> Dictionary:
 			print("[EnemyAI] flinched (%d)" % hits)
 		_update_label()
 		return {"killed": false, "blocked": false, "crit": true}
-	var guard_up := state == IDLE or state == CHASE or state == WINDUP
-	if _is_shielded() and guard_up and to_you.length_squared() > 0.0001:
-		var fwd := -global_transform.basis.z
-		fwd.y = 0.0
-		var half := deg_to_rad(float((cfg.get("attack", {}) as Dictionary).get("shield_half_angle", 60.0)))
-		if fwd.normalized().dot(to_you.normalized()) > cos(half):
-			blocked_hits += 1
-			_flash(Color(0.6, 0.7, 1.0))
-			print("[EnemyAI] blocked %d" % blocked_hits)
-			_update_label()
-			return {"killed": false, "blocked": true}
+	if _would_block(to_you):
+		blocked_hits += 1
+		_flash(Color(0.6, 0.7, 1.0))
+		print("[EnemyAI] blocked %d" % blocked_hits)
+		_update_label()
+		return {"killed": false, "blocked": true}
 	hp = maxf(hp - power, 0.0)
 	poise = maxf(poise - power * POISE_FACTOR, 0.0)
 	_poise_wait = float((cfg.get("stats", {}) as Dictionary).get("poise_reset_time", 3.5))
@@ -154,8 +149,66 @@ func take_hit(power: float, from: Vector3, crit_mult := 1.0) -> Dictionary:
 	return {"killed": false, "blocked": false}
 
 
+## Blade-shove connect (P3 S3, features/17): the heavies' guard-break
+## answer. If the shield would block this connect (frontal + guard up),
+## the shove cracks it: small chip damage + guard_break as flat poise
+## damage (a 70-break vs 30 poise always flinches — one shove cracks),
+## never blocked, never rebounds. Vs a down guard / flanked soldier the
+## shove is near-useless: small damage + modest poise only (plan 21/09).
+## Returns {killed, blocked:false, cracked}. Ignored while DEAD.
+func take_shove(power: float, guard_break: float, from: Vector3) -> Dictionary:
+	if state == DEAD:
+		return {"killed": false, "blocked": false, "cracked": false}
+	var to_you: Vector3 = from - global_position
+	to_you.y = 0.0
+	if _would_block(to_you):
+		hp = maxf(hp - power, 0.0)
+		poise = maxf(poise - guard_break, 0.0)
+		_poise_wait = float((cfg.get("stats", {}) as Dictionary).get("poise_reset_time", 3.5))
+		_turn_suppress = TURN_SUPPRESS_TIME
+		hits += 1
+		_flash(Color(1.0, 0.6, 0.1))
+		print("[EnemyAI] SHOVE CRACK dmg %.0f hp %.0f poise %.0f" % [power, hp, poise])
+		if hp <= 0.0:
+			_die()
+			return {"killed": true, "blocked": false, "cracked": true}
+		poise = float((cfg.get("stats", {}) as Dictionary).get("poise", 40.0))
+		_enter(FLINCH)
+		print("[EnemyAI] flinched (%d)" % hits)
+		_update_label()
+		return {"killed": false, "blocked": false, "cracked": true}
+	hp = maxf(hp - power, 0.0)
+	poise = maxf(poise - power * POISE_FACTOR, 0.0)
+	_poise_wait = float((cfg.get("stats", {}) as Dictionary).get("poise_reset_time", 3.5))
+	hits += 1
+	_flash(Color(1, 1, 1))
+	if hp <= 0.0:
+		_die()
+		return {"killed": true, "blocked": false, "cracked": false}
+	if poise <= 0.0:
+		poise = float((cfg.get("stats", {}) as Dictionary).get("poise", 40.0))
+		_enter(FLINCH)
+		print("[EnemyAI] flinched (%d)" % hits)
+	else:
+		print("[EnemyAI] shoved %d hp %.0f poise %.0f" % [hits, hp, poise])
+	_update_label()
+	return {"killed": false, "blocked": false, "cracked": false}
+
+
 func _is_shielded() -> bool:
 	return bool((cfg.get("attack", {}) as Dictionary).get("shielded", false))
+
+
+## Shared block predicate (shield + guard up + inside the frontal cone):
+## take_hit blocks on it, take_shove cracks on it.
+func _would_block(to_you: Vector3) -> bool:
+	var guard_up := state == IDLE or state == CHASE or state == WINDUP
+	if not (_is_shielded() and guard_up and to_you.length_squared() > 0.0001):
+		return false
+	var fwd := -global_transform.basis.z
+	fwd.y = 0.0
+	var half := deg_to_rad(float((cfg.get("attack", {}) as Dictionary).get("shield_half_angle", 60.0)))
+	return fwd.normalized().dot(to_you.normalized()) > cos(half)
 
 
 ## Backstab eligibility (P3 S2): config flag + neutral/committed state +

@@ -61,6 +61,13 @@ func attack_light_pressed() -> bool:
 	return InputManager.is_just_pressed(&"attack_light")
 
 
+## Forward held (P3 S3 shove trigger): move input pushing forward past the
+## sneak band — with a blade_shove weapon this resolves the shove, without
+## one the normal attack (no dead input, plan 21/09).
+func forward_held() -> bool:
+	return move_raw().y < -0.5
+
+
 ## Guard hold (Shift / L1 per frozen game table): polled hold, read by the
 ## grounded states to enter StateGuard.
 func guard_held() -> bool:

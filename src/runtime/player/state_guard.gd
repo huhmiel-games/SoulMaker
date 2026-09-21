@@ -45,8 +45,14 @@ func step(delta: float) -> int:
 				return PlayerStateMachine.BACKSTEP
 		elif ctrl.spend_stamina(PlayerController.ROLL_COST):
 			return PlayerStateMachine.ROLL
-	if intent.attack_light_pressed() and ctrl.is_on_floor() and ctrl.attack_clip() != &"" and ctrl.spend_stamina(float(ctrl.attack_phases().get("stamina_cost", 20.0))):
-		return PlayerStateMachine.ATTACK
+	# Attack drops the guard: forward + shove carrier = blade shove (S3),
+	# otherwise the normal swing. Same gates as LockOn.
+	if intent.attack_light_pressed() and ctrl.is_on_floor() and ctrl.attack_clip() != &"":
+		if intent.forward_held() and ctrl.shove_available():
+			if ctrl.spend_stamina(PlayerController.SHOVE_STAMINA):
+				return PlayerStateMachine.SHOVE
+		elif ctrl.spend_stamina(float(ctrl.attack_phases().get("stamina_cost", 20.0))):
+			return PlayerStateMachine.ATTACK
 	var planar := Vector3(ctrl.velocity.x, 0.0, ctrl.velocity.z)
 	if raw == Vector2.ZERO:
 		ctrl.anim_state = &"idle"

@@ -1,0 +1,30 @@
+{
+  "schema": "weapon_v0.1",
+  "id": "greatsword_test",
+  "display_name": "Greatsword (test)",
+  "comment": "P3 S3 graybox heavy (features/17 push/shove): same VikingSwordBS model as the light sword, scaled up (mesh_scale) — no new art. Heavy profile: slow, hard-hitting, crit x2, weak guard values (stored, used at S7 two-hand — S1 shield guard untouched). The only V1 push_move carrier: blade shove cracks turtle-blockers in one.",
+  "class": "greatsword",
+  "mesh_scale": 1.4,
+  "attack": {
+    "damage": 22.0,
+    "critical_multiplier": 2.0,
+    "windup_speed": 0.7,
+    "attack_speed": 0.7,
+    "release_speed": 0.8,
+    "stamina_cost": 35.0,
+    "hitstop_frames": 5,
+    "shake_scale": 1.2
+  },
+  "guard": {
+    "guard_absorb": 0.7,
+    "stability_mult": 1.5,
+    "block_arc": 60.0
+  },
+  "push_move": {
+    "type": "blade_shove",
+    "reach": 2.0,
+    "guard_break": 70.0,
+    "recovery": 0.6,
+    "damage": 4.0
+  }
+}
