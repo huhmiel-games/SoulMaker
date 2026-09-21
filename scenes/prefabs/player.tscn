@@ -40,7 +40,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.6, 0)
 script = ExtResource("2")
 
 [node name="SpringArm3D" type="SpringArm3D" parent="CamPivot" unique_id=251311734]
-spring_length = 4.5
+spring_length = 2.5
 margin = 0.3
 
 [node name="Camera3D" type="Camera3D" parent="CamPivot/SpringArm3D" unique_id=370940538]
