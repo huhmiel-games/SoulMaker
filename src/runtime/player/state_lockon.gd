@@ -47,9 +47,9 @@ func step(delta: float) -> int:
 	# Light attack (after dodge): same clip + stamina gate, lock preserved.
 	if intent.attack_light_pressed() and ctrl.is_on_floor() and ctrl.attack_clip() != &"" and ctrl.spend_stamina(float(ctrl.attack_phases().get("stamina_cost", 20.0))):
 		return PlayerStateMachine.ATTACK
+	var planar := Vector3(ctrl.velocity.x, 0.0, ctrl.velocity.z)
 	if raw == Vector2.ZERO:
 		ctrl.anim_state = &"idle"
-		var planar := Vector3(ctrl.velocity.x, 0.0, ctrl.velocity.z)
 		planar = planar.move_toward(Vector3.ZERO, PlayerController.DECEL * delta)
 		ctrl.velocity.x = planar.x
 		ctrl.velocity.z = planar.z
@@ -58,7 +58,6 @@ func step(delta: float) -> int:
 	ctrl.anim_state = &"run" if force >= PlayerIntent.RUN_TRIGGER else &"walk"
 	var wish := intent.wish_direction(raw)
 	var target := wish * cap * clampf(force, PlayerIntent.SNEAK_TRIGGER, 1.0)
-	var planar := Vector3(ctrl.velocity.x, 0.0, ctrl.velocity.z)
 	planar = planar.move_toward(target, PlayerController.ACCEL * delta)
 	ctrl.velocity.x = planar.x
 	ctrl.velocity.z = planar.z

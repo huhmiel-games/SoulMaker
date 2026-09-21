@@ -217,6 +217,10 @@ func _poll_sweep() -> void:
 ## backwards to the clip start at the data speed (native
 ## play_section_backwards). The sweep is already spent (no re-connects);
 ## the section-advance freeze holds until the recovery blends out.
+## NOTE (future tuning): the reverse duration is emergent — from / speed —
+## so an early connect recoils short and a late one recoils long. Keep it
+## (DS3-like timing feel) unless a fixed-length recoil is wanted; in that
+## case renormalize here: speed = from / TARGET_REVERSE_DUR.
 func _start_reversal() -> void:
 	var rb: Dictionary = ctrl.attack_phases().get("rebound", {})
 	var speed := maxf(float(rb.get("speed", 3.0)), 0.5)

@@ -272,8 +272,8 @@ func _source_pressed(s: Dictionary) -> bool:
 		var axis := JOY_AXIS_TRIGGER_RIGHT if str(s["trigger"]) == "right" else JOY_AXIS_TRIGGER_LEFT
 		return Input.get_joy_axis(DEVICE, axis) > TRIGGER_THRESHOLD
 	if s.has("stick"):
-		var sign: float = float(s.get("stick_sign", 1.0))
-		return Input.get_joy_axis(DEVICE, int(s["stick"])) * sign > DEADZONE
+		var _sign: float = float(s.get("stick_sign", 1.0))
+		return Input.get_joy_axis(DEVICE, int(s["stick"])) * _sign > DEADZONE
 	return false
 
 
