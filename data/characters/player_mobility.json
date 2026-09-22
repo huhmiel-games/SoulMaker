@@ -1,0 +1,33 @@
+{
+  "schema": "mobility_v0.1",
+  "comment": "P3 S4 graybox mobility (features/17 equip-load/backstep/plunge): base-owned thresholds, NOT creator-tunable. Roll tiers by equip-load ratio, backstep cost per tier, plunge bounds, fall damage bounds. Charge test = controller export equip_load_ratio (no inventory until P8).",
+  "thresholds": {
+    "fast_max": 0.3,
+    "mid_max": 0.7
+  },
+  "roll": {
+    "base_time": 0.8,
+    "fast": { "iframes": 0.5, "distance": 6.0, "recovery_bonus": 0.0, "anim_speed": 1.0 },
+    "mid": { "iframes": 0.4, "distance": 4.0, "recovery_bonus": 0.08, "anim_speed": 0.9 },
+    "fat": { "iframes": 0.25, "distance": 3.0, "recovery_bonus": 0.3, "anim_speed": 0.75 }
+  },
+  "costs": {
+    "roll": 25.0,
+    "backstep": { "fast": 15.0, "mid": 18.0, "fat": 22.0 }
+  },
+  "plunge": {
+    "min_reach": 1.5,
+    "min_drop": 2.0,
+    "damage_per_meter": 8.0,
+    "damage_cap": 40.0,
+    "knockback": 1.5,
+    "hit_recovery": 0.4,
+    "miss_recovery": 0.9,
+    "roll_cancel_at": 0.5
+  },
+  "fall_damage": {
+    "threshold": 5.0,
+    "per_meter": 15.0,
+    "cap": 50.0
+  }
+}

@@ -4,7 +4,7 @@
 [ext_resource type="PackedScene" uid="uid://cqk7playerp21" path="res://scenes/prefabs/player.tscn" id="5"]
 [ext_resource type="Script" uid="uid://bbafwoae82175" path="res://scenes/tests/fake_enemy.gd" id="6"]
 [ext_resource type="Script" uid="uid://djnughxi6e4qg" path="res://src/runtime/impact_host.gd" id="7"]
-[ext_resource type="Script" path="res://scenes/tests/test_bars.gd" id="8"]
+[ext_resource type="Script" uid="uid://ba2byly0nswhu" path="res://scenes/tests/test_bars.gd" id="8"]
 
 [sub_resource type="BoxMesh" id="ground_mesh"]
 size = Vector3(40, 0.2, 40)
@@ -51,6 +51,18 @@ size = Vector3(0.4, 2.5, 4)
 
 [sub_resource type="BoxShape3D" id="wall_shape"]
 size = Vector3(0.4, 2.5, 4)
+
+[sub_resource type="BoxMesh" id="plunge_ramp_mesh"]
+size = Vector3(3, 0.2, 13.5)
+
+[sub_resource type="BoxShape3D" id="plunge_ramp_shape"]
+size = Vector3(3, 0.2, 13.5)
+
+[sub_resource type="BoxMesh" id="plunge_ledge_mesh"]
+size = Vector3(4, 0.2, 4)
+
+[sub_resource type="BoxShape3D" id="plunge_ledge_shape"]
+size = Vector3(4, 0.2, 4)
 
 [sub_resource type="CylinderShape3D" id="enemy_shape"]
 height = 1.8
@@ -149,11 +161,29 @@ mesh = SubResource("wall_mesh")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.25, 0)
 shape = SubResource("wall_shape")
 
+[node name="PlungeRamp" type="StaticBody3D" parent="." unique_id=-1194967295]
+transform = Transform3D(1, 0, 0, 0, 0.8941542, -0.44775903, 0, 0.44775903, 0.8941542, 0, 3, 6)
+
+[node name="PlungeRampMesh" type="MeshInstance3D" parent="PlungeRamp" unique_id=-1194967294]
+transform = Transform3D(1, 0, 0, 0, 1.0000002, 0, 0, 0, 1.0000002, 0, 0, 0)
+mesh = SubResource("plunge_ramp_mesh")
+
+[node name="PlungeRampShape" type="CollisionShape3D" parent="PlungeRamp" unique_id=-1194967293]
+shape = SubResource("plunge_ramp_shape")
+
+[node name="PlungeLedge" type="StaticBody3D" parent="." unique_id=-1194967292]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 6, -2)
+
+[node name="PlungeLedgeMesh" type="MeshInstance3D" parent="PlungeLedge" unique_id=-1194967291]
+mesh = SubResource("plunge_ledge_mesh")
+
+[node name="PlungeLedgeShape" type="CollisionShape3D" parent="PlungeLedge" unique_id=-1194967290]
+shape = SubResource("plunge_ledge_shape")
+
 [node name="FakeEnemy" type="StaticBody3D" parent="." unique_id=2100000001 groups=["lockable"]]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -2)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -5.5)
 collision_layer = 3
 script = ExtResource("6")
-blocked_mode = true
 
 [node name="EnemyBody" type="CollisionShape3D" parent="FakeEnemy" unique_id=2100000002]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
@@ -193,42 +223,42 @@ offset_bottom = 88.0
 theme_override_font_sizes/font_size = 18
 text = "enemy"
 
-[node name="HPBg" type="ColorRect" parent="HUD"]
+[node name="HPBg" type="ColorRect" parent="HUD" unique_id=48262847]
 offset_left = 16.0
 offset_top = 92.0
 offset_right = 316.0
 offset_bottom = 102.0
 color = Color(0.05, 0.05, 0.05, 0.8)
 
-[node name="HP" type="ColorRect" parent="HUD"]
+[node name="HP" type="ColorRect" parent="HUD" unique_id=19539966]
 offset_left = 16.0
 offset_top = 92.0
 offset_right = 316.0
 offset_bottom = 102.0
 color = Color(0.2, 0.8, 0.2, 1)
 
-[node name="STBg" type="ColorRect" parent="HUD"]
+[node name="STBg" type="ColorRect" parent="HUD" unique_id=1443806408]
 offset_left = 16.0
 offset_top = 104.0
 offset_right = 316.0
 offset_bottom = 114.0
 color = Color(0.05, 0.05, 0.05, 0.8)
 
-[node name="ST" type="ColorRect" parent="HUD"]
+[node name="ST" type="ColorRect" parent="HUD" unique_id=363585357]
 offset_left = 16.0
 offset_top = 104.0
 offset_right = 316.0
 offset_bottom = 114.0
 color = Color(0.9, 0.8, 0.2, 1)
 
-[node name="ENBg" type="ColorRect" parent="HUD"]
+[node name="ENBg" type="ColorRect" parent="HUD" unique_id=1711945658]
 offset_left = 16.0
 offset_top = 116.0
 offset_right = 316.0
 offset_bottom = 126.0
 color = Color(0.05, 0.05, 0.05, 0.8)
 
-[node name="EN" type="ColorRect" parent="HUD"]
+[node name="EN" type="ColorRect" parent="HUD" unique_id=1872252183]
 offset_left = 16.0
 offset_top = 116.0
 offset_right = 316.0
@@ -247,4 +277,4 @@ offset_bottom = -12.0
 grow_horizontal = 2
 grow_vertical = 0
 theme_override_font_sizes/font_size = 14
-text = "ZQSD move (relative to character, A/D strafe) · mouse: orbit in Idle, turn in Locomotion · MMB/R3 lock-on · ramp on the right, stairs on the left"
+text = "ZQSD move (relative to character, A/D strafe) · mouse: orbit in Idle, turn in Locomotion · MMB/R3 lock-on · ramp on the right, stairs on the left · S-ramp: plunge ledge (cross N, WALK off N edge + attack mid-fall onto dummy)"

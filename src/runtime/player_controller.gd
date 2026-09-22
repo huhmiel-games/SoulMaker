@@ -40,6 +40,15 @@ const ROLL_SEEK := 0.55
 const BACKSTEP_COST := 15.0
 const BACKSTEP_SPEED := 3.5
 const BACKSTEP_TIME := 0.7
+## Fat-roll thud (P3 S4 graybox): seconds into StateRoll when the back hits
+## the ground — fires InputManager.rumble on fat tier only. TIMING IS A
+## PLACEHOLDER: calibrate against the real fat-roll anim (P4 shared rig).
+const FAT_THUD_TIME := 0.45
+## Early-Fall catch (P3 S4 fix 22/09): downward speed that forces FALL before
+## the air-grace expires — running off a ledge must read as a fall now, not
+## after 0.65 s of run anim. Stair/ramp steps peak ~3 m/s, real falls pass
+## this in ~0.16 s, so it never misfires on descent.
+const AIR_FALL_SPEED := 4.0
 ## Clip idles ~0.8 s before the impulse — seek past it on enter.
 const BACKSTEP_SEEK := 0.8
 ## Light attack (P2 single swing): forward step during the attack section
@@ -102,6 +111,10 @@ const CRIT_IFRAMES := 0.6
 
 ## Locomotion clips resolve from data/characters/player_moveset.json (packs
 ## + slots + active variant); FALLBACK lives in Moveset, not here.
+## Curated runtime library (exported on demand from the anim lab): when
+## present the player mounts it directly instead of rebuilding from the
+## .glb packs; absent (fresh clone) = silent rebuild, never blocking.
+const PLAYER_PACK := "res://scenes/anim_lab/player_pack.res"
 
 ## Attach points (must exist in the scene scaffold).
 @onready var rig_root: Node3D = get_node("RigRoot")
@@ -148,6 +161,21 @@ var guard_release_needed := false
 ## = built-in fallback = pre-S3 behavior exactly.
 @export var weapon_id := "light_sword"
 var weapon_cfg := {}
+## Equip-load charge test (P3 S4 graybox, features/17): ratio actuel / max,
+## 0.0 = nu, 1.0 = surcharge. Test scenes override the export (0.2/0.5/0.8);
+## no inventory until P8 — this migrates into Endurance + item weights then.
+@export var equip_load_ratio := 0.2
+var mobility_cfg := {}
+## Fall tracking (P3 S4): fall_start_y captured by StateFall on enter,
+## plunge_wanted = attack buffered mid-fall (one-shot, no auto-trigger),
+## last_fall_drop = last landing drop in meters (HUD + harness reads).
+var fall_start_y := 0.0
+var plunge_wanted := false
+var last_fall_drop := 0.0
+## Last grounded height (P3 S4 fix 22/09): refreshed every physics tick while
+## on the floor — StateFall measures the drop from here, not from the late
+## Fall-enter point (the 0.65 s grace ate 4+ m of the fall before).
+var last_ground_y := 0.0
 
 var _player: AnimationPlayer = null
 var _clips := {}
@@ -167,6 +195,20 @@ var _sweep_center := SWEEP_FALLBACK_CENTER
 var _prev_mid := Vector3.ZERO
 var _sweep_primed := false
 var _sweep_debug: MeshInstance3D = null
+## Blade length (P3 S4 plunge forgiveness): longest weapon-mesh AABB axis
+## detected by _build_sweep (mesh scale included), fallback length when no
+## mesh. Drives plunge_reach() — dagger hits the min, halberd its 3 m.
+var _blade_length := 1.05
+## Plunge hitbox (P3 S4 forgiveness, features/17): generous body-riding box
+## (NOT the blade sweep — facing-independent 180° pardon), armed only by
+## StatePlunge. Own connect registry like the sweep.
+var _plunge_cast: ShapeCast3D = null
+var _plunge_hits := {}
+## Fake plunge lock (S4 forgiveness): temp lock_target acquired on the R1
+## commit in Fall when free (nearest enemy below within reach), restored on
+## landing/exit so free play never gains a surprise real lock. Already
+## locked = untouched (real lock path only).
+var plunge_temp_lock := false
 
 
 ## Light-attack clip ("" = unresolved, attack refused — never T-poses).
@@ -216,6 +258,77 @@ func shove_move() -> Dictionary:
 	return weapon_cfg.get("push_move", {})
 
 
+## Roll tier (P3 S4, features/17 equip-load): < fast_max = fast,
+## < mid_max = mid, else fat. Swaps live — read every roll, no caching.
+func roll_tier() -> StringName:
+	var th: Dictionary = mobility_cfg.get("thresholds", {})
+	var ratio := clampf(equip_load_ratio, 0.0, 1.0)
+	if ratio < float(th.get("fast_max", 0.3)):
+		return &"fast"
+	if ratio < float(th.get("mid_max", 0.7)):
+		return &"mid"
+	return &"fat"
+
+
+## Roll params for the current tier ({iframes, distance, recovery_bonus,
+## anim_speed} — MobilityConfig shape, never empty: FALLBACK guarantees it).
+func roll_params() -> Dictionary:
+	var roll: Dictionary = mobility_cfg.get("roll", {})
+	var tier := str(roll_tier())
+	if roll.has(tier) and roll[tier] is Dictionary:
+		return roll[tier] as Dictionary
+	return {"iframes": ROLL_IFRAMES, "distance": ROLL_SPEED * ROLL_TIME, "recovery_bonus": 0.0, "anim_speed": 1.0}
+
+
+## Roll stamina cost (S4: flat — the dodge stays the survival tool, the
+## backstep pays the load tax, not the roll).
+func roll_cost() -> float:
+	return float((mobility_cfg.get("costs", {}) as Dictionary).get("roll", ROLL_COST))
+
+
+## Backstep stamina cost, scaled by load tier (S4 tranche 15/18/22).
+func backstep_cost() -> float:
+	var bs: Dictionary = (mobility_cfg.get("costs", {}) as Dictionary).get("backstep", {})
+	return float(bs.get(str(roll_tier()), BACKSTEP_COST))
+
+
+## Plunge damage for a drop (S4): base weapon damage + per-meter scaling,
+## capped (melee only — no plunge bow shots V1). 0 below min_drop.
+func compute_plunge_damage(drop: float) -> float:
+	var pl: Dictionary = mobility_cfg.get("plunge", {})
+	if drop < float(pl.get("min_drop", 2.0)):
+		return 0.0
+	var base := float(attack_impact().get("damage", 10.0))
+	var dmg := base + maxf(drop - float(pl.get("min_drop", 2.0)), 0.0) * float(pl.get("damage_per_meter", 8.0))
+	return minf(dmg, float(pl.get("damage_cap", 40.0)))
+
+
+## Fall damage for a landing without plunge (S4 tranche: none at or below
+## 5 m, then per-meter, capped).
+func compute_fall_damage(drop: float) -> float:
+	var fd: Dictionary = mobility_cfg.get("fall_damage", {})
+	var over := drop - float(fd.get("threshold", 5.0))
+	if over <= 0.0:
+		return 0.0
+	return minf(over * float(fd.get("per_meter", 15.0)), float(fd.get("cap", 50.0)))
+
+
+## Apply fall damage (bypasses guard/iframes — gravity is not an attack).
+## Returns the damage dealt. Never touches the machine (caller routes to
+## HURT on death — states own transitions, see StateFall).
+func take_fall_damage(drop: float) -> float:
+	var dmg := compute_fall_damage(drop)
+	if dmg <= 0.0 or dead:
+		return 0.0
+	hp = maxf(hp - dmg, 0.0)
+	print("[Player] fall %.1fm dmg %.0f hp %.0f" % [drop, dmg, hp])
+	if hp <= 0.0:
+		dead = true
+		_respawn_in = RESPAWN_DELAY
+		print("[Player] DIED from fall")
+	return dmg
+
+
 ## Impact host of the current scene (test scenes carry one in group
 ## "impact"; null in scenes without — the swing still connects, only the
 ## juice stack stays silent).
@@ -263,6 +376,7 @@ func _build_sweep() -> void:
 				longest = 2
 			sweep_size = Vector3(absf(sz.x), absf(sz.y), absf(sz.z))
 			sweep_size[longest] += SWEEP_EXTRA
+			_blade_length = maxf(absf(sz.x), maxf(absf(sz.y), absf(sz.z)))
 			var center: Vector3 = rel * (aabb.position + aabb.size * 0.5)
 			sweep_pos = center
 			_sweep_center = center
@@ -391,16 +505,160 @@ func blade_contact_ratio(contact_point: Vector3) -> float:
 	return clampf((local[axis] - (_sweep_center[axis] - half)) / blade_len, 0.0, 1.0)
 
 
+## Plunge reach (S4 forgiveness): weapon-sized, min_reach floor (dagger
+## connects anyway, halberd keeps its 3 m). Drives BOTH the below-enemy
+## detection radius and the PlungeCast size — one tunable pardon.
+func plunge_reach() -> float:
+	var pl: Dictionary = mobility_cfg.get("plunge", {})
+	return maxf(float(pl.get("min_reach", 1.5)), _blade_length)
+
+
+## Body-riding plunge box: (reach+1) column around the fall line, slight
+## front bias, 3 m tall (covers the dive speed per tick). Facing-independent
+## by construction — the 180° pardon. Built once (weapon-fixed at boot).
+func _build_plunge_cast() -> void:
+	var reach := plunge_reach()
+	_plunge_cast = ShapeCast3D.new()
+	_plunge_cast.name = "PlungeCast"
+	var box := BoxShape3D.new()
+	box.size = Vector3(reach + 1.0, 3.0, reach + 1.0)
+	_plunge_cast.shape = box
+	# Centered column (no front bias — tracking aligns the body in real
+	# dives, and the 180° pardon must hold even facing away).
+	_plunge_cast.position = Vector3(0.0, -0.5, 0.0)
+	_plunge_cast.target_position = Vector3.ZERO
+	_plunge_cast.enabled = false
+	_plunge_cast.add_exception(self)
+	add_child(_plunge_cast)
+	print("[Player] plunge cast %.1f x 3.0 x %.1f (blade %.2f)" % [reach + 1.0, reach + 1.0, _blade_length])
+
+
+## Open a plunge window: clear the connect registry, arm the cast.
+func plunge_begin() -> void:
+	_plunge_hits.clear()
+	if _plunge_cast != null:
+		_plunge_cast.enabled = true
+
+
+## Close a plunge window: disarm the cast.
+func plunge_end() -> void:
+	if _plunge_cast != null:
+		_plunge_cast.enabled = false
+
+
+## New plunge connects this physics tick: [{body, point, is_wall}] for
+## bodies not yet touched by this dive. Same carrier contract as the sweep
+## (take_hit carriers are enemies); walls report is_wall and StatePlunge
+## skips them silently (no rebound on a plunge). The cast sweeps along the
+## current velocity so the dive speed never tunnels past a target.
+func plunge_poll() -> Array:
+	var out: Array = []
+	if _plunge_cast == null or not _plunge_cast.enabled:
+		return out
+	var lv: Vector3 = global_transform.basis.inverse() * velocity
+	_plunge_cast.target_position = lv * get_physics_process_delta_time()
+	_plunge_cast.force_shapecast_update()
+	for i in _plunge_cast.get_collision_count():
+		var body := _plunge_cast.get_collider(i) as Object
+		if body == null:
+			continue
+		var id := body.get_instance_id()
+		if _plunge_hits.has(id):
+			continue
+		_plunge_hits[id] = true
+		out.append({"body": body, "point": _plunge_cast.get_collision_point(i), "is_wall": not body.has_method("take_hit")})
+	return out
+
+
+## Nearest lockable below the player within radius (planar), any facing —
+## the 180° detection. Vertical window: strictly below (0.3 m) to 15 m.
+## Nearest wins. Null when the sky below is empty.
+func find_enemy_below(radius: float) -> Node3D:
+	var best: Node3D = null
+	var best_d := radius
+	for n in get_tree().get_nodes_in_group(&"lockable"):
+		if not (n is Node3D) or n == self:
+			continue
+		var b := n as Node3D
+		var dy := global_position.y - b.global_position.y
+		if dy < 0.3 or dy > 15.0:
+			continue
+		var flat := Vector2(b.global_position.x - global_position.x, b.global_position.z - global_position.z).length()
+		if flat <= best_d:
+			best_d = flat
+			best = b
+	return best
+
+
+## Fake plunge lock: on the R1 commit in Fall while free, adopt the enemy
+## below SILENTLY (no marker — human call 22/09: the temp lock is internal
+## tracking only, never a visual). Already locked = no-op (real lock path).
+## True when a lock (temp or real) is held after.
+func acquire_plunge_lock() -> bool:
+	if lock_target != null:
+		return true
+	var e := find_enemy_below(plunge_reach())
+	if e == null:
+		return false
+	plunge_temp_lock = true
+	lock_target = e
+	print("[Player] plunge lock %s (silent)" % e.name)
+	return true
+
+
+## Drop the fake lock (landing/exit/death paths). Real locks untouched. The
+## marker clear below is a no-op safety (temp locks never light it).
+func release_plunge_lock() -> void:
+	if not plunge_temp_lock:
+		return
+	plunge_temp_lock = false
+	if lock_target != null and is_instance_valid(lock_target):
+		_set_marker(false)
+	lock_target = null
+	print("[Player] plunge lock released")
+
+
+## Revalidate the fake lock each tick (the target may die or walk out of
+## the column mid-fall — the dive then continues straight, honest miss).
+## True while any lock (temp or real) is held.
+func validate_plunge_lock() -> bool:
+	if not plunge_temp_lock:
+		return lock_target != null
+	if lock_target == null or not is_instance_valid(lock_target):
+		release_plunge_lock()
+		return false
+	var dy := global_position.y - lock_target.global_position.y
+	var flat := Vector2(lock_target.global_position.x - global_position.x, lock_target.global_position.z - global_position.z).length()
+	if dy < -0.5 or flat > plunge_reach() + 1.0:
+		release_plunge_lock()
+		return false
+	return true
+
+
+## Animation source: curated player pack when exported from the anim lab
+## (fast path, same take names), silent rebuild from the .glb packs
+## otherwise (fresh clone). A corrupt pack also falls back with a warning.
+func _build_anim_player() -> AnimationPlayer:
+	if FileAccess.file_exists(PLAYER_PACK):
+		var packed := RigKit.mount_packed(rig_root, PLAYER_PACK)
+		if packed != null:
+			print("[Player] mounted packed anims (%d)" % packed.get_animation_list().size())
+			return packed
+		push_warning("[Player] packed library unusable, rebuilding from packs")
+	return RigKit.build_player(rig_root, Moveset.packs_of(Moveset.load_object()))
+
+
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	InputManager.set_profile(&"game")
 	ToonKit.apply_to(self)
 	add_to_group("player")
 	_home = global_transform
+	last_ground_y = global_position.y
 	var ms := Moveset.load_object()
 	for issue in Moveset.validate_moveset(ms):
 		push_warning("[Moveset] %s" % issue)
-	_player = RigKit.build_player(rig_root, Moveset.packs_of(ms))
+	_player = _build_anim_player()
 	_clips = Moveset.resolve_clips(ms, _player)
 	_attack_phases[&"attack_light_1"] = Moveset.phases_for(ms, &"attack_light_1")
 	weapon_cfg = WeaponConfig.merged(weapon_id)
@@ -408,8 +666,12 @@ func _ready() -> void:
 	print("[Player] weapon %s %s" % [weapon_id, str((weapon_cfg.get("attack", {}) as Dictionary).get("damage", "?"))])
 	guard_cfg = GuardConfig.merged()
 	print("[Player] guard %s %s" % [str(guard_cfg.get("equipped_shield", "?")), str(guard_cfg.get("class", {}))])
+	mobility_cfg = MobilityConfig.merged()
+	print("[Player] mobility load %.2f tier %s" % [equip_load_ratio, str(roll_tier())])
 	# Sweep resolves _blade_attach and auto-sizes from the weapon mesh.
 	_build_sweep()
+	# Plunge box derives from the detected blade length (above).
+	_build_plunge_cast()
 	# Single facing: the rig never yaws (nailed once — mesh = body heading).
 	rig_root.rotation.y = RIG_BASE_YAW
 	print("[Player] impact %s" % str(attack_impact()))
@@ -427,7 +689,8 @@ func _ready() -> void:
 	var hurt := StateHurt.new()
 	var guard := StateGuard.new()
 	var shove := StateShove.new()
-	for st in [idle, loco, fall, roll, backstep, lockon, attack, hurt, guard, shove]:
+	var plunge := StatePlunge.new()
+	for st in [idle, loco, fall, roll, backstep, lockon, attack, hurt, guard, shove, plunge]:
 		(st as PlayerState).setup(self, intent)
 	machine.add_state(PlayerStateMachine.IDLE, idle)
 	machine.add_state(PlayerStateMachine.LOCOMOTION, loco)
@@ -439,6 +702,7 @@ func _ready() -> void:
 	machine.add_state(PlayerStateMachine.HURT, hurt)
 	machine.add_state(PlayerStateMachine.GUARD, guard)
 	machine.add_state(PlayerStateMachine.SHOVE, shove)
+	machine.add_state(PlayerStateMachine.PLUNGE, plunge)
 	machine.start(PlayerStateMachine.IDLE)
 	print("[Player] ready — profile %s, body-relative, nodess SM" % InputManager.get_profile())
 
@@ -461,7 +725,16 @@ func _physics_process(delta: float) -> void:
 			_respawn()
 	machine.step(delta)
 	move_and_slide()
+	if is_on_floor():
+		last_ground_y = global_position.y
 	_resolve_anim()
+
+
+## True while airborne with real downward speed (early-Fall catch — the
+## grounded states check this alongside their air-grace so ledge runs read
+## as falls immediately).
+func falling_fast() -> bool:
+	return not is_on_floor() and velocity.y < -AIR_FALL_SPEED
 
 
 ## Stamina spend gate: true + deducts when affordable, false when denied
@@ -640,6 +913,7 @@ func try_acquire_lock() -> bool:
 
 
 func clear_lock() -> void:
+	plunge_temp_lock = false
 	if lock_target != null and is_instance_valid(lock_target):
 		_set_marker(false)
 		print("[Player] lock released")
@@ -816,7 +1090,7 @@ func marker_time(clip: StringName, marker: StringName) -> float:
 func _process(_delta: float) -> void:
 	if state_label != null:
 		var planar := Vector2(velocity.x, velocity.z).length()
-		state_label.text = "%s · speed %.1f · floor %s · anim %s · stam %.0f · hp %.0f · poise %.0f%s%s\nprofile %s · raw %s" % [
+		state_label.text = "%s · speed %.1f · floor %s · anim %s · stam %.0f · hp %.0f · poise %.0f%s%s\nprofile %s · raw %s · load %.2f %s · drop %.1f" % [
 			machine.state_name(),
 			planar,
 			"yes" if is_on_floor() else "NO",
@@ -828,4 +1102,7 @@ func _process(_delta: float) -> void:
 			" LOCK %.1fm" % lock_distance() if lock_target != null else "",
 			InputManager.get_profile(),
 			intent.move_raw(),
+			clampf(equip_load_ratio, 0.0, 1.0),
+			str(roll_tier()),
+			last_fall_drop,
 		]

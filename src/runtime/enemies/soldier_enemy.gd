@@ -195,6 +195,38 @@ func take_shove(power: float, guard_break: float, from: Vector3) -> Dictionary:
 	return {"killed": false, "blocked": false, "cracked": false}
 
 
+## Plunging-attack connect (P3 S4, features/17): a vertical drop attack
+## bypasses the shield (like a backstab — the slab only covers the front),
+## deals the drop-scaled capped damage + planar knockback, never blocked,
+## never rebounds. Returns {killed, blocked:false, plunged}. Ignored while
+## DEAD. Melee only (the player sweep is the sole caller — no bow V1).
+func take_plunge(power: float, knockback: float, from: Vector3) -> Dictionary:
+	if state == DEAD:
+		return {"killed": false, "blocked": false, "plunged": false}
+	hp = maxf(hp - power, 0.0)
+	poise = maxf(poise - power * POISE_FACTOR, 0.0)
+	_poise_wait = float((cfg.get("stats", {}) as Dictionary).get("poise_reset_time", 3.5))
+	_turn_suppress = TURN_SUPPRESS_TIME
+	hits += 1
+	_flash(Color(1.0, 0.75, 0.3))
+	var away: Vector3 = global_position - from
+	away.y = 0.0
+	if away.length_squared() > 0.0001:
+		global_position += away.normalized() * maxf(knockback, 0.0)
+	print("[EnemyAI] PLUNGE dmg %.0f hp %.0f poise %.0f" % [power, hp, poise])
+	if hp <= 0.0:
+		_die()
+		return {"killed": true, "blocked": false, "plunged": true}
+	if poise <= 0.0:
+		poise = float((cfg.get("stats", {}) as Dictionary).get("poise", 40.0))
+		_enter(FLINCH)
+		print("[EnemyAI] flinched (%d)" % hits)
+	else:
+		print("[EnemyAI] plunged %d hp %.0f poise %.0f" % [hits, hp, poise])
+	_update_label()
+	return {"killed": false, "blocked": false, "plunged": true}
+
+
 func _is_shielded() -> bool:
 	return bool((cfg.get("attack", {}) as Dictionary).get("shielded", false))
 

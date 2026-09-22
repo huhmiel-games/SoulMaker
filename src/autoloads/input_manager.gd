@@ -284,6 +284,28 @@ func _entries_for(profile := &"") -> Dictionary:
 	return PROFILES.get(prof, {})
 
 
+## Proportional value of an action: digital sources (key/button/mouse/
+## trigger) count 1.0 when down, stick sources contribute their deadzoned
+## deflection — each physical device counted ONCE. The single reader for
+## mixed digital+analog axes (move_*): the old is_pressed + left_stick()
+## sum in PlayerIntent counted one tilt twice, so any deflection past the
+## deadzone saturated to run and the stick could never walk (fix 22/09).
+func action_value(action: StringName, profile := &"") -> float:
+	var entries := _entries_for(profile)
+	if not entries.has(action):
+		return 0.0
+	var e: Dictionary = entries[action]
+	var out := 0.0
+	for s in e.get("sources", []):
+		if (s as Dictionary).has("stick"):
+			out += _deadzone(
+				Input.get_joy_axis(DEVICE, int((s as Dictionary)["stick"])) * float((s as Dictionary).get("stick_sign", 1.0))
+			)
+		elif _source_pressed(s):
+			out += 1.0
+	return out
+
+
 ## Continuous value of an action, in velocity units per second (full stick
 ## deflection = 1.0). All sources mapped on the entry sum up, with the same
 ## deadzone policy as the boolean reads:

@@ -16,6 +16,7 @@ size = Vector3(0.313095, 0.596767, 0.436127)
 floor_max_angle = 1.0472
 floor_snap_length = 1.0
 script = ExtResource("1")
+equip_load_ratio = 0.8
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=143494794]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.06, 0)

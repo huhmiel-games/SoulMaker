@@ -14,6 +14,13 @@ var _air := 0.0
 
 func enter() -> void:
 	_air = 0.0
+	# Null guard (hardening 22/09 — the Plunge->LockOn Nil crash): a LockOn
+	# enter without target skips the snap; step() releases next tick.
+	if ctrl.lock_target == null or not is_instance_valid(ctrl.lock_target):
+		ctrl.set_cam_yaw(true)
+		ctrl.anim_state = &"idle"
+		print("[SM] LockOn enter without target (release next tick)")
+		return
 	_snap_face()
 	ctrl.set_cam_yaw(false)
 	ctrl.anim_state = &"idle"
@@ -32,7 +39,7 @@ func step(delta: float) -> int:
 	else:
 		ctrl.velocity.y -= PlayerController.GRAVITY * delta
 		_air += delta
-		if _air > PlayerController.AIR_TO_FALL:
+		if _air > PlayerController.AIR_TO_FALL or ctrl.falling_fast():
 			return PlayerStateMachine.FALL
 	# Track the target: shared helper (body ease + camera follow).
 	ctrl.track_lock_target(delta)
@@ -40,9 +47,9 @@ func step(delta: float) -> int:
 	# input = roll (enemy-relative, free).
 	if intent.dodge_pressed() and ctrl.is_on_floor():
 		if raw == Vector2.ZERO:
-			if ctrl.spend_stamina(PlayerController.BACKSTEP_COST):
+			if ctrl.spend_stamina(ctrl.backstep_cost()):
 				return PlayerStateMachine.BACKSTEP
-		elif ctrl.spend_stamina(PlayerController.ROLL_COST):
+		elif ctrl.spend_stamina(ctrl.roll_cost()):
 			return PlayerStateMachine.ROLL
 	# Light attack (after dodge): forward + shove carrier = blade shove
 	# (S3), otherwise the normal swing. Same clip + stamina gate, lock kept.

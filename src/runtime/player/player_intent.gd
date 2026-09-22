@@ -18,7 +18,9 @@ func setup(c: PlayerController) -> void:
 
 
 ## Camera-free raw mix: keyboard faces are digital (saturate to run), the
-## left stick stays analog (tilt walks). Clamped to unit length.
+## left stick stays analog (tilt walks). One proportional read per axis
+## (action_value counts each device once — never is_pressed + stick summed).
+## Clamped to unit length.
 func move_raw() -> Vector2:
 	var v := Vector2(_axis(&"move_right", &"move_left"), _axis(&"move_back", &"move_forward"))
 	return v.limit_length(1.0)
@@ -75,14 +77,4 @@ func guard_held() -> bool:
 
 
 func _axis(pos: StringName, neg: StringName) -> float:
-	var out := 0.0
-	if InputManager.is_pressed(pos):
-		out += 1.0
-	if InputManager.is_pressed(neg):
-		out -= 1.0
-	var stick := InputManager.left_stick()
-	if pos == &"move_right":
-		out += stick.x
-	elif pos == &"move_back":
-		out += stick.y
-	return out
+	return InputManager.action_value(pos) - InputManager.action_value(neg)

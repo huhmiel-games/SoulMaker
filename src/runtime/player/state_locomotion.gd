@@ -29,7 +29,7 @@ func step(delta: float) -> int:
 	else:
 		ctrl.velocity.y -= PlayerController.GRAVITY * delta
 		_air += delta
-		if _air > PlayerController.AIR_TO_FALL:
+		if _air > PlayerController.AIR_TO_FALL or ctrl.falling_fast():
 			return PlayerStateMachine.FALL
 	# Lock-on tap wins over the turn/move below (acquire gates the transition).
 	if intent.lock_pressed() and ctrl.try_acquire_lock():
@@ -38,9 +38,9 @@ func step(delta: float) -> int:
 	# hop, any input = committed roll in the input direction (stamina prepaid).
 	if intent.dodge_pressed() and ctrl.is_on_floor():
 		if raw == Vector2.ZERO:
-			if ctrl.spend_stamina(PlayerController.BACKSTEP_COST):
+			if ctrl.spend_stamina(ctrl.backstep_cost()):
 				return PlayerStateMachine.BACKSTEP
-		elif ctrl.spend_stamina(PlayerController.ROLL_COST):
+		elif ctrl.spend_stamina(ctrl.roll_cost()):
 			return PlayerStateMachine.ROLL
 	# Light attack (after dodge — defense wins ties): forward + shove carrier
 	# = blade shove (S3), otherwise the normal swing. Clip + stamina gates.

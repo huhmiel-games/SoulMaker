@@ -18,6 +18,8 @@ reference/godot47_docs/
 .kilo/
 .opencode/
 
-# Baked animation lab (regenerable: --script res://src/tools/bake_anim_lab.gd)
-scenes/tests/anim_lab.tscn
-scenes/tests/anim_lab_lib.res
+# Baked animation libraries (regenerable: buttons in scenes/anim_lab/ or
+# --script res://src/tools/bake_anim_lab.gd / bake_player_pack.gd).
+# The scene scaffold + scripts + packs/hidden lists in scenes/anim_lab/ ARE versioned.
+scenes/anim_lab/anim_lab_lib.res
+scenes/anim_lab/player_pack.res

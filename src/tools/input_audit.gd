@@ -26,7 +26,7 @@ const OVERLAP_ALLOW := {
 }
 
 const CONSUME_RES := [
-	"(?:is_just_pressed|is_just_released|is_pressed|time_held|analog|wheel_ticks)\\(&\"([A-Za-z_0-9]+)\"\\)",
+	"(?:is_just_pressed|is_just_released|is_pressed|time_held|analog|action_value|wheel_ticks)\\(&\"([A-Za-z_0-9]+)\"\\)",
 	"action\\s*==\\s*&\"([A-Za-z_0-9]+)\"",
 ]
 

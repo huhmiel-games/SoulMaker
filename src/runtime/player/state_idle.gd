@@ -26,7 +26,7 @@ func step(delta: float) -> int:
 	else:
 		ctrl.velocity.y -= PlayerController.GRAVITY * delta
 		_air += delta
-		if _air > PlayerController.IDLE_AIR_TO_FALL:
+		if _air > PlayerController.IDLE_AIR_TO_FALL or ctrl.falling_fast():
 			return PlayerStateMachine.FALL
 	var planar := Vector3(ctrl.velocity.x, 0.0, ctrl.velocity.z)
 	planar = planar.move_toward(Vector3.ZERO, PlayerController.DECEL * delta)
@@ -39,9 +39,9 @@ func step(delta: float) -> int:
 	# any input = committed roll in the input direction. Stamina prepaid here.
 	if intent.dodge_pressed() and ctrl.is_on_floor():
 		if raw == Vector2.ZERO:
-			if ctrl.spend_stamina(PlayerController.BACKSTEP_COST):
+			if ctrl.spend_stamina(ctrl.backstep_cost()):
 				return PlayerStateMachine.BACKSTEP
-		elif ctrl.spend_stamina(PlayerController.ROLL_COST):
+		elif ctrl.spend_stamina(ctrl.roll_cost()):
 			return PlayerStateMachine.ROLL
 	# Light attack (after dodge — defense wins ties): forward + shove carrier
 	# = blade shove (S3), otherwise the normal swing. Clip + stamina gates.

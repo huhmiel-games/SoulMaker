@@ -11,16 +11,12 @@ extends RefCounted
 ## Animations land as "lib_id__anim_name". Returns the player (null + error
 ## when the skeleton is missing — the caller runs capsule-only).
 static func build_player(rig_root: Node3D, packs: Dictionary) -> AnimationPlayer:
-	var skeleton := rig_root.get_node_or_null("Armature/GeneralSkeleton") as Skeleton3D
-	if skeleton == null:
-		push_error("RigKit: GeneralSkeleton not found under %s" % rig_root.name)
+	var prepared := _armature_player(rig_root)
+	if prepared.is_empty():
 		return null
-	var armature: Node3D = rig_root.get_node("Armature")
-	var player := AnimationPlayer.new()
-	player.name = "AnimationPlayer"
-	player.root_node = NodePath("..")
-	armature.add_child(player)
-	var skeleton_path: String = armature.get_path_to(skeleton)
+	var player: AnimationPlayer = prepared[0]
+	var skeleton: Skeleton3D = prepared[1]
+	var skeleton_path: String = (rig_root.get_node("Armature") as Node3D).get_path_to(skeleton)
 	var libs := AnimationLibrary.new()
 	var ok := 0
 	for lib_id in packs:
@@ -36,6 +32,42 @@ static func build_player(rig_root: Node3D, packs: Dictionary) -> AnimationPlayer
 	print("[RigKit] %d animations on %s" % [ok, rig_root.name])
 	_diagnose(player, skeleton)
 	return player
+
+
+## Mounts a pre-baked AnimationLibrary .res (player pack) under Armature.
+## Same layout and take names as build_player ("lib_id__anim_name"), so
+## moveset slots resolve unchanged — without re-reading the .glb packs.
+## Returns the player (null + error when the skeleton is missing or the
+## pack cannot load — the caller falls back to build_player).
+static func mount_packed(rig_root: Node3D, pack_path: String) -> AnimationPlayer:
+	var libs := load(pack_path) as AnimationLibrary
+	if libs == null:
+		push_error("RigKit: packed library not loadable: %s" % pack_path)
+		return null
+	var prepared := _armature_player(rig_root)
+	if prepared.is_empty():
+		return null
+	var player: AnimationPlayer = prepared[0]
+	var skeleton: Skeleton3D = prepared[1]
+	player.add_animation_library("rig", libs)
+	print("[RigKit] mounted %d packed animations on %s" % [libs.get_animation_list().size(), rig_root.name])
+	_diagnose(player, skeleton)
+	return player
+
+
+## Shared scaffold: AnimationPlayer under Armature on the rig skeleton.
+## Returns [player, skeleton], empty + error when the skeleton is missing.
+static func _armature_player(rig_root: Node3D) -> Array:
+	var skeleton := rig_root.get_node_or_null("Armature/GeneralSkeleton") as Skeleton3D
+	if skeleton == null:
+		push_error("RigKit: GeneralSkeleton not found under %s" % rig_root.name)
+		return []
+	var armature: Node3D = rig_root.get_node("Armature")
+	var player := AnimationPlayer.new()
+	player.name = "AnimationPlayer"
+	player.root_node = NodePath("..")
+	armature.add_child(player)
+	return [player, skeleton]
 
 
 ## Boot diagnostic: do the retargeted bone tracks address THIS skeleton?
