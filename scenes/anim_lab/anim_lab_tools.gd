@@ -125,8 +125,9 @@ func hide_current_take() -> void:
 
 
 ## Renames the previewed take to [member rename_to]: live rename + renames
-## JSON append (chain-collapsed: A->B then B->C records A->C and B->C so a
-## re-bake applies single hops) + moveset clips updated + .res re-save.
+## JSON update (chain-collapsed: A->B then B->C records A->C only, so a
+## re-bake applies single hops with no dead alias keys) + moveset clips
+## updated + .res re-save.
 func rename_current_take() -> void:
 	var player := _find_lab_player()
 	if player == null:
@@ -216,16 +217,22 @@ func _append_hidden(short: String) -> void:
 	JsonFile.save_atomic(HIDDEN_PATH, obj)
 
 
-## Records old -> new in the renames map, collapsing chains (values pointing
-## at old are rewritten to new first) so the baker applies single hops.
+## Records old -> new in the renames map. Renaming an already-renamed take
+## (old is itself an alias) updates the original entry instead of adding a
+## new one: values pointing at old are rewritten to new (chain collapse) and
+## no intermediate old -> new key is stored, so the baker applies single
+## hops and the map never grows dead alias keys.
 func _append_rename(old: String, new: String) -> void:
 	var obj := JsonFile.load_object(RENAMES_PATH)
 	var raw: Variant = obj.get("renames", {})
 	var renames := (raw as Dictionary).duplicate() if raw is Dictionary else {}
+	var collapsed := false
 	for key in renames:
 		if str(renames[key]) == old:
 			renames[key] = new
-	renames[old] = new
+			collapsed = true
+	if not collapsed:
+		renames[old] = new
 	obj["renames"] = renames
 	JsonFile.save_atomic(RENAMES_PATH, obj)
 
