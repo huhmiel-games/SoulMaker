@@ -8,8 +8,8 @@ extends PlayerState
 ## auto-trigger): while free, the commit adopts the enemy below as a fake
 ## lock (silent — no marker; body tracks through the fall),
 ## already locked = untouched. Landing: buffered + drop >= min_drop =
-## Plunge; else fall damage when drop > threshold (lethal = HURT); else
-## Idle/Locomotion by input presence (old Fall landing rule, lock kept).
+## Plunge; else fall damage when drop > threshold (lethal = HURT, damaging =
+## LAND reception, clean = old Idle/Locomotion rule, lock kept).
 ## The fake lock is always released on landing (free play never gains a
 ## surprise real lock).
 func enter() -> void:
@@ -57,6 +57,7 @@ func step(delta: float) -> int:
 			return PlayerStateMachine.HURT
 		if dealt > 0.0:
 			print("[SM] Fall hard landing %.1fm" % drop)
+			return PlayerStateMachine.LAND
 		# Lock survives accidental edge falls: still valid = back to LockOn.
 		if ctrl.lock_target != null and ctrl.lock_valid():
 			return PlayerStateMachine.LOCKON

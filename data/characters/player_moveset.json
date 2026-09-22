@@ -49,6 +49,16 @@
 			"active": 0,
 			"loop": false
 		},
+		"land_hard": {
+			"clips": [
+				"adventure__hard landing"
+			],
+			"active": 0,
+			"loop": false,
+			"phases": {
+				"contact_time": 0.1542
+			}
+		},
 		"attack_light_1": {
 			"clips": [
 				"melee__sword and shield slash"

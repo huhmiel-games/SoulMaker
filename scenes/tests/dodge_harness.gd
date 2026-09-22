@@ -15,7 +15,7 @@ var _fails := 0
 func _ready() -> void:
 	await get_tree().physics_frame
 	await get_tree().physics_frame
-	_run()
+	await _run()
 	print("[Harness] dodge S4: %d FAIL" % _fails)
 	get_tree().quit()
 
@@ -195,3 +195,66 @@ func _run() -> void:
 	fin.setup(player, player.intent)
 	_check("no lockon on temp", fin._finish() == PlayerStateMachine.IDLE, PlayerStateMachine.NAMES.get(fin._finish(), "?"))
 	player.release_plunge_lock()
+
+	# 12. LAND reception (S4 close-out, land_hard = hard landing): slot
+	# resolves, duration = clip length, Fall routes LAND on damaging drops
+	# (lethal still HURT), the state holds the full clip then exits.
+	_check("land slot", str(player._clips.get(&"land_hard", &"")) == "rig/adventure__hard landing", str(player._clips.get(&"land_hard", &"")))
+	_check("land duration", absf(player.land_duration() - 1.88) < 0.05, "%.2f" % player.land_duration())
+	player.lock_target = null
+	# Grounded: the section 10-11 teleports left the body airborne, and an
+	# airborne Idle re-falls within frames (grace/falling_fast).
+	player.global_position = Vector3(0.0, 0.1, 20.0)
+	player.velocity = Vector3.ZERO
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	player.machine.start(PlayerStateMachine.LAND)
+	_check("land enters", player.machine.state_name() == "Land", player.machine.state_name())
+	var land := StateLand.new()
+	land.setup(player, player.intent)
+	land.enter()
+	_check("land holds", land.step(0.5) == PlayerStateMachine.KEEP, PlayerStateMachine.NAMES.get(land.step(0.0), "?"))
+	# Contact entry through the integrated path: the clip starts at the
+	# contact frame (airborne intro skipped) and exits to IDLE at its end.
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	var land_pos := player._player.current_animation_position
+	_check("land seeks contact", absf(land_pos - 0.1542) < 0.3, "pos %.3f" % land_pos)
+	player._player.seek(2.0, true)
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	_check("land exits idle", player.machine.state_name() == "Idle", player.machine.state_name())
+	player.machine.start(PlayerStateMachine.IDLE)
+	# Real 6 m landing through the Fall path (drop from the sky, wait for
+	# the machine — floor state only exists across physics frames).
+	player.hp = 100.0
+	player.dead = false
+	player.lock_target = null
+	player.plunge_wanted = false
+	player.global_position = Vector3(0.0, 6.5, 20.0)
+	player.velocity = Vector3.ZERO
+	player.last_ground_y = 6.5
+	player.machine.start(PlayerStateMachine.FALL)
+	for i in 120:
+		await get_tree().physics_frame
+		if player.machine.state_name() == "Land":
+			break
+	_check("fall routes land", player.machine.state_name() == "Land", "%s hp %.0f" % [player.machine.state_name(), player.hp])
+	# Lethal landing still routes HURT (last — leaves the dummy dead).
+	player.hp = 5.0
+	player.dead = false
+	player.lock_target = null
+	player.plunge_wanted = false
+	player.global_position = Vector3(0.0, 6.5, 20.0)
+	player.velocity = Vector3.ZERO
+	player.last_ground_y = 6.5
+	player.machine.start(PlayerStateMachine.FALL)
+	for i in 120:
+		await get_tree().physics_frame
+		if player.machine.state_name() == "Hurt":
+			break
+	_check("fall lethal hurt", player.machine.state_name() == "Hurt", player.machine.state_name())

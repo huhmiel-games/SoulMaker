@@ -21,13 +21,13 @@ const FALLBACK_SLOTS := {
 	&"attack_light_1": ["attack", "slash", "swing", "hit"],
 }
 
-const KNOWN_SLOTS := [&"idle", &"walk", &"run", &"fall", &"roll", &"backstep", &"attack_light_1"]
+const KNOWN_SLOTS := [&"idle", &"walk", &"run", &"fall", &"roll", &"backstep", &"land_hard", &"attack_light_1"]
 
 ## Default attack phases (no phases section = whole clip as release at 1.0).
 const PHASE_DEFAULTS := {
 	"attack_start": 0.0, "release_start": 0.0,
 	"windup_speed": 1.0, "attack_speed": 1.0, "release_speed": 1.0,
-	"stamina_cost": 20.0, "sweep_start": 0.4,
+	"stamina_cost": 20.0, "sweep_start": 0.4, "contact_time": 0.0,
 }
 
 ## Default impact payload (features/01 game feel): damage per connect,
@@ -76,7 +76,7 @@ static func validate_moveset(obj: Dictionary) -> PackedStringArray:
 		if not phases is Dictionary:
 			issues.append("moveset slot '%s' phases must be an object" % name)
 		else:
-			for key in ["attack_start", "release_start", "windup_speed", "attack_speed", "release_speed", "stamina_cost", "sweep_start"]:
+			for key in ["attack_start", "release_start", "windup_speed", "attack_speed", "release_speed", "stamina_cost", "sweep_start", "contact_time"]:
 				var v: Variant = (phases as Dictionary).get(key, 0.0)
 				if not v is float and not v is int:
 					issues.append("moveset slot '%s' phases.%s must be a number" % [name, key])

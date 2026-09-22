@@ -95,6 +95,13 @@ const POISE_MAX := 50.0
 const POISE_RESET := 3.5
 const HURT_TIME := 0.5
 const RESPAWN_DELAY := 2.0
+
+## Hard-landing reception (S4 close-out): the land_hard clip from its contact
+## frame (airborne intro skipped via anim_seek), committed to the end.
+const LAND_FALLBACK_TIME := 1.0
+## Snap blend onto the contact frame (vs ANIM_BLEND): the feet must plant on
+## touchdown, not morph through it. Feel-tunable with contact_time.
+const LAND_ENTER_BLEND := 0.05
 ## Guard (P3 S1 graybox, features/17 block/guard): held Shift/L1 raises the
 ## equipped shield (GuardConfig class values). Blocked hits convert damage
 ## into stamina cost (stability_mult) + chip HP (1 - absorb) and skip poise
@@ -129,6 +136,12 @@ var anim_state := &"idle"
 ## One-shot anim offset (seconds) consumed by _resolve_anim: states seek past
 ## clip anticipation so the visible motion matches the committed displacement.
 var anim_seek := -1.0
+## One-shot crossfade (seconds) consumed by _resolve_anim alongside anim_seek:
+## LAND enters on the contact frame with a snap blend; -1.0 = ANIM_BLEND.
+var anim_blend := -1.0
+## Feet-touch offset into the land_hard take (seconds), read once from the
+## slot phases at boot — StateLand seeks past the airborne intro on entry.
+var land_contact := 0.0
 ## Manual playback flag: StateAttack drives marker sections itself
 ## (play_phase) — _resolve_anim stands down while set.
 var anim_manual := false
@@ -660,6 +673,7 @@ func _ready() -> void:
 		push_warning("[Moveset] %s" % issue)
 	_player = _build_anim_player()
 	_clips = Moveset.resolve_clips(ms, _player)
+	land_contact = float(Moveset.phases_for(ms, &"land_hard").get("contact_time", 0.0))
 	_attack_phases[&"attack_light_1"] = Moveset.phases_for(ms, &"attack_light_1")
 	weapon_cfg = WeaponConfig.merged(weapon_id)
 	_apply_weapon_attack()
@@ -677,7 +691,7 @@ func _ready() -> void:
 	print("[Player] impact %s" % str(attack_impact()))
 	if _player != null:
 		_play(_clips.get(&"idle", &""))
-		print("[Player] clips idle=%s walk=%s run=%s fall=%s roll=%s backstep=%s attack=%s" % [_clips.get(&"idle"), _clips.get(&"walk"), _clips.get(&"run"), _clips.get(&"fall"), _clips.get(&"roll"), _clips.get(&"backstep"), _clips.get(&"attack_light_1")])
+		print("[Player] clips idle=%s walk=%s run=%s fall=%s roll=%s backstep=%s land=%s attack=%s" % [_clips.get(&"idle"), _clips.get(&"walk"), _clips.get(&"run"), _clips.get(&"fall"), _clips.get(&"roll"), _clips.get(&"backstep"), _clips.get(&"land_hard"), _clips.get(&"attack_light_1")])
 	intent.setup(self)
 	var idle := StateIdle.new()
 	var loco := StateLocomotion.new()
@@ -690,7 +704,8 @@ func _ready() -> void:
 	var guard := StateGuard.new()
 	var shove := StateShove.new()
 	var plunge := StatePlunge.new()
-	for st in [idle, loco, fall, roll, backstep, lockon, attack, hurt, guard, shove, plunge]:
+	var land := StateLand.new()
+	for st in [idle, loco, fall, roll, backstep, lockon, attack, hurt, guard, shove, plunge, land]:
 		(st as PlayerState).setup(self, intent)
 	machine.add_state(PlayerStateMachine.IDLE, idle)
 	machine.add_state(PlayerStateMachine.LOCOMOTION, loco)
@@ -703,6 +718,7 @@ func _ready() -> void:
 	machine.add_state(PlayerStateMachine.GUARD, guard)
 	machine.add_state(PlayerStateMachine.SHOVE, shove)
 	machine.add_state(PlayerStateMachine.PLUNGE, plunge)
+	machine.add_state(PlayerStateMachine.LAND, land)
 	machine.start(PlayerStateMachine.IDLE)
 	print("[Player] ready — profile %s, body-relative, nodess SM" % InputManager.get_profile())
 
@@ -828,6 +844,29 @@ func guard_wanted() -> bool:
 ## or the standard flinch time.
 func hurt_duration() -> float:
 	return hurt_time_override if hurt_time_override >= 0.0 else HURT_TIME
+
+
+## LAND duration: remaining clip after the contact seek (entry starts at
+## contact_time, not 0). Fallback when the slot is unresolved.
+func land_duration() -> float:
+	var clip: StringName = _clips.get(&"land_hard", &"")
+	if clip != &"" and _player != null:
+		var anim := _player.get_animation(clip)
+		if anim != null:
+			return maxf(anim.length - land_contact, 0.5)
+	return LAND_FALLBACK_TIME
+
+
+## True once the land_hard clip played out (seek-aware: compared against the
+## clip end, so anticipated and contact entries exit uniformly).
+func land_finished() -> bool:
+	var clip: StringName = _clips.get(&"land_hard", &"")
+	if clip == &"" or _player == null or _player.current_animation != clip:
+		return false
+	var anim := _player.get_animation(clip)
+	if anim == null:
+		return false
+	return _player.current_animation_position >= anim.length - 0.05
 
 
 ## Frontal arc check: attacker position inside block_arc/2 of the body
@@ -995,15 +1034,19 @@ func _resolve_anim() -> void:
 	# stands down or it would replay the whole clip over the sections.
 	if anim_manual:
 		return
-	_play(str(_clips.get(anim_state, &"")))
+	var blend := ANIM_BLEND
+	if anim_blend >= 0.0:
+		blend = anim_blend
+		anim_blend = -1.0
+	_play(str(_clips.get(anim_state, &"")), blend)
 	if anim_seek >= 0.0 and _player != null:
 		_player.seek(anim_seek, true)
 		anim_seek = -1.0
 
 
-func _play(anim: StringName) -> void:
+func _play(anim: StringName, blend: float = ANIM_BLEND) -> void:
 	if anim != &"" and anim != _anim_cur and _player != null:
-		_player.play(anim, ANIM_BLEND)
+		_player.play(anim, blend)
 		if _anim_cur != &"":
 			print("[Player] anim %s" % anim)
 		_anim_cur = anim
