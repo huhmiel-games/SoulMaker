@@ -3,89 +3,135 @@
 	"packs": {
 		"adventure": "res://assets/animations/adventure.glb",
 		"aerial": "res://assets/animations/aerial.glb",
+		"female": "res://assets/animations/female.glb",
+		"greatsword": "res://assets/animations/great_sword_anim.glb",
 		"melee": "res://assets/animations/sword_and_shield_anims.glb"
 	},
 	"slots": {
-		"idle": {
+		"attack_light_1": {
+			"active": 0.0,
 			"clips": [
-				"adventure__idle (2)",
-				"adventure__idle (3)"
+				"melee__sword and shield slash"
 			],
-			"active": 0,
-			"loop": true
-		},
-		"walk": {
-			"clips": [
-				"adventure__walking"
-			],
-			"active": 0,
-			"loop": true
-		},
-		"run": {
-			"clips": [
-				"adventure__running"
-			],
-			"active": 0,
-			"loop": true
-		},
-		"fall": {
-			"clips": [
-				"adventure__falling idle"
-			],
-			"active": 0,
-			"loop": true
-		},
-		"roll": {
-			"clips": [
-				"aerial__Quick Roll To Run"
-			],
-			"active": 0,
-			"loop": false
+			"loop": false,
+			"phases": {
+				"attack_speed": 1.25,
+				"attack_start": 0.4416,
+				"impact": {
+					"critical_multiplier": 1.5,
+					"damage": 10.0,
+					"hitstop_frames": 4.0,
+					"shake_scale": 1.0
+				},
+				"rebound": {
+					"frames": 16.0,
+					"hold_time": 0.15,
+					"reblend_time": 0.3,
+					"speed": 2.0
+				},
+				"release_speed": 1.0,
+				"release_start": 0.803,
+				"stamina_cost": 20.0,
+				"sweep_start": 0.4,
+				"windup_speed": 1.0
+			}
 		},
 		"backstep": {
+			"active": 0.0,
 			"clips": [
 				"aerial__Jump Away"
 			],
-			"active": 0,
 			"loop": false
 		},
+		"fall": {
+			"active": 0.0,
+			"clips": [
+				"adventure__falling idle"
+			],
+			"loop": true
+		},
+		"idle": {
+			"active": 0.0,
+			"clips": [
+				"adventure__idle",
+				"adventure__idle (3)"
+			],
+			"loop": true
+		},
 		"land_hard": {
+			"active": 0.0,
 			"clips": [
 				"adventure__hard landing"
 			],
-			"active": 0,
 			"loop": false,
 			"phases": {
 				"contact_time": 0.1542
 			}
 		},
-		"attack_light_1": {
+		"roll": {
+			"active": 0.0,
 			"clips": [
-				"melee__sword and shield slash"
+				"aerial__Medium roll"
 			],
-			"active": 0,
-			"loop": false,
-			"phases": {
-				"attack_start": 0.4416,
-				"release_start": 0.803,
-				"windup_speed": 1.0,
-				"attack_speed": 1.25,
-				"release_speed": 1.0,
-				"stamina_cost": 20.0,
-				"sweep_start": 0.4,
-				"rebound": {
-					"frames": 16,
-					"speed": 2.0,
-					"hold_time": 0.15,
-					"reblend_time": 0.30
+			"loop": false
+		},
+		"run": {
+			"active": 0.0,
+			"clips": [
+				"adventure__running"
+			],
+			"loop": true,
+			"variants": [
+				{
+					"active": 0.0,
+					"clips": [
+						"female__running"
+					],
+					"match": {
+						"body": "female",
+						"stance": "any"
+					}
 				},
-				"impact": {
-					"damage": 10.0,
-					"critical_multiplier": 1.5,
-					"hitstop_frames": 4,
-					"shake_scale": 1.0
+				{
+					"active": 0.0,
+					"clips": [
+						"greatsword__great sword run backward"
+					],
+					"match": {
+						"body": "any",
+						"stance": "two_hand"
+					}
 				}
-			}
+			]
+		},
+		"walk": {
+			"active": 0.0,
+			"clips": [
+				"adventure__walking"
+			],
+			"loop": true,
+			"variants": [
+				{
+					"active": 0.0,
+					"clips": [
+						"female__walking"
+					],
+					"match": {
+						"body": "female",
+						"stance": "any"
+					}
+				},
+				{
+					"active": 0.0,
+					"clips": [
+						"greatsword__great sword walk forward"
+					],
+					"match": {
+						"body": "any",
+						"stance": "two_hand"
+					}
+				}
+			]
 		}
 	}
 }

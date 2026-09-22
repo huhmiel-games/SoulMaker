@@ -4,11 +4,22 @@ extends RefCounted
 ## Player moveset loader (P2 locomotion, schema moveset_v0.1): packs + slots
 ## from data/characters/player_moveset.json. Switching idle variant or adding
 ## a .glb is a JSON edit — the states and controller never change.
+## Slots carry legacy clips (body/stance agnostic fallback) plus an optional
+## "variants" list of {match: {body, stance}, clips, active} entries — the
+## resolver picks the best body/stance match and falls back to legacy clips.
+## Alias convention for curated takes: action__body__stance__NN (double
+## underscore = field boundary, single underscore = word separator).
 ## Tolerant (ADR-009): missing clips warn at boot and fall back to the first
 ## existing clip of the slot; a missing/corrupt file falls back to code
 ## defaults (current locomotion set) instead of breaking the boot.
 const PATH := "res://data/characters/player_moveset.json"
 const FORMAT := "0.1"
+
+## Body axis (character config, features/02): "any" = fallback entry.
+const KNOWN_BODIES := [&"male", &"female", &"any"]
+## Stance axis (equipment grip, features/04+17): "any" = fallback entry.
+## V1 scope = sword_shield + two_hand (dual is vault — no anims yet).
+const KNOWN_STANCES := [&"sword_shield", &"two_hand", &"any"]
 
 const FALLBACK_PACKS := {"adventure": "res://assets/animations/adventure.glb"}
 const FALLBACK_SLOTS := {
@@ -62,11 +73,29 @@ static func validate_moveset(obj: Dictionary) -> PackedStringArray:
 	for name in slots:
 		var slot: Dictionary = slots[name] if slots[name] is Dictionary else {}
 		var clips: Array = slot.get("clips", [])
-		if clips.is_empty():
+		if clips.is_empty() and (slot.get("variants", []) as Array).is_empty():
 			issues.append("moveset slot '%s' has no clips" % name)
 		var active := int(slot.get("active", 0))
 		if not clips.is_empty() and (active < 0 or active >= clips.size()):
 			issues.append("moveset slot '%s' active=%d out of range (clamps into range)" % [name, active])
+		for vi in (slot.get("variants", []) as Array).size():
+			var v: Variant = (slot.get("variants", []) as Array)[vi]
+			if not v is Dictionary:
+				issues.append("moveset slot '%s' variants[%d] must be an object" % [name, vi])
+				continue
+			var match := (v as Dictionary).get("match", {}) as Dictionary
+			var vbody := str(match.get("body", "any"))
+			var vstance := str(match.get("stance", "any"))
+			if not StringName(vbody) in KNOWN_BODIES:
+				issues.append("moveset slot '%s' variants[%d] unknown body '%s'" % [name, vi, vbody])
+			if not StringName(vstance) in KNOWN_STANCES:
+				issues.append("moveset slot '%s' variants[%d] unknown stance '%s'" % [name, vi, vstance])
+			var vclips: Array = (v as Dictionary).get("clips", [])
+			if vclips.is_empty():
+				issues.append("moveset slot '%s' variants[%d] has no clips" % [name, vi])
+			var vactive := int((v as Dictionary).get("active", 0))
+			if not vclips.is_empty() and (vactive < 0 or vactive >= vclips.size()):
+				issues.append("moveset slot '%s' variants[%d] active=%d out of range (clamps into range)" % [name, vi, vactive])
 		if not StringName(name) in KNOWN_SLOTS:
 			issues.append("moveset slot '%s' unknown (ignored)" % name)
 		var loop = slot.get("loop", false)
@@ -115,11 +144,14 @@ static func packs_of(obj: Dictionary) -> Dictionary:
 
 
 ## Resolve every known slot to a full "rig/pack__clip" name verified against
-## the built player. Missing active clip -> first existing clip of the slot;
-## nothing found -> "" (caller keeps the current anim, never T-poses).
+## the built player. Variant entries are tried first (best body/stance match
+## wins, ties go to the earliest entry — put body-specific entries before
+## stance-specific ones), then the legacy clips; missing active clip -> first
+## existing clip of the tried list; nothing found -> "" (caller keeps the
+## current anim, never T-poses).
 ## Applies each slot's loop flag (LOOP_LINEAR when true, LOOP_NONE otherwise)
 ## on the runtime copy — the imported .glb is never touched.
-static func resolve_clips(obj: Dictionary, player: AnimationPlayer) -> Dictionary:
+static func resolve_clips(obj: Dictionary, player: AnimationPlayer, body: StringName = &"any", stance: StringName = &"any") -> Dictionary:
 	var out := {}
 	var have := player.get_animation_list() if player != null else PackedStringArray()
 	var slots: Dictionary = obj.get("slots", {})
@@ -136,30 +168,90 @@ static func resolve_clips(obj: Dictionary, player: AnimationPlayer) -> Dictionar
 			out[name] = &""
 			continue
 		var slot: Dictionary = slots[key]
-		var clips: Array = slot.get("clips", [])
-		var active := clampi(int(slot.get("active", 0)), 0, maxi(clips.size() - 1, 0))
-		var order: Array = []
-		if not clips.is_empty():
-			order.append(clips[active])
-			for c in clips:
-				if c != clips[active]:
-					order.append(c)
-		var found := &""
-		for c in order:
-			var want := "rig/%s" % c
-			if want in have:
-				found = StringName(want)
-				break
-		if found == &"" and not clips.is_empty():
-			push_warning("[Moveset] slot '%s': none of %s found on the rig" % [key, str(clips)])
-		elif not clips.is_empty() and str(clips[active]) != str(found).trim_prefix("rig/"):
-			push_warning("[Moveset] slot '%s': active '%s' missing, using '%s'" % [key, clips[active], found])
+		var found := resolve_clip(slot, have, body, stance)
+		if found == &"":
+			push_warning("[Moveset] slot '%s': nothing found for body '%s' stance '%s'" % [key, body, stance])
 		out[name] = found
 		loops[name] = _set_loop(player, found, bool(slot.get("loop", false)))
 		markers[name] = _set_markers(player, found, slot.get("phases", {}))
-	print("[Moveset] loops %s" % str(loops))
+	print("[Moveset] body=%s stance=%s loops %s" % [body, stance, str(loops)])
 	print("[Moveset] markers %s" % str(markers))
 	return out
+
+
+## Single-slot resolution against an AnimationPlayer clip list (rig/-prefixed
+## full names): best variant first, legacy clips last. Pure function for the
+## harness seam — no player needed, no side effects.
+static func resolve_clip(slot: Dictionary, have: PackedStringArray, body: StringName = &"any", stance: StringName = &"any") -> StringName:
+	var lists: Array = _ordered_clip_lists(slot, body, stance)
+	for entry in lists:
+		var l: Array = entry
+		for c in l:
+			var want := "rig/%s" % c
+			if want in have:
+				return StringName(want)
+	return &""
+
+
+## Candidate clip lists, best match first: variants scored (exact = 2,
+## "any" = 1, concrete mismatch = skip), ties keep JSON order, legacy last.
+static func _ordered_clip_lists(slot: Dictionary, body: StringName, stance: StringName) -> Array:
+	var clips: Array = slot.get("clips", [])
+	var active := clampi(int(slot.get("active", 0)), 0, maxi(clips.size() - 1, 0))
+	var legacy: Array = []
+	if not clips.is_empty():
+		legacy.append(clips[active])
+		for c in clips:
+			if c != clips[active]:
+				legacy.append(c)
+	if body == &"any" and stance == &"any":
+		return [legacy] if not legacy.is_empty() else []
+	var scored: Array = []
+	for v in slot.get("variants", []):
+		if not v is Dictionary:
+			continue
+		var match := (v as Dictionary).get("match", {}) as Dictionary
+		var score := _variant_score(match, body, stance)
+		if score < 0:
+			continue
+		var vclips: Array = (v as Dictionary).get("clips", [])
+		var vactive := clampi(int((v as Dictionary).get("active", 0)), 0, maxi(vclips.size() - 1, 0))
+		var order: Array = []
+		if not vclips.is_empty():
+			order.append(vclips[vactive])
+			for c in vclips:
+				if c != vclips[vactive]:
+					order.append(c)
+		scored.append({"score": score, "clips": order})
+	scored.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a["score"]) > int(b["score"]))
+	var out: Array = []
+	for s in scored:
+		out.append((s as Dictionary)["clips"])
+	if not legacy.is_empty():
+		out.append(legacy)
+	return out
+
+
+## Match score for one variant: -1 = concrete mismatch (skip), else body
+## points + stance points. Exact match = 2, variant-side "any" = 1,
+## request-side "any" against a concrete variant = 0 (usable, least
+## preferred — legacy any/any callers keep resolving the agnostic clips).
+static func _variant_score(match: Dictionary, body: StringName, stance: StringName) -> int:
+	var b := _axis_score(str(match.get("body", "any")), body)
+	var s := _axis_score(str(match.get("stance", "any")), stance)
+	if b < 0 or s < 0:
+		return -1
+	return b + s
+
+
+static func _axis_score(want: String, got: StringName) -> int:
+	if want == String(got):
+		return 2
+	if want == "any":
+		return 1
+	if got == &"any":
+		return 0
+	return -1
 
 
 ## Writes the combat section markers (windup_start/attack_start/release_start/

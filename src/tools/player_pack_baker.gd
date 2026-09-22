@@ -3,13 +3,17 @@ extends RefCounted
 
 ## Shared animation-pack baking (lab library + player pack): merges the
 ## moveset packs with the lab-only packs from anim_lab_packs.json, retargets
-## via RigKit, removes the takes hidden in anim_lab_hidden.json, saves one
-## AnimationLibrary .res. Called headless (bake_anim_lab.gd,
-## bake_player_pack.gd) and from the lab's Export button (no subprocess).
-## Take names stay "pack__take" so moveset slots resolve unchanged.
+## via RigKit, replays the curated aliases from anim_lab_renames.json, removes
+## the takes hidden in anim_lab_hidden.json, saves one AnimationLibrary .res.
+## Called headless (bake_anim_lab.gd, bake_player_pack.gd) and from the lab's
+## Export button (no subprocess).
+## Raw take names stay "pack__take"; curated aliases follow
+## action__body__stance__NN (__ = field boundary, _ = word separator) and
+## moveset slots resolve the post-rename names.
 const RIG_PATH := "res://assets/meshes/characters/Superhero_Male_FullBody.gltf"
 const LAB_PACKS_PATH := "res://scenes/anim_lab/anim_lab_packs.json"
 const HIDDEN_PATH := "res://scenes/anim_lab/anim_lab_hidden.json"
+const RENAMES_PATH := "res://scenes/anim_lab/anim_lab_renames.json"
 const LAB_LIB_OUT := "res://scenes/anim_lab/anim_lab_lib.res"
 const PLAYER_PACK_OUT := "res://scenes/anim_lab/player_pack.res"
 
@@ -37,13 +41,35 @@ static func bake_to(tree_root: Node, out_path: String, tag: String) -> Error:
 		return ERR_CANT_CREATE
 	var hidden := hidden_takes()
 	var skipped := 0
+	var renames := renames_map()
+	var renamed := 0
+	for old in renames:
+		var new := str(renames[old])
+		if not libs.has_animation(old):
+			push_warning("[%s] rename: '%s' not in the baked library (stale entry?)" % [tag, old])
+			continue
+		if libs.has_animation(new):
+			push_warning("[%s] rename: target '%s' already exists (skipped)" % [tag, new])
+			continue
+		if "/" in new or "\\" in new:
+			push_warning("[%s] rename: target '%s' must not contain a path separator (skipped)" % [tag, new])
+			continue
+		if new.get_slice("__", 0) != str(old).get_slice("__", 0):
+			push_warning("[%s] rename: pack prefix changes '%s' -> '%s'" % [tag, old, new])
+		libs.rename_animation(old, new)
+		renamed += 1
+	if renamed > 0:
+		print("[%s] renames: applied %d" % [tag, renamed])
 	for h in hidden:
 		if libs.has_animation(h):
 			libs.remove_animation(h)
 			skipped += 1
+		elif renames.has(h):
+			push_warning("[%s] hidden: '%s' is a pre-rename name (renamed to '%s' — hide the new name instead)" % [tag, h, str(renames[h])])
 	if skipped > 0:
 		print("[%s] hidden: skipped %d" % [tag, skipped])
 	_warn_hidden_slots(ms, hidden)
+	_warn_missing_slots(ms, libs, tag)
 	_print_pack_tally(libs, tag)
 	var err := ResourceSaver.save(libs, out_path)
 	holder.free()
@@ -74,6 +100,18 @@ static func hidden_takes() -> Dictionary:
 	return set
 
 
+## Curated aliases {old pack__take: new action__body__stance__NN} (flat
+## dict under "renames" — written by the lab rename button, hand-editable).
+static func renames_map() -> Dictionary:
+	var obj := JsonFile.load_object(RENAMES_PATH)
+	var raw: Variant = obj.get("renames", {})
+	var out := {}
+	if raw is Dictionary:
+		for old in (raw as Dictionary):
+			out[str(old)] = str((raw as Dictionary)[old])
+	return out
+
+
 ## Lab-only extra packs (never read by the game): {lib_id: .glb path}.
 static func _lab_packs() -> Dictionary:
 	var obj := JsonFile.load_object(LAB_PACKS_PATH)
@@ -86,12 +124,37 @@ static func _lab_packs() -> Dictionary:
 ## Warns when a hidden take is referenced by a moveset slot: the game would
 ## silently fall back (ADR-009) instead of playing it.
 static func _warn_hidden_slots(ms: Dictionary, hidden: Dictionary) -> void:
-	var slots: Dictionary = ms.get("slots", {})
-	for slot_name in slots:
-		var clips: Array = (slots[slot_name] as Dictionary).get("clips", [])
-		for c in clips:
-			if hidden.has(str(c)):
-				push_warning("[Pack] hidden: slot '%s' references hidden take '%s' (game falls back)" % [slot_name, c])
+	for key in _all_slot_clips(ms):
+		if hidden.has(key):
+			push_warning("[Pack] hidden: slot clip '%s' is hidden (game falls back)" % key)
+
+
+## Every clip name referenced by moveset slots (legacy clips + variant
+## clips): {clip_name: true}. Shared by the hidden/rename warnings.
+static func _all_slot_clips(ms: Dictionary) -> Dictionary:
+	var set := {}
+	var slots: Variant = ms.get("slots", {})
+	if not slots is Dictionary:
+		return set
+	for slot_name in (slots as Dictionary):
+		var slot: Variant = (slots as Dictionary)[slot_name]
+		if not slot is Dictionary:
+			continue
+		for c in (slot as Dictionary).get("clips", []):
+			set[str(c)] = true
+		for v in (slot as Dictionary).get("variants", []):
+			if v is Dictionary:
+				for c in (v as Dictionary).get("clips", []):
+					set[str(c)] = true
+	return set
+
+
+## Warns when a moveset-referenced clip is absent from the baked library
+## (post-rename, post-hidden): the game falls back at boot (ADR-009).
+static func _warn_missing_slots(ms: Dictionary, libs: AnimationLibrary, tag: String) -> void:
+	for key in _all_slot_clips(ms):
+		if not libs.has_animation(key):
+			push_warning("[%s] slot clip '%s' missing from the baked library (game falls back)" % [tag, key])
 
 
 ## Per-pack take counts after hidden filtering (triage overview).

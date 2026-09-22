@@ -173,6 +173,14 @@ var guard_release_needed := false
 ## (test scenes override the export — no inventory until P8). "light_sword"
 ## = built-in fallback = pre-S3 behavior exactly.
 @export var weapon_id := "light_sword"
+## Body axis for moveset variants (features/02): "male" (default) or
+## "female" (walk/run only — female_idle is off, the rest does not exist).
+## Test scenes override the export; P4 wires the character config instead.
+@export var body_id := "male"
+## Two-hand toggle (features/17): false = sword_shield stance, true =
+## two_hand stance (moveset variant when present, legacy fallback else).
+## V1 scope = these two stances (dual is vault — no anims yet).
+@export var two_handed := false
 var weapon_cfg := {}
 ## Equip-load charge test (P3 S4 graybox, features/17): ratio actuel / max,
 ## 0.0 = nu, 1.0 = surcharge. Test scenes override the export (0.2/0.5/0.8);
@@ -661,6 +669,21 @@ func _build_anim_player() -> AnimationPlayer:
 	return RigKit.build_player(rig_root, Moveset.packs_of(Moveset.load_object()))
 
 
+## Grip stance for moveset variants: two_hand when toggled, sword_shield
+## otherwise (features/17 — dual/bow/crossbow/torch join the enum later).
+func current_stance() -> StringName:
+	return &"two_hand" if two_handed else &"sword_shield"
+
+
+## Re-resolves every moveset slot for the current body/stance (boot + stance
+## or body switch — clips, loops and markers re-applied on the live player).
+func refresh_clips() -> void:
+	var body := StringName(body_id) if StringName(body_id) in Moveset.KNOWN_BODIES and body_id != "any" else &"male"
+	if StringName(body_id) != body:
+		push_warning("[Player] unknown body_id '%s', using 'male'" % body_id)
+	_clips = Moveset.resolve_clips(Moveset.load_object(), _player, body, current_stance())
+
+
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	InputManager.set_profile(&"game")
@@ -672,7 +695,7 @@ func _ready() -> void:
 	for issue in Moveset.validate_moveset(ms):
 		push_warning("[Moveset] %s" % issue)
 	_player = _build_anim_player()
-	_clips = Moveset.resolve_clips(ms, _player)
+	refresh_clips()
 	land_contact = float(Moveset.phases_for(ms, &"land_hard").get("contact_time", 0.0))
 	_attack_phases[&"attack_light_1"] = Moveset.phases_for(ms, &"attack_light_1")
 	weapon_cfg = WeaponConfig.merged(weapon_id)
@@ -691,7 +714,7 @@ func _ready() -> void:
 	print("[Player] impact %s" % str(attack_impact()))
 	if _player != null:
 		_play(_clips.get(&"idle", &""))
-		print("[Player] clips idle=%s walk=%s run=%s fall=%s roll=%s backstep=%s land=%s attack=%s" % [_clips.get(&"idle"), _clips.get(&"walk"), _clips.get(&"run"), _clips.get(&"fall"), _clips.get(&"roll"), _clips.get(&"backstep"), _clips.get(&"land_hard"), _clips.get(&"attack_light_1")])
+		print("[Player] clips body=%s stance=%s idle=%s walk=%s run=%s fall=%s roll=%s backstep=%s land=%s attack=%s" % [body_id, current_stance(), _clips.get(&"idle"), _clips.get(&"walk"), _clips.get(&"run"), _clips.get(&"fall"), _clips.get(&"roll"), _clips.get(&"backstep"), _clips.get(&"land_hard"), _clips.get(&"attack_light_1")])
 	intent.setup(self)
 	var idle := StateIdle.new()
 	var loco := StateLocomotion.new()
