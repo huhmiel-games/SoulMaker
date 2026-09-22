@@ -94,7 +94,7 @@
 				{
 					"active": 0.0,
 					"clips": [
-						"greatsword__great sword run backward"
+						"greatsword__great sword run forward"
 					],
 					"match": {
 						"body": "any",
