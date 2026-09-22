@@ -1,12 +1,12 @@
 class_name PlayerPackBaker
 extends RefCounted
 
-## Shared animation-pack baking (lab library + player pack): merges the
+## Single animation-pack baking (scenes/anim_lab/player_pack.res): merges the
 ## moveset packs with the lab-only packs from anim_lab_packs.json, retargets
 ## via RigKit, replays the curated aliases from anim_lab_renames.json, removes
 ## the takes hidden in anim_lab_hidden.json, saves one AnimationLibrary .res.
-## Called headless (bake_anim_lab.gd, bake_player_pack.gd) and from the lab's
-## Export button (no subprocess).
+## One file shared by the lab dock and the game — no duplication, no sync
+## step. Called headless (bake_player_pack.gd).
 ## Raw take names stay "pack__take"; curated aliases follow
 ## action__body__stance__NN (__ = field boundary, _ = word separator) and
 ## moveset slots resolve the post-rename names.
@@ -14,7 +14,6 @@ const RIG_PATH := "res://assets/meshes/characters/Superhero_Male_FullBody.gltf"
 const LAB_PACKS_PATH := "res://scenes/anim_lab/anim_lab_packs.json"
 const HIDDEN_PATH := "res://scenes/anim_lab/anim_lab_hidden.json"
 const RENAMES_PATH := "res://scenes/anim_lab/anim_lab_renames.json"
-const LAB_LIB_OUT := "res://scenes/anim_lab/anim_lab_lib.res"
 const PLAYER_PACK_OUT := "res://scenes/anim_lab/player_pack.res"
 
 

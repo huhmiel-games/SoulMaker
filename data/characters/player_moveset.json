@@ -53,8 +53,7 @@
 		"idle": {
 			"active": 0.0,
 			"clips": [
-				"adventure__idle",
-				"adventure__idle (3)"
+				"adventure__idle"
 			],
 			"loop": true
 		},

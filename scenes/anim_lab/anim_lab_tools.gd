@@ -5,19 +5,22 @@ extends Node
 ## node): while scrubbing takes in the editor Animation dock, "Hide current
 ## take" appends the previewed take to anim_lab_hidden.json + removes it live
 ## + re-saves the baked .res — never shown again until restored (remove its
-## line from the JSON + re-bake with src/tools/bake_anim_lab.gd).
+## line from the JSON + re-bake with src/tools/bake_player_pack.gd).
 ## "Rename current take" renames the previewed take to the curated alias in
 ## [member rename_to] (action__body__stance__NN, __ = field boundary): live
 ## rename + anim_lab_renames.json append (replayed on every bake BEFORE the
 ## hidden filter) + player_moveset.json clips updated when the take is used
 ## by a slot + .res re-save. The source .glb files are never touched.
+## Single-file setup: the dock library IS player_pack.res (the same file the
+## game mounts) — hide/rename write straight into it; "Bake player pack"
+## rebuilds it whole from the JSONs (bulk changes, reconsolidation).
 ## Dev only, nothing in the game reads the hidden/renames files.
 ## Note: LabPlayer lives under the RigRoot instance, so the editor hides it
 ## in the scene dock unless RigRoot is set to Editable Children — the tool
 ## resolves it dynamically, nothing to configure.
 const HIDDEN_PATH := "res://scenes/anim_lab/anim_lab_hidden.json"
 const RENAMES_PATH := "res://scenes/anim_lab/anim_lab_renames.json"
-const LAB_LIB := "res://scenes/anim_lab/anim_lab_lib.res"
+const PACK := "res://scenes/anim_lab/player_pack.res"
 
 ## Curated alias for the previewed take (see above): pre-filled with the
 ## previewed take name whenever the Animation dock selection changes — edit
@@ -31,18 +34,20 @@ var _last_take := ""
 
 @export_tool_button("Hide current take") var hide_action: Callable = hide_current_take
 @export_tool_button("Rename current take") var rename_action: Callable = rename_current_take
-@export_tool_button("Export player pack") var export_action: Callable = export_player_pack
+@export_tool_button("Bake player pack") var bake_action: Callable = bake_player_pack
 
 
-## Curated runtime library for the game (same merge+filter as the lab):
-## export on demand, whenever the triage moves. The game mounts it directly
-## when present and silently rebuilds from the .glb packs when absent.
-func export_player_pack() -> void:
+## Full rebuild of player_pack.res from the JSONs (moveset packs + lab packs,
+## renames replayed, hidden removed): use after hand-editing hidden/renames,
+## or to reconsolidate the pack. Same bake as
+## --script res://src/tools/bake_player_pack.gd. Hide/Rename buttons already
+## write straight into the pack, so this is only needed for bulk changes.
+func bake_player_pack() -> void:
 	var err := PlayerPackBaker.bake_to(get_tree().root, PlayerPackBaker.PLAYER_PACK_OUT, "Pack")
 	if err == OK:
-		print("[AnimLab] player pack exported — game uses it on next boot")
+		print("[AnimLab] player pack baked — lab and game use it immediately")
 	else:
-		push_warning("[AnimLab] player pack export failed")
+		push_warning("[AnimLab] player pack bake failed")
 
 
 func _ready() -> void:
@@ -106,7 +111,7 @@ func hide_current_take() -> void:
 	var next_short := _next_take(lib, short)
 	if lib.has_animation(short):
 		lib.remove_animation(short)
-		if ResourceSaver.save(lib, LAB_LIB) == OK:
+		if ResourceSaver.save(lib, PACK) == OK:
 			print("[AnimLab] hidden '%s' (%d takes left)" % [short, lib.get_animation_list().size()])
 		else:
 			push_warning("[AnimLab] hidden '%s' in JSON but .res re-save failed" % short)
@@ -159,7 +164,7 @@ func rename_current_take() -> void:
 	lib.rename_animation(short, new)
 	_append_rename(short, new)
 	var updated := _update_slot_clips(short, new)
-	if ResourceSaver.save(lib, LAB_LIB) == OK:
+	if ResourceSaver.save(lib, PACK) == OK:
 		print("[AnimLab] renamed '%s' -> '%s' (%s slots updated)" % [short, new, updated])
 	else:
 		push_warning("[AnimLab] renamed '%s' -> '%s' live but .res re-save failed" % [short, new])
