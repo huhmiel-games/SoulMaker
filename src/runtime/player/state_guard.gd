@@ -2,20 +2,19 @@ class_name StateGuard
 extends PlayerState
 
 ## Raised shield (P3 S1 graybox, features/17 block/guard): entered from the
-## grounded states while guard is held (Shift / L1). Slow walk
-## (GUARD_WALK_MULT), body faces the lock target when locked, the wish
-## otherwise; dodge and attack drop the guard (same stamina gates as
-## LockOn). take_hit resolves blocks while here (controller-side) — this
-## state only owns the posture, the movement and the exits.
-## No guard clip on the rig: anim_state &"guard" is unresolved, so
-## _resolve_anim keeps the current anim (never T-poses) — the graybox
-## signal is the HUD state name plus the enter/block prints.
+## grounded states while guard is held (Shift / L1). Full walk/run speed
+## (DS3 check 23/09 — no guard slowdown), body faces the lock target when
+## locked, the wish otherwise; dodge and attack drop the guard (same stamina
+## gates as LockOn). take_hit resolves blocks while here (controller-side) —
+## this state only owns the posture, the movement and the exits.
+## Posture is the guard_idle slot (block idle loop, two_hand blocking loop),
+## crab locomotion while moving (lock_anim_for, run-capable like LockOn).
 var _air := 0.0
 
 
 func enter() -> void:
 	_air = 0.0
-	ctrl.anim_state = &"guard"
+	ctrl.anim_state = &"guard_idle"
 	ctrl.anim_seek = -1.0
 	print("[SM] Guard %s" % str(ctrl.guard_cfg.get("equipped_shield", "?")))
 
@@ -55,14 +54,16 @@ func step(delta: float) -> int:
 			return PlayerStateMachine.ATTACK
 	var planar := Vector3(ctrl.velocity.x, 0.0, ctrl.velocity.z)
 	if raw == Vector2.ZERO:
-		ctrl.anim_state = &"idle"
+		ctrl.anim_state = &"guard_idle"
 		planar = planar.move_toward(Vector3.ZERO, PlayerController.DECEL * delta)
 		ctrl.velocity.x = planar.x
 		ctrl.velocity.z = planar.z
 		return PlayerStateMachine.KEEP
-	ctrl.anim_state = &"walk"
+	var fast := raw.length() >= PlayerIntent.RUN_TRIGGER
+	ctrl.anim_state = ctrl.lock_anim_for(raw, fast) if ctrl.lock_target != null else (&"run" if fast else &"walk")
 	var wish := intent.wish_direction(raw)
-	var target := wish * PlayerController.WALK_SPEED * PlayerController.GUARD_WALK_MULT
+	var cap := PlayerController.RUN_SPEED if fast else PlayerController.WALK_SPEED
+	var target := wish * cap
 	planar = planar.move_toward(target, PlayerController.ACCEL * delta)
 	ctrl.velocity.x = planar.x
 	ctrl.velocity.z = planar.z

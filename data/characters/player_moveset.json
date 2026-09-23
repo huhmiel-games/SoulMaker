@@ -8,6 +8,25 @@
 		"melee": "res://assets/animations/sword_and_shield_anims.glb"
 	},
 	"slots": {
+		"guard_idle": {
+			"active": 0.0,
+			"clips": [
+				"melee__sword and shield block idle loop"
+			],
+			"loop": true,
+			"variants": [
+				{
+					"active": 0.0,
+					"clips": [
+						"greatsword__great sword blocking loop"
+					],
+					"match": {
+						"body": "any",
+						"stance": "two_hand"
+					}
+				}
+			]
+		},
 		"attack_light_1": {
 			"active": 0.0,
 			"clips": [
@@ -74,6 +93,13 @@
 			],
 			"loop": false
 		},
+		"roll_fast": {
+			"active": 0.0,
+			"clips": [
+				"aerial__fast roll"
+			],
+			"loop": false
+		},
 		"run": {
 			"active": 0.0,
 			"clips": [
@@ -103,6 +129,93 @@
 				}
 			]
 		},
+		"run_back": {
+			"active": 0.0,
+			"clips": [
+				"melee__sword and shield run backward"
+			],
+			"loop": true,
+			"variants": [
+				{
+					"active": 0.0,
+					"clips": [
+						"melee__sword and shield run backward"
+					],
+					"match": {
+						"body": "female",
+						"stance": "any"
+					}
+				},
+				{
+					"active": 0.0,
+					"clips": [
+						"greatsword__great sword run backward"
+					],
+					"match": {
+						"body": "any",
+						"stance": "two_hand"
+					}
+				}
+			]
+		},
+		"run_strafe_left": {
+			"active": 0.0,
+			"clips": [
+				"melee__sword and shield strafe run left"
+			],
+			"loop": true,
+			"variants": [
+				{
+					"active": 0.0,
+					"clips": [
+						"female__left run strafe"
+					],
+					"match": {
+						"body": "female",
+						"stance": "any"
+					}
+				},
+				{
+					"active": 0.0,
+					"clips": [
+						"greatsword__great sword strafe run left"
+					],
+					"match": {
+						"body": "any",
+						"stance": "two_hand"
+					}
+				}
+			]
+		},
+		"run_strafe_right": {
+			"active": 0.0,
+			"clips": [
+				"melee__sword and shield strafe run right"
+			],
+			"loop": true,
+			"variants": [
+				{
+					"active": 0.0,
+					"clips": [
+						"female__right run strafe"
+					],
+					"match": {
+						"body": "female",
+						"stance": "any"
+					}
+				},
+				{
+					"active": 0.0,
+					"clips": [
+						"greatsword__great sword strafe run right"
+					],
+					"match": {
+						"body": "any",
+						"stance": "two_hand"
+					}
+				}
+			]
+		},
 		"walk": {
 			"active": 0.0,
 			"clips": [
@@ -124,6 +237,93 @@
 					"active": 0.0,
 					"clips": [
 						"greatsword__great sword walk forward"
+					],
+					"match": {
+						"body": "any",
+						"stance": "two_hand"
+					}
+				}
+			]
+		},
+		"walk_back": {
+			"active": 0.0,
+			"clips": [
+				"melee__sword and shield walk backward"
+			],
+			"loop": true,
+			"variants": [
+				{
+					"active": 0.0,
+					"clips": [
+						"melee__sword and shield walk backward"
+					],
+					"match": {
+						"body": "female",
+						"stance": "any"
+					}
+				},
+				{
+					"active": 0.0,
+					"clips": [
+						"greatsword__great sword walk backward"
+					],
+					"match": {
+						"body": "any",
+						"stance": "two_hand"
+					}
+				}
+			]
+		},
+		"walk_strafe_left": {
+			"active": 0.0,
+			"clips": [
+				"melee__sword and shield strafe walk left"
+			],
+			"loop": true,
+			"variants": [
+				{
+					"active": 0.0,
+					"clips": [
+						"female__left strafe walk"
+					],
+					"match": {
+						"body": "female",
+						"stance": "any"
+					}
+				},
+				{
+					"active": 0.0,
+					"clips": [
+						"greatsword__great sword strafe walk left"
+					],
+					"match": {
+						"body": "any",
+						"stance": "two_hand"
+					}
+				}
+			]
+		},
+		"walk_strafe_right": {
+			"active": 0.0,
+			"clips": [
+				"melee__sword and shield strafe walk right"
+			],
+			"loop": true,
+			"variants": [
+				{
+					"active": 0.0,
+					"clips": [
+						"female__right strafe walk"
+					],
+					"match": {
+						"body": "female",
+						"stance": "any"
+					}
+				},
+				{
+					"active": 0.0,
+					"clips": [
+						"greatsword__great sword strafe walk right"
 					],
 					"match": {
 						"body": "any",

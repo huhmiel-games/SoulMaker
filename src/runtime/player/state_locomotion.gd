@@ -31,8 +31,9 @@ func step(delta: float) -> int:
 		_air += delta
 		if _air > PlayerController.AIR_TO_FALL or ctrl.falling_fast():
 			return PlayerStateMachine.FALL
-	# Lock-on tap wins over the turn/move below (acquire gates the transition).
-	if intent.lock_pressed() and ctrl.try_acquire_lock():
+	# Lock-on tap wins over the turn/move below (acquire gates the transition —
+	# single edge per press via lock_edge, never a double toggle).
+	if ctrl.lock_edge() and ctrl.try_acquire_lock():
 		return PlayerStateMachine.LOCKON
 	# Dodge tap wins over the turn/move below: neutral stick = backstep
 	# hop, any input = committed roll in the input direction (stamina prepaid).

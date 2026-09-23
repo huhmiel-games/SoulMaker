@@ -45,8 +45,12 @@ func snap_aft() -> void:
 ## Applied immediately (_process early-outs on zero input and would not
 ## reapply it). Used by lock-on facing snaps (free rolls never touch the
 ## body heading — reset_camera convention).
+## Wrapped to [-180, 180] (S4-bis anti-360): free orbit accumulates _yaw
+## without bounds, so an engage after heavy orbiting could leave a 300°+
+## local offset that track_aft would ease the LONG way around. Wrapped, the
+## ease always takes the short path home.
 func shift_yaw(d_body: float) -> void:
-	_yaw -= rad_to_deg(d_body)
+	_yaw = wrapf(_yaw - rad_to_deg(d_body), -180.0, 180.0)
 	_apply()
 
 

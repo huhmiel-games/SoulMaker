@@ -7,7 +7,7 @@
   },
   "roll": {
     "base_time": 0.8,
-    "fast": { "iframes": 0.5, "distance": 6.0, "recovery_bonus": 0.0, "anim_speed": 1.0 },
+    "fast": { "iframes": 0.5, "distance": 6.0, "recovery_bonus": 0.0, "anim_speed": 2.5 },
     "mid": { "iframes": 0.4, "distance": 4.0, "recovery_bonus": 0.08, "anim_speed": 0.9 },
     "fat": { "iframes": 0.25, "distance": 3.0, "recovery_bonus": 0.3, "anim_speed": 0.75 }
   },

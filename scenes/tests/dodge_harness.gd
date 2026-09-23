@@ -6,7 +6,8 @@ extends Node
 ## Covers: tier resolution + boundaries + live swap, roll params per tier,
 ## costs (roll flat, backstep scaled), stamina gate, ROLL/BACKSTEP/PLUNGE
 ## enterable, plunge damage scale/cap/min, take_plunge (bypass shield,
-## knockback, lethal, DEAD ignored), fall damage bounds + application.
+## knockback, lethal, DEAD ignored), fall damage bounds + application, LAND
+## reception, lock-toggle single edge, camera short swing.
 ## Prints PASS/FAIL per step plus a summary line, then quits (headless).
 ## Run: Godot --headless --path . scenes/tests/dodge_harness.tscn
 var _fails := 0
@@ -258,3 +259,75 @@ func _run() -> void:
 		if player.machine.state_name() == "Hurt":
 			break
 	_check("fall lethal hurt", player.machine.state_name() == "Hurt", player.machine.state_name())
+
+	# 13. Lock toggle: one press spanning two physics ticks toggles ONCE
+	# (S4-bis — release + instant re-acquire used to read as "ignored").
+	# The stuck edge is forged into the InputManager track: physics steps in
+	# _physics_process while edges live one render frame, and headless tick
+	# alignment can't reproduce the straddle deterministically.
+	player.global_position = Vector3(0.0, 0.1, 20.0)
+	player.rotation.y = 0.0
+	player.velocity = Vector3.ZERO
+	soldier.global_position = Vector3(0.0, 0.1, 12.0)
+	await get_tree().physics_frame
+	player.lock_target = soldier
+	player.machine.start(PlayerStateMachine.LOCKON)
+	_check("toggle setup", player.machine.state_name() == "LockOn", player.machine.state_name())
+	InputManager._action_track["game/lock_on"] = {"pressed": true, "just_pressed": true}
+	player.machine.step(0.016)
+	_check("toggle releases", player.lock_target == null and player.machine.state_name() != "LockOn", "%s lock=%s" % [player.machine.state_name(), str(player.lock_target)])
+	player.machine.step(0.016)
+	_check("toggle once", player.lock_target == null and player.machine.state_name() != "LockOn", "%s lock=%s" % [player.machine.state_name(), str(player.lock_target)])
+	# A new press re-arms and acquires (camera faces the soldier).
+	InputManager._action_track["game/lock_on"] = {"pressed": false, "just_pressed": false}
+	player.machine.step(0.016)
+	InputManager._action_track["game/lock_on"] = {"pressed": true, "just_pressed": true}
+	player.machine.step(0.016)
+	_check("toggle reacquire", player.machine.state_name() == "LockOn" and player.lock_target == soldier, "%s lock=%s" % [player.machine.state_name(), str(player.lock_target)])
+	InputManager._action_track["game/lock_on"] = {"pressed": false, "just_pressed": false}
+	player.lock_target = null
+
+	# 14. No long-way camera swing (S4-bis): a pre-wound local yaw takes the
+	# short path home — shift_yaw wraps to [-180, 180], so the ease never
+	# whips 270 deg around the body. Static marker (no AI drift), off-axis
+	# so the body ease runs shift_yaw on tick 1 (dead-ahead would never
+	# wrap and would ease the long way even when fixed).
+	var swing_mark := Node3D.new()
+	swing_mark.add_to_group("lockable")
+	add_child(swing_mark)
+	swing_mark.global_position = Vector3(5.0, 0.1, 12.0)
+	player.global_position = Vector3(0.0, 0.1, 20.0)
+	player.rotation.y = 0.0
+	player.velocity = Vector3.ZERO
+	await get_tree().physics_frame
+	player.lock_target = swing_mark
+	player.machine.start(PlayerStateMachine.LOCKON)
+	player.camera._yaw = 270.0
+	player.camera._apply()
+	var path := 0.0
+	var prev := float(player.camera.global_rotation.y)
+	for i in 90:
+		await get_tree().physics_frame
+		var cur := float(player.camera.global_rotation.y)
+		path += absf(wrapf(cur - prev, -PI, PI))
+		prev = cur
+	_check("short swing", rad_to_deg(path) < 180.0, "path %.0f deg" % rad_to_deg(path))
+	swing_mark.queue_free()
+	player.lock_target = null
+	player.machine.start(PlayerStateMachine.IDLE)
+
+	# 15. Roll tier clips (S4-bis): fast plays roll_fast, mid/fat the legacy
+	# roll slot (fat clip unchanged by design).
+	_check("roll fast slot", str(player._clips.get(&"roll_fast", &"")) == "rig/aerial__fast roll", str(player._clips.get(&"roll_fast", &"")))
+	player.equip_load_ratio = 0.2
+	var rs_fast := StateRoll.new()
+	rs_fast.setup(player, player.intent)
+	rs_fast.enter()
+	_check("roll fast anim", player.anim_state == &"roll_fast", str(player.anim_state))
+	player.equip_load_ratio = 0.5
+	var rs_mid := StateRoll.new()
+	rs_mid.setup(player, player.intent)
+	rs_mid.enter()
+	_check("roll mid anim", player.anim_state == &"roll", str(player.anim_state))
+	player.equip_load_ratio = 0.2
+	player.machine.start(PlayerStateMachine.IDLE)

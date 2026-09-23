@@ -107,8 +107,8 @@ const LAND_ENTER_BLEND := 0.05
 ## into stamina cost (stability_mult) + chip HP (1 - absorb) and skip poise
 ## entirely — stamina is the guard's pool. A hit exceeding the remaining
 ## stamina breaks the guard: extended HURT (GUARD_BREAK_TIME) + no regen
-## (GUARD_BREAK_NOREGEN). Hits outside the frontal block_arc bypass.
-const GUARD_WALK_MULT := 0.5
+## (GUARD_BREAK_NOREGEN). Hits outside the frontal block_arc bypass. Guard
+## moves at full walk/run speed (DS3 check 23/09 — no slowdown).
 const GUARD_BREAK_TIME := 1.2
 const GUARD_BREAK_NOREGEN := 1.0
 
@@ -684,6 +684,28 @@ func refresh_clips() -> void:
 	_clips = Moveset.resolve_clips(Moveset.load_object(), _player, body, current_stance())
 
 
+## Locked locomotion anim (S4-bis crab): 4-way from the body-relative raw
+## (raw.y < 0 = forward, raw.x = strafe, raw.y > 0 = back — see
+## PlayerIntent.move_raw), dominant axis wins diagonals. [param fast]
+## selects the run set, forward stays walk/run. An empty directional slot
+## (legacy/adventure rigs) falls back to walk/run — never an empty anim.
+func lock_anim_for(raw: Vector2, fast: bool) -> StringName:
+	var base := &"run" if fast else &"walk"
+	if raw == Vector2.ZERO:
+		return base
+	var suffix := &""
+	if absf(raw.x) >= absf(raw.y):
+		suffix = &"strafe_right" if raw.x > 0.0 else &"strafe_left"
+	elif raw.y > 0.0:
+		suffix = &"back"
+	else:
+		return base
+	var cand := StringName("%s_%s" % [String(base), String(suffix)])
+	if String(_clips.get(cand, &"")) != "":
+		return cand
+	return base
+
+
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	InputManager.set_profile(&"game")
@@ -715,6 +737,7 @@ func _ready() -> void:
 	if _player != null:
 		_play(_clips.get(&"idle", &""))
 		print("[Player] clips body=%s stance=%s idle=%s walk=%s run=%s fall=%s roll=%s backstep=%s land=%s attack=%s" % [body_id, current_stance(), _clips.get(&"idle"), _clips.get(&"walk"), _clips.get(&"run"), _clips.get(&"fall"), _clips.get(&"roll"), _clips.get(&"backstep"), _clips.get(&"land_hard"), _clips.get(&"attack_light_1")])
+		print("[Player] crab walk_back=%s run_back=%s walk_sl_l=%s walk_sl_r=%s run_sl_l=%s run_sl_r=%s guard_idle=%s" % [_clips.get(&"walk_back"), _clips.get(&"run_back"), _clips.get(&"walk_strafe_left"), _clips.get(&"walk_strafe_right"), _clips.get(&"run_strafe_left"), _clips.get(&"run_strafe_right"), _clips.get(&"guard_idle")])
 	intent.setup(self)
 	var idle := StateIdle.new()
 	var loco := StateLocomotion.new()
@@ -944,11 +967,23 @@ const LOCK_FACE := 10.0 # body ease toward the target (weight/sec)
 const LOCK_CHEST := 1.2 # aim height on the target
 
 var lock_target: Node3D = null
+## Lock-toggle edge guard (S4-bis): the SM steps in physics while
+## InputManager edges live one render frame — a single press can span two
+## physics ticks and toggle twice (release + instant re-acquire = toggle
+## "ignored"). Every consumed edge disarms until the button is released.
+var _lock_edge_armed := true
+## 360-spin probe (S4-bis, dev only): previous camera world yaw for the
+## per-tick jump warning in track_lock_target. Reset on release so a
+## re-engage after free orbit never false-positives.
+var _prev_cam_yaw := 0.0
+var _cam_yaw_init := false
 
 
-## Nearest lockable inside LOCK_RANGE and the front cone. Arms the marker.
+## Nearest lockable inside LOCK_RANGE and the CAMERA front cone (souls
+## standard: what you see is what you lock — the body snaps onto it via
+## _snap_face). Arms the marker.
 func try_acquire_lock() -> bool:
-	var fwd := -global_transform.basis.z
+	var fwd := -camera.global_transform.basis.z
 	fwd.y = 0.0
 	fwd = fwd.normalized() if fwd.length_squared() > 0.0001 else Vector3(0.0, 0.0, -1.0)
 	var best: Node3D = null
@@ -974,12 +1009,27 @@ func try_acquire_lock() -> bool:
 	return true
 
 
+## Single lock-toggle edge per press (see _lock_edge_armed): true once when
+## the button goes down, then false until it is released. All three toggle
+## sites (Idle/Locomotion acquire, LockOn release) go through here so a
+## press straddling two physics ticks can never toggle twice.
+func lock_edge() -> bool:
+	if not intent.lock_pressed():
+		_lock_edge_armed = true
+		return false
+	if not _lock_edge_armed:
+		return false
+	_lock_edge_armed = false
+	return true
+
+
 func clear_lock() -> void:
 	plunge_temp_lock = false
 	if lock_target != null and is_instance_valid(lock_target):
 		_set_marker(false)
 		print("[Player] lock released")
 	lock_target = null
+	_cam_yaw_init = false
 
 
 ## Still locked: target alive and inside break range (called every LockOn tick).
@@ -1026,6 +1076,17 @@ func track_lock_target(delta: float) -> void:
 		rotation.y = lerp_angle(before, atan2(-to.x, -to.z), minf(LOCK_FACE * delta, 1.0))
 		camera.shift_yaw(rotation.y - before)
 	camera.track_aft(delta)
+	# 360-spin probe (S4-bis, dev only): loud warning on large single-tick
+	# camera world-yaw jumps while locked. Engage snaps go through
+	# StateLockOn._snap_face, never here, so anything above ~20 deg/tick is
+	# a real spin, not a snap.
+	var wy := float(camera.global_rotation.y)
+	if _cam_yaw_init:
+		var jump := absf(wrapf(wy - _prev_cam_yaw, -PI, PI))
+		if jump > 0.35:
+			print("[Player] CAMJUMP %.0f deg/tick in %s (target %s)" % [rad_to_deg(jump), machine.state_name(), lock_target.name])
+	_prev_cam_yaw = wy
+	_cam_yaw_init = true
 
 
 ## Snap the aft camera behind the body (Locomotion enter, old reset_camera).

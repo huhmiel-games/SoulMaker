@@ -9,9 +9,11 @@ extends PlayerState
 ## body turns toward _dir (single facing); locked rolls keep tracking the
 ## enemy instead. Stamina is prepaid by the caller — enter only arms
 ## i-frames. Grounded only: walked off an edge mid-roll -> Fall.
-## The clip ("Quick Roll To Run", 1.43 s) opens on ~0.55 s of anticipation
-## crouch — enter seeks past it (ctrl.anim_seek) so the visible tuck matches
-## the committed displacement.
+## The mid/fat clip ("Quick Roll To Run", 1.43 s) opens on ~0.55 s of
+## anticipation crouch — enter seeks past it (ctrl.anim_seek) so the visible
+## tuck matches the committed displacement. Fast tier plays its own clip
+## ("Big Jump" 2.40 s → roll_fast slot) at anim_speed (2.5 ≈ fits the 0.8 s
+## window with the same seek — tune per feel, mobility JSON).
 var _t := 0.0
 var _dir := Vector3.ZERO
 var _speed := 6.0
@@ -30,7 +32,7 @@ func enter() -> void:
 	_base_time = float((ctrl.mobility_cfg.get("roll", {}) as Dictionary).get("base_time", PlayerController.ROLL_TIME))
 	_speed = float(params.get("distance", 4.0)) / maxf(_base_time, 0.05)
 	_recovery = maxf(float(params.get("recovery_bonus", 0.0)), 0.0)
-	ctrl.anim_state = &"roll"
+	ctrl.anim_state = &"roll_fast" if _tier == &"fast" else &"roll"
 	ctrl.anim_seek = PlayerController.ROLL_SEEK
 	ctrl.iframes = float(params.get("iframes", PlayerController.ROLL_IFRAMES))
 	ctrl.set_anim_speed(maxf(float(params.get("anim_speed", 1.0)), 0.1))

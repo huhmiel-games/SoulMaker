@@ -1,11 +1,11 @@
-[gd_scene format=3]
+[gd_scene format=3 uid="uid://csqwlrjuf4gc4"]
 
 [ext_resource type="Environment" path="res://scenes/editors/env_default.tres" id="4"]
-[ext_resource type="PackedScene" path="res://scenes/prefabs/player.tscn" id="5"]
-[ext_resource type="Script" path="res://src/runtime/enemies/soldier_enemy.gd" id="6"]
-[ext_resource type="Script" path="res://src/runtime/impact_host.gd" id="7"]
-[ext_resource type="Script" path="res://scenes/tests/test_slowmo.gd" id="9"]
-[ext_resource type="Script" path="res://scenes/tests/test_bars.gd" id="10"]
+[ext_resource type="PackedScene" uid="uid://cqk7playerp21" path="res://scenes/prefabs/player.tscn" id="5"]
+[ext_resource type="Script" uid="uid://r78tjdxcbjbc" path="res://src/runtime/enemies/soldier_enemy.gd" id="6"]
+[ext_resource type="Script" uid="uid://djnughxi6e4qg" path="res://src/runtime/impact_host.gd" id="7"]
+[ext_resource type="Script" uid="uid://7mxcmrtskqla" path="res://scenes/tests/test_slowmo.gd" id="9"]
+[ext_resource type="Script" uid="uid://ba2byly0nswhu" path="res://scenes/tests/test_bars.gd" id="10"]
 
 [sub_resource type="BoxMesh" id="ground_mesh"]
 size = Vector3(40, 0.2, 40)
@@ -13,42 +13,44 @@ size = Vector3(40, 0.2, 40)
 [sub_resource type="BoxShape3D" id="ground_shape"]
 size = Vector3(40, 0.2, 40)
 
-[node name="EnemyArchetypeTest" type="Node3D"]
+[node name="EnemyArchetypeTest" type="Node3D" unique_id=892444453]
 script = ExtResource("9")
 
-[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=277048585]
 environment = ExtResource("4")
 
-[node name="Sun" type="DirectionalLight3D" parent="."]
+[node name="Sun" type="DirectionalLight3D" parent="." unique_id=1297250966]
 transform = Transform3D(0.81915206, -0.3686878, 0.43938506, 0, 0.76604444, 0.6427876, -0.57357645, -0.52654076, 0.62750685, 0, 0, 0)
 light_energy = 1.1
 shadow_enabled = true
 
-[node name="Ground" type="StaticBody3D" parent="."]
+[node name="Ground" type="StaticBody3D" parent="." unique_id=1792480368]
 
-[node name="GroundMesh" type="MeshInstance3D" parent="Ground"]
+[node name="GroundMesh" type="MeshInstance3D" parent="Ground" unique_id=1815042002]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.1, 0)
 mesh = SubResource("ground_mesh")
 
-[node name="GroundShape" type="CollisionShape3D" parent="Ground"]
+[node name="GroundShape" type="CollisionShape3D" parent="Ground" unique_id=918246748]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.1, 0)
 shape = SubResource("ground_shape")
 
-[node name="Soldier" type="CharacterBody3D" parent="." groups=["lockable"]]
+[node name="Soldier" type="CharacterBody3D" parent="." unique_id=1205937770 groups=["lockable"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -10)
 script = ExtResource("6")
 
-[node name="Player" parent="." instance=ExtResource("5")]
+[node name="Player" parent="." unique_id=917259665 instance=ExtResource("5")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 6)
 weapon_id = "greatsword_test"
+two_handed = true
+equip_load_ratio = 0.3
 
-[node name="ImpactHost" type="Node3D" parent="."]
+[node name="ImpactHost" type="Node3D" parent="." unique_id=1520050542]
 script = ExtResource("7")
 
-[node name="HUD" type="CanvasLayer" parent="."]
+[node name="HUD" type="CanvasLayer" parent="." unique_id=1248773126]
 script = ExtResource("10")
 
-[node name="State" type="Label" parent="HUD"]
+[node name="State" type="Label" parent="HUD" unique_id=1369306800]
 offset_left = 16.0
 offset_top = 16.0
 offset_right = 700.0
@@ -56,7 +58,7 @@ offset_bottom = 60.0
 theme_override_font_sizes/font_size = 18
 text = "boot"
 
-[node name="EnemyAI" type="Label" parent="HUD"]
+[node name="EnemyAI" type="Label" parent="HUD" unique_id=664728805]
 offset_left = 16.0
 offset_top = 64.0
 offset_right = 700.0
@@ -64,49 +66,49 @@ offset_bottom = 88.0
 theme_override_font_sizes/font_size = 18
 text = "enemy"
 
-[node name="HPBg" type="ColorRect" parent="HUD"]
+[node name="HPBg" type="ColorRect" parent="HUD" unique_id=1883305]
 offset_left = 16.0
 offset_top = 92.0
 offset_right = 316.0
 offset_bottom = 102.0
 color = Color(0.05, 0.05, 0.05, 0.8)
 
-[node name="HP" type="ColorRect" parent="HUD"]
+[node name="HP" type="ColorRect" parent="HUD" unique_id=679749773]
 offset_left = 16.0
 offset_top = 92.0
 offset_right = 316.0
 offset_bottom = 102.0
 color = Color(0.2, 0.8, 0.2, 1)
 
-[node name="STBg" type="ColorRect" parent="HUD"]
+[node name="STBg" type="ColorRect" parent="HUD" unique_id=1083276497]
 offset_left = 16.0
 offset_top = 104.0
 offset_right = 316.0
 offset_bottom = 114.0
 color = Color(0.05, 0.05, 0.05, 0.8)
 
-[node name="ST" type="ColorRect" parent="HUD"]
+[node name="ST" type="ColorRect" parent="HUD" unique_id=1807115273]
 offset_left = 16.0
 offset_top = 104.0
 offset_right = 316.0
 offset_bottom = 114.0
 color = Color(0.9, 0.8, 0.2, 1)
 
-[node name="ENBg" type="ColorRect" parent="HUD"]
+[node name="ENBg" type="ColorRect" parent="HUD" unique_id=2112634718]
 offset_left = 16.0
 offset_top = 116.0
 offset_right = 316.0
 offset_bottom = 126.0
 color = Color(0.05, 0.05, 0.05, 0.8)
 
-[node name="EN" type="ColorRect" parent="HUD"]
+[node name="EN" type="ColorRect" parent="HUD" unique_id=1090010914]
 offset_left = 16.0
 offset_top = 116.0
 offset_right = 316.0
 offset_bottom = 126.0
 color = Color(0.8, 0.2, 0.2, 1)
 
-[node name="Hint" type="Label" parent="HUD"]
+[node name="Hint" type="Label" parent="HUD" unique_id=360953810]
 anchors_preset = 12
 anchor_top = 1.0
 anchor_right = 1.0

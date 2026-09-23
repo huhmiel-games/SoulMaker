@@ -28,7 +28,7 @@ func enter() -> void:
 
 
 func step(delta: float) -> int:
-	if intent.lock_pressed() or not ctrl.lock_valid():
+	if ctrl.lock_edge() or not ctrl.lock_valid():
 		return _release()
 	var raw := intent.move_raw()
 	var force := raw.length()
@@ -70,7 +70,7 @@ func step(delta: float) -> int:
 		ctrl.velocity.z = planar.z
 		return PlayerStateMachine.KEEP
 	var cap := PlayerController.RUN_SPEED if force >= PlayerIntent.RUN_TRIGGER else PlayerController.WALK_SPEED
-	ctrl.anim_state = &"run" if force >= PlayerIntent.RUN_TRIGGER else &"walk"
+	ctrl.anim_state = ctrl.lock_anim_for(raw, force >= PlayerIntent.RUN_TRIGGER)
 	var wish := intent.wish_direction(raw)
 	var target := wish * cap * clampf(force, PlayerIntent.SNEAK_TRIGGER, 1.0)
 	planar = planar.move_toward(target, PlayerController.ACCEL * delta)

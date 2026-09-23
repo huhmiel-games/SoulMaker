@@ -32,7 +32,9 @@ const FALLBACK_SLOTS := {
 	&"attack_light_1": ["attack", "slash", "swing", "hit"],
 }
 
-const KNOWN_SLOTS := [&"idle", &"walk", &"run", &"fall", &"roll", &"backstep", &"land_hard", &"attack_light_1"]
+const KNOWN_SLOTS := [&"idle", &"walk", &"run", &"fall", &"roll", &"backstep", &"land_hard", &"attack_light_1",
+	&"walk_back", &"run_back", &"walk_strafe_left", &"walk_strafe_right", &"run_strafe_left", &"run_strafe_right",
+	&"guard_idle", &"roll_fast"]
 
 ## Default attack phases (no phases section = whole clip as release at 1.0).
 const PHASE_DEFAULTS := {
