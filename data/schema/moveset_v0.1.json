@@ -14,7 +14,7 @@
 	},
     "slots": {
 	  "type": "object",
-	  "description": "Semantic slots (locomotion v0.1: idle/walk/run/fall/roll/backstep + attack_light_1 with optional phases + S4-bis lock-on crab: walk_back/run_back/walk_strafe_left/walk_strafe_right/run_strafe_left/run_strafe_right; forward stays walk/run + guard_idle (block idle loop, two_hand blocking loop) + roll_fast (fast-tier clip)). Each slot lists legacy clips (body/stance agnostic fallback) plus an optional variants array of {match: {body: male|female|any, stance: sword_shield|two_hand|any}, clips, active} — best body/stance match wins, ties keep JSON order (body-specific first), legacy clips last. Curated aliases follow action__body__stance__NN (__ = field boundary). Unknown slots are ignored with a warning.",
+	  "description": "Semantic slots (locomotion v0.1: idle/walk/run/fall/roll/backstep + attack_light_1 with optional phases + S4-bis lock-on crab: walk_back/run_back/walk_strafe_left/walk_strafe_right/run_strafe_left/run_strafe_right; forward stays walk/run + guard_idle (block idle loop, two_hand blocking loop) + roll_fast (fast-tier clip)). Each slot lists legacy clips (body/stance agnostic fallback) plus an optional variants array of {match: {body: male|female|any, stance: sword_shield|two_hand|any}, clips, active, phases?} — best body/stance match wins, ties keep JSON order (body-specific first), legacy clips last; variant phases (same shape as slot phases) merge per-key over the slot phases for markers and combat reads. Curated aliases follow action__body__stance__NN (__ = field boundary). Unknown slots are ignored with a warning.",
 	  "additionalProperties": {
 		"type": "object",
 		"required": ["clips"],

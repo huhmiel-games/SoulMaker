@@ -123,6 +123,16 @@
 		"various__Running Forward Flip",
 		"various__Sneaking Forward",
 		"various__Teeter",
-		"various__Unarmed Grab Torch From Wall"
+		"various__Unarmed Grab Torch From Wall",
+		"ual1__Crouch_Fwd",
+		"ual1__Crouch_Idle",
+		"ual1__Dance",
+		"ual1__Driving",
+		"ual1__Pistol_Aim_Down",
+		"ual1__Pistol_Aim_Neutral",
+		"ual1__Pistol_Aim_Up",
+		"ual1__Pistol_Idle",
+		"ual1__Pistol_Reload",
+		"ual1__Pistol_Shoot"
 	]
 }

@@ -42,7 +42,7 @@ script = ExtResource("6")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 6)
 weapon_id = "greatsword_test"
 two_handed = true
-equip_load_ratio = 0.3
+equip_load_ratio = 0.2
 
 [node name="ImpactHost" type="Node3D" parent="." unique_id=1520050542]
 script = ExtResource("7")

@@ -33,6 +33,27 @@
 				"melee__sword and shield slash"
 			],
 			"loop": false,
+			"variants": [
+				{
+					"active": 0.0,
+					"clips": [
+						"greatsword__great sword slash"
+					],
+					"match": {
+						"body": "any",
+						"stance": "two_hand"
+					},
+					"phases": {
+						"attack_start": 0.374,
+						"release_start": 0.681,
+						"windup_speed": 1.0,
+						"attack_speed": 1.25,
+						"release_speed": 1.0,
+						"stamina_cost": 20.0,
+						"sweep_start": 0.339
+					}
+				}
+			],
 			"phases": {
 				"attack_speed": 1.25,
 				"attack_start": 0.4416,
@@ -74,7 +95,19 @@
 			"clips": [
 				"adventure__idle"
 			],
-			"loop": true
+			"loop": true,
+			"variants": [
+				{
+					"active": 0.0,
+					"clips": [
+						"greatsword__great sword idle"
+					],
+					"match": {
+						"body": "any",
+						"stance": "two_hand"
+					}
+				}
+			]
 		},
 		"land_hard": {
 			"active": 0.0,

@@ -682,6 +682,17 @@ func refresh_clips() -> void:
 	if StringName(body_id) != body:
 		push_warning("[Player] unknown body_id '%s', using 'male'" % body_id)
 	_clips = Moveset.resolve_clips(Moveset.load_object(), _player, body, current_stance())
+	_refresh_attack_phases(body)
+
+
+## Effective attack_light_1 phases for a body/stance (winning variant merged
+## over slot phases) + weapon combat-math overlay. Re-runs on every
+## refresh_clips so timings follow the resolved clip across stance/body
+## switches (S3 behavior unchanged without variants: slot phases + overlay).
+func _refresh_attack_phases(body: StringName) -> void:
+	_attack_phases[&"attack_light_1"] = Moveset.effective_phases(Moveset.load_object(), &"attack_light_1", body, current_stance())
+	if not weapon_cfg.is_empty():
+		_apply_weapon_attack()
 
 
 ## Locked locomotion anim (S4-bis crab): 4-way from the body-relative raw
@@ -719,7 +730,6 @@ func _ready() -> void:
 	_player = _build_anim_player()
 	refresh_clips()
 	land_contact = float(Moveset.phases_for(ms, &"land_hard").get("contact_time", 0.0))
-	_attack_phases[&"attack_light_1"] = Moveset.phases_for(ms, &"attack_light_1")
 	weapon_cfg = WeaponConfig.merged(weapon_id)
 	_apply_weapon_attack()
 	print("[Player] weapon %s %s" % [weapon_id, str((weapon_cfg.get("attack", {}) as Dictionary).get("damage", "?"))])

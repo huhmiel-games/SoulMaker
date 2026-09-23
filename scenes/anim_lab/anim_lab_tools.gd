@@ -15,6 +15,8 @@ extends Node
 ## game mounts) — hide/rename write straight into it; "Bake player pack"
 ## rebuilds it whole from the JSONs (bulk changes, reconsolidation).
 ## Dev only, nothing in the game reads the hidden/renames files.
+## "Reset pose" clears dock preview residue between takes (see reset_pose):
+## use it before judging a take, especially UAL ones.
 ## Note: LabPlayer lives under the RigRoot instance, so the editor hides it
 ## in the scene dock unless RigRoot is set to Editable Children — the tool
 ## resolves it dynamically, nothing to configure.
@@ -35,6 +37,7 @@ var _last_take := ""
 @export_tool_button("Hide current take") var hide_action: Callable = hide_current_take
 @export_tool_button("Rename current take") var rename_action: Callable = rename_current_take
 @export_tool_button("Bake player pack") var bake_action: Callable = bake_player_pack
+@export_tool_button("Reset pose") var reset_action: Callable = reset_pose
 
 
 ## Full rebuild of player_pack.res from the JSONs (moveset packs + lab packs,
@@ -48,6 +51,30 @@ func bake_player_pack() -> void:
 		print("[AnimLab] player pack baked — lab and game use it immediately")
 	else:
 		push_warning("[AnimLab] player pack bake failed")
+
+
+## Clears the dock preview residue: neither the player nor the dock resets
+## bones a take does not animate (e.g. UAL takes carry no Spine track — it
+## is stripped at import as immutable — so Spine keeps the previous take's
+## pose when hopping takes in the dock). Stop + reset all bone poses to
+## rest for a clean baseline before judging a take. Editor only, touches
+## nothing on disk.
+func reset_pose() -> void:
+	var player := _find_lab_player()
+	if player == null:
+		push_warning("[AnimLab] reset pose: LabPlayer not resolved")
+		return
+	player.stop()
+	var armature: Node = player.get_parent()
+	if armature == null:
+		push_warning("[AnimLab] reset pose: LabPlayer has no parent")
+		return
+	var skeleton := armature.get_node_or_null("GeneralSkeleton") as Skeleton3D
+	if skeleton == null:
+		push_warning("[AnimLab] reset pose: GeneralSkeleton not found under LabPlayer parent")
+		return
+	skeleton.reset_bone_poses()
+	print("[AnimLab] pose reset to rest — preview any take from a clean baseline")
 
 
 func _ready() -> void:

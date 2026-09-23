@@ -7,6 +7,8 @@ extends RefCounted
 ## Slots carry legacy clips (body/stance agnostic fallback) plus an optional
 ## "variants" list of {match: {body, stance}, clips, active} entries — the
 ## resolver picks the best body/stance match and falls back to legacy clips.
+## Variants accept an optional "phases" object (2H attack timing): merged
+## per-key over the slot phases for markers and combat reads.
 ## Alias convention for curated takes: action__body__stance__NN (double
 ## underscore = field boundary, single underscore = word separator).
 ## Tolerant (ADR-009): missing clips warn at boot and fall back to the first
@@ -98,40 +100,120 @@ static func validate_moveset(obj: Dictionary) -> PackedStringArray:
 			var vactive := int((v as Dictionary).get("active", 0))
 			if not vclips.is_empty() and (vactive < 0 or vactive >= vclips.size()):
 				issues.append("moveset slot '%s' variants[%d] active=%d out of range (clamps into range)" % [name, vi, vactive])
+			if (v as Dictionary).has("phases"):
+				for issue in _check_phases((v as Dictionary).get("phases"), "slot '%s' variants[%d]" % [name, vi]):
+					issues.append(issue)
 		if not StringName(name) in KNOWN_SLOTS:
 			issues.append("moveset slot '%s' unknown (ignored)" % name)
 		var loop = slot.get("loop", false)
 		if not (loop is bool):
 			issues.append("moveset slot '%s' loop must be a boolean" % name)
 		var phases: Variant = slot.get("phases", {})
-		if not phases is Dictionary:
-			issues.append("moveset slot '%s' phases must be an object" % name)
-		else:
-			for key in ["attack_start", "release_start", "windup_speed", "attack_speed", "release_speed", "stamina_cost", "sweep_start", "contact_time"]:
-				var v: Variant = (phases as Dictionary).get(key, 0.0)
-				if not v is float and not v is int:
-					issues.append("moveset slot '%s' phases.%s must be a number" % [name, key])
-		var a := float((phases as Dictionary).get("attack_start", 0.0))
-		var r := float((phases as Dictionary).get("release_start", 0.0))
-		if r < a:
-			issues.append("moveset slot '%s' phases.release_start < attack_start" % name)
-		var impact: Variant = (phases as Dictionary).get("impact", {})
-		if not impact is Dictionary:
-			issues.append("moveset slot '%s' phases.impact must be an object" % name)
-		else:
-			for key in ["damage", "critical_multiplier", "hitstop_frames", "shake_scale"]:
-				var v: Variant = (impact as Dictionary).get(key, 0.0)
-				if not v is float and not v is int:
-					issues.append("moveset slot '%s' phases.impact.%s must be a number" % [name, key])
-		var rebound: Variant = (phases as Dictionary).get("rebound", {})
-		if not rebound is Dictionary:
-			issues.append("moveset slot '%s' phases.rebound must be an object" % name)
-		elif not (rebound as Dictionary).is_empty():
-			for key in ["frames", "speed", "hold_time", "reblend_time"]:
-				var v: Variant = (rebound as Dictionary).get(key, 0.0)
-				if not v is float and not v is int:
-					issues.append("moveset slot '%s' phases.rebound.%s must be a number" % [name, key])
+		for issue in _check_phases(phases, "slot '%s'" % name):
+			issues.append(issue)
 	return issues
+
+
+## Phase-shape checks shared by slot phases and variant phases (2H attack
+## timing lives on the variant). [param owner] renders as "slot 'x'" or
+## "slot 'x' variants[i]" inside the issue strings.
+static func _check_phases(phases: Variant, owner: String) -> PackedStringArray:
+	var issues := PackedStringArray()
+	if not phases is Dictionary:
+		issues.append("moveset %s phases must be an object" % owner)
+		return issues
+	for key in ["attack_start", "release_start", "windup_speed", "attack_speed", "release_speed", "stamina_cost", "sweep_start", "contact_time"]:
+		var v: Variant = (phases as Dictionary).get(key, 0.0)
+		if not v is float and not v is int:
+			issues.append("moveset %s phases.%s must be a number" % [owner, key])
+	var a := float((phases as Dictionary).get("attack_start", 0.0))
+	var r := float((phases as Dictionary).get("release_start", 0.0))
+	if r < a:
+		issues.append("moveset %s phases.release_start < attack_start" % owner)
+	var impact: Variant = (phases as Dictionary).get("impact", {})
+	if not impact is Dictionary:
+		issues.append("moveset %s phases.impact must be an object" % owner)
+	else:
+		for key in ["damage", "critical_multiplier", "hitstop_frames", "shake_scale"]:
+			var v: Variant = (impact as Dictionary).get(key, 0.0)
+			if not v is float and not v is int:
+				issues.append("moveset %s phases.impact.%s must be a number" % [owner, key])
+	var rebound: Variant = (phases as Dictionary).get("rebound", {})
+	if not rebound is Dictionary:
+		issues.append("moveset %s phases.rebound must be an object" % owner)
+	elif not (rebound as Dictionary).is_empty():
+		for key in ["frames", "speed", "hold_time", "reblend_time"]:
+			var v: Variant = (rebound as Dictionary).get(key, 0.0)
+			if not v is float and not v is int:
+				issues.append("moveset %s phases.rebound.%s must be a number" % [owner, key])
+	return issues
+
+
+## Slot phases merged with the winning variant's phases (2H attack timing):
+## variant keys win per-key, nested impact/rebound merge per-key too, absent
+## keys fall back to the slot. any/any callers get the slot phases untouched.
+static func _merged_variant_phases(slot: Dictionary, body: StringName, stance: StringName) -> Dictionary:
+	var src: Variant = slot.get("phases", {})
+	var out := (src as Dictionary).duplicate() if src is Dictionary else {}
+	if body == &"any" and stance == &"any":
+		return out
+	var best := {}
+	var best_score := -1
+	for v in slot.get("variants", []):
+		if not v is Dictionary:
+			continue
+		var s := _variant_score((v as Dictionary).get("match", {}) as Dictionary, body, stance)
+		if s > best_score:
+			best_score = s
+			best = v
+	if best_score < 0:
+		return out
+	var vp: Variant = (best as Dictionary).get("phases", {})
+	if not vp is Dictionary:
+		return out
+	for k in (vp as Dictionary):
+		var vv: Variant = (vp as Dictionary)[k]
+		if vv is Dictionary and out.get(k) is Dictionary:
+			var m := (out[k] as Dictionary).duplicate()
+			for k2 in (vv as Dictionary):
+				m[k2] = (vv as Dictionary)[k2]
+			out[k] = m
+		else:
+			out[k] = vv
+	return out
+
+
+## Effective phases for a slot at a body/stance (defaults filled, winning
+## variant merged over slot phases): the stance-aware twin of phases_for.
+## phases_for stays slot-level (land_contact and other stance-agnostic
+## readers are untouched).
+static func effective_phases(obj: Dictionary, slot: StringName, body: StringName, stance: StringName) -> Dictionary:
+	var out := (PHASE_DEFAULTS as Dictionary).duplicate()
+	out["impact"] = (IMPACT_DEFAULTS as Dictionary).duplicate()
+	out["rebound"] = (REBOUND_DEFAULTS as Dictionary).duplicate()
+	var slots: Dictionary = obj.get("slots", {})
+	var entry: Variant = slots.get(String(slot), {})
+	if not entry is Dictionary:
+		return out
+	var merged := _merged_variant_phases(entry, body, stance)
+	for key in PHASE_DEFAULTS:
+		if merged.has(key):
+			out[key] = float(merged[key])
+	var impact: Variant = merged.get("impact", {})
+	if impact is Dictionary:
+		var imerged := (IMPACT_DEFAULTS as Dictionary).duplicate()
+		for key in imerged:
+			if (impact as Dictionary).has(key):
+				imerged[key] = float((impact as Dictionary)[key])
+		out["impact"] = imerged
+	var rebound: Variant = merged.get("rebound", {})
+	if rebound is Dictionary and not (rebound as Dictionary).is_empty():
+		var rmerged := (REBOUND_DEFAULTS as Dictionary).duplicate()
+		for key in rmerged:
+			if (rebound as Dictionary).has(key):
+				rmerged[key] = float((rebound as Dictionary)[key])
+		out["rebound"] = rmerged
+	return out
 
 
 ## Raw object ({} when missing/corrupt — JsonFile quarantines corruption).
@@ -175,7 +257,7 @@ static func resolve_clips(obj: Dictionary, player: AnimationPlayer, body: String
 			push_warning("[Moveset] slot '%s': nothing found for body '%s' stance '%s'" % [key, body, stance])
 		out[name] = found
 		loops[name] = _set_loop(player, found, bool(slot.get("loop", false)))
-		markers[name] = _set_markers(player, found, slot.get("phases", {}))
+		markers[name] = _set_markers(player, found, _merged_variant_phases(slot, body, stance))
 	print("[Moveset] body=%s stance=%s loops %s" % [body, stance, str(loops)])
 	print("[Moveset] markers %s" % str(markers))
 	return out
