@@ -1,8 +1,8 @@
-[gd_scene format=3 uid="uid://d7runp2loop01"]
+[gd_scene format=3 uid="uid://ddy2n5c4huaa"]
 
-[ext_resource type="Script" path="res://src/runtime/map_runner.gd" id="1"]
+[ext_resource type="Script" uid="uid://do6lsw0n3d401" path="res://src/runtime/map_runner.gd" id="1"]
 [ext_resource type="PackedScene" uid="uid://cqk7playerp21" path="res://scenes/prefabs/player.tscn" id="2"]
-[ext_resource type="Environment" path="res://scenes/editors/env_default.tres" id="3"]
+[ext_resource type="Environment" path="res://scenes/ingame_editors/env_default.tres" id="3"]
 
 [node name="Run" type="Node3D"]
 script = ExtResource("1")

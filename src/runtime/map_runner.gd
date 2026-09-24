@@ -8,7 +8,7 @@ extends Node3D
 ## yet (P6/P7) — this proves the maker loop, not the game.
 const RUN_PENDING_KEY := "game/pending_map"
 const EDITOR_PENDING_KEY := "editor/pending_map"
-const EDITOR_SCENE := "res://scenes/editors/map_editor.tscn"
+const EDITOR_SCENE := "res://scenes/ingame_editors/map_editor.tscn"
 const MAPS_DIR := "user://maps"
 const SPAWN_DROP := 2.0
 

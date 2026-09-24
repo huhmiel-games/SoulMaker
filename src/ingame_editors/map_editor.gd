@@ -22,7 +22,7 @@ const SELECT_MASK := GROUND_LAYER | SELECTOR_LAYER
 const MAPS_DIR := "user://maps"
 ## Menu scene (QUIT returns here) + the GameState key the menu uses to hand
 ## over the map to open ("" = none, boot empty as usual).
-const MENU_SCENE := "res://scenes/editors/map_editor_menu.tscn"
+const MENU_SCENE := "res://scenes/ingame_editors/map_editor_menu.tscn"
 const PENDING_KEY := "editor/pending_map"
 ## Game run scene (PLAYTEST hands it the live map) + the GameState key for
 ## the symmetric handover. The run returns here via PENDING_KEY (existing

@@ -1,6 +1,6 @@
 [gd_scene format=3]
 
-[ext_resource type="Environment" path="res://scenes/editors/env_default.tres" id="4"]
+[ext_resource type="Environment" path="res://scenes/ingame_editors/env_default.tres" id="4"]
 [ext_resource type="PackedScene" path="res://scenes/prefabs/player.tscn" id="5"]
 [ext_resource type="Script" path="res://src/runtime/enemies/soldier_enemy.gd" id="6"]
 [ext_resource type="Script" path="res://scenes/tests/shove_harness.gd" id="8"]

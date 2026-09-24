@@ -9,7 +9,7 @@ extends GenericMenu
 ## deferred.
 
 const MAPS_DIR := "user://maps"
-const EDITOR_SCENE := "res://scenes/editors/map_editor.tscn"
+const EDITOR_SCENE := "res://scenes/ingame_editors/map_editor.tscn"
 const HUB_SCENE := "res://scenes/main.tscn"
 const PENDING_KEY := "editor/pending_map"
 

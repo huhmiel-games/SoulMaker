@@ -6,7 +6,7 @@ extends GenericMenu
 ## quits the game directly (nothing sits above the hub).
 
 const HUB_ENTRIES: Array = [
-	{"label": "Map editor", "open": "res://scenes/editors/map_editor_menu.tscn"},
+	{"label": "Map editor", "open": "res://scenes/ingame_editors/map_editor_menu.tscn"},
 	{"label": "EXIT", "quit": true},
 ]
 

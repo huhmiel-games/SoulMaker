@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://j4qlgcc8lw61"]
 
-[ext_resource type="Environment" path="res://scenes/editors/env_default.tres" id="4"]
+[ext_resource type="Environment" path="res://scenes/ingame_editors/env_default.tres" id="4"]
 [ext_resource type="PackedScene" uid="uid://cqk7playerp21" path="res://scenes/prefabs/player.tscn" id="5"]
 [ext_resource type="Script" uid="uid://bbafwoae82175" path="res://scenes/tests/fake_enemy.gd" id="6"]
 [ext_resource type="Script" uid="uid://djnughxi6e4qg" path="res://src/runtime/impact_host.gd" id="7"]
