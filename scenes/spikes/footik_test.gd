@@ -1,6 +1,6 @@
 extends Node3D
 
-const AnimPrepScript := preload("res://src/tools/spikes/anim_prep.gd")
+const AnimPrepScript := preload("res://src/cli_tools/spikes/anim_prep.gd")
 const MALE_SCENE := preload("res://assets/meshes/characters/Superhero_Male_FullBody.gltf")
 const LIBRARY := "res://assets/animations/sword_and_shield_anims.glb"
 

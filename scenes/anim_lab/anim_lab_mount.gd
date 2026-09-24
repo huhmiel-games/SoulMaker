@@ -6,7 +6,7 @@ extends AnimationPlayer
 ## nothing to launch, just open the scene and scrub. Dev only. This is the
 ## SAME player_pack.res the game mounts: one file, one bake, lab and game
 ## always in sync. Re-bake when packs change:
-## <godot> --headless --path . --script res://src/tools/bake_player_pack.gd
+## <godot> --headless --path . --script res://src/cli_tools/bake_player_pack.gd
 const PACK := "res://scenes/anim_lab/player_pack.res"
 
 

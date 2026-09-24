@@ -26,14 +26,14 @@
 
 ## Input
 
-- **Device parity (standing rule, editors + game)**: keyboard/mouse and gamepad are the same logical device. No code path may branch on which device drives it — every action resolves through a named `InputManager` action (arrows/D-pad share actions, A/E share actions, …); no raw `Input.*` polling and no device-specific paths in `src/`. The gamepad defines the capabilities (source of truth): the keyboard mirrors them — extra mirrors of an existing capability are allowed (Q, Shift+LMB), new capabilities are not. R1-pad chords are editor-only; Shift-key chords exist in every profile. The keyboard sets are **frozen** (editor table + game table; features/11 wins over DS3 PC). Enforced headless by `src/tools/input_audit.gd` — run it after any input change. Consequences: no catalog drag & drop (placement is arrows/D-pad + A/E), no OS file-drop import (file-picker only). Per-context device tables live in `concepts_and_docs/editor_input_mapping.md`.
+- **Device parity (standing rule, editors + game)**: keyboard/mouse and gamepad are the same logical device. No code path may branch on which device drives it — every action resolves through a named `InputManager` action (arrows/D-pad share actions, A/E share actions, …); no raw `Input.*` polling and no device-specific paths in `src/`. The gamepad defines the capabilities (source of truth): the keyboard mirrors them — extra mirrors of an existing capability are allowed (Q, Shift+LMB), new capabilities are not. R1-pad chords are editor-only; Shift-key chords exist in every profile. The keyboard sets are **frozen** (editor table + game table; features/11 wins over DS3 PC). Enforced headless by `src/cli_tools/input_audit.gd` — run it after any input change. Consequences: no catalog drag & drop (placement is arrows/D-pad + A/E), no OS file-drop import (file-picker only). Per-context device tables live in `concepts_and_docs/editor_input_mapping.md`.
 
 ## Folder structure
 
 - `concepts_and_docs/` — design docs (English); `features.md` is the master list.
 - `data/` — all game content as JSON (data-driven):
   - `schema/` world/character/prefab schemas (versioned), `catalog/` starter manifest + its schema, `items/` item instances, `characters/` base humanoid + morphs, `enemies/` definitions, `worlds/` world compositions, `localization/` `en` key table (later).
-- `src/` — GDScript organized by concept: `autoloads/`, `runtime/` (combat, bonfire, camera, streaming), `editors/`, `ui/`, `dataio/` (JSON load/validate), `tools/` (headless: `import_check.gd`, `build_pck`, data validation).
+- `src/` — GDScript organized by concept: `autoloads/`, `runtime/` (combat, bonfire, camera, streaming), `ingame_editors/` (maker in-game), `ui/`, `dataio/` (JSON load/validate), `cli_tools/` (headless: `import_check.gd`, `build_pck`, data validation).
 - `scenes/` — `.tscn` (main, prefabs, UI screens, humanoid template).
 - `creator_docs/` — short creator-facing docs (decision I).
 - `reference/` — read-only reference snippets salvaged from the sibling project `rpg-base` (toon shaders, state-machine pattern) plus the gitignored `godot47_docs/` class-ref cache; never imported by the game, see `reference/README.md`.

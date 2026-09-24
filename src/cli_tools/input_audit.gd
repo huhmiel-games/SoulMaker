@@ -1,7 +1,7 @@
 extends SceneTree
 
 ## Headless freeze-enforcer for the input mapping (AGENTS.md ## Input).
-## Run: <godot> --headless --path . --script res://src/tools/input_audit.gd
+## Run: <godot> --headless --path . --script res://src/cli_tools/input_audit.gd
 ## Checks (any FAIL exits nonzero, one line per violation):
 ## 1. Per profile, no two actions share one discrete binding: same key code,
 ##    same (btn, shifted), same (mouse, shifted, mod) or same trigger.

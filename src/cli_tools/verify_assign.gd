@@ -5,7 +5,7 @@ extends SceneTree
 ## saved) — legacy rewrite, variant upsert/create, loop/phase overrides and
 ## -1 keep, unknown body/stance rejection, unknown slot tolerance, and
 ## resolve_clip picking up the assigned takes. Pure Moveset — no scene.
-## Run: <godot> --headless --path . --script res://src/tools/verify_assign.gd
+## Run: <godot> --headless --path . --script res://src/cli_tools/verify_assign.gd
 
 var _fail := 0
 var _count := 0

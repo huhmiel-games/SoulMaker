@@ -4,7 +4,7 @@ extends SceneTree
 ## runtime library — same merge+filter as the lab, exported on demand via
 ## the lab's "Export player pack" button (or here, headless). The game mounts
 ## it directly when present and skips rebuilding from the .glb packs.
-## Run: <godot> --headless --path . --script res://src/tools/bake_player_pack.gd
+## Run: <godot> --headless --path . --script res://src/cli_tools/bake_player_pack.gd
 const OUT_PACK := PlayerPackBaker.PLAYER_PACK_OUT
 
 

@@ -5,7 +5,7 @@ extends Node
 ## node): while scrubbing takes in the editor Animation dock, "Hide current
 ## take" appends the previewed take to anim_lab_hidden.json + removes it live
 ## + re-saves the baked .res — never shown again until restored (remove its
-## line from the JSON + re-bake with src/tools/bake_player_pack.gd).
+## line from the JSON + re-bake with src/cli_tools/bake_player_pack.gd).
 ## "Rename current take" renames the previewed take to the curated alias in
 ## [member rename_to] (action__body__stance__NN, __ = field boundary): live
 ## rename + anim_lab_renames.json append (replayed on every bake BEFORE the
@@ -99,7 +99,7 @@ var _assign_dialog: ConfirmationDialog = null
 ## Full rebuild of player_pack.res from the JSONs (moveset packs + lab packs,
 ## renames replayed, hidden removed): use after hand-editing hidden/renames,
 ## or to reconsolidate the pack. Same bake as
-## --script res://src/tools/bake_player_pack.gd. Hide/Rename buttons already
+## --script res://src/cli_tools/bake_player_pack.gd. Hide/Rename buttons already
 ## write straight into the pack, so this is only needed for bulk changes.
 func bake_player_pack() -> void:
 	var err := PlayerPackBaker.bake_to(get_tree().root, PlayerPackBaker.PLAYER_PACK_OUT, "Pack")

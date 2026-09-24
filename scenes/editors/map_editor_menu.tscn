@@ -1,6 +1,6 @@
 [gd_scene format=3]
 
-[ext_resource type="Script" path="res://src/editors/map_menu.gd" id="1"]
+[ext_resource type="Script" uid="uid://4x68uuunkh2x" path="res://src/ingame_editors/map_menu.gd" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/ui/generic_menu.tscn" id="2"]
 
 [node name="MapMenu" instance=ExtResource("2")]

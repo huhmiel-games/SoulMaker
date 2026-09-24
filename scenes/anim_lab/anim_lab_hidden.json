@@ -1,5 +1,5 @@
 {
-	"_note": "Takes listed in hidden are skipped by bake_player_pack.gd and never shown in the lab again. Restore: remove the line + re-bake (--script res://src/tools/bake_player_pack.gd). Source .glb files are never touched.",
+	"_note": "Takes listed in hidden are skipped by bake_player_pack.gd and never shown in the lab again. Restore: remove the line + re-bake (--script res://src/cli_tools/bake_player_pack.gd). Source .glb files are never touched.",
 	"hidden": [
 		"adventure__cover to stand",
 		"adventure__cover to stand (2)",

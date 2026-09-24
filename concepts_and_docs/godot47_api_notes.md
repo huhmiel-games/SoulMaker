@@ -82,7 +82,7 @@ The `<path>` must already exist. The dump covers the full built-in API of the
 
 - Retargeting import-time renames bones to profile names, so animation glm
   tracks (subnames) match the character skeleton 1:1 — `split_body_parts()`
-  in the layers spike (`src/tools/spikes/anim_prep.gd`) relies on this.
+  in the layers spike (`src/cli_tools/spikes/anim_prep.gd`) relies on this.
 - **Autoload identifiers are NOT resolvable in standalone `--headless --script`
   compile** (`Identifier not found: GameState`) — that mode never registers
   project autoloads. Validate autoload-referencing scenes by *running* them

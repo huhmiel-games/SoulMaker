@@ -145,7 +145,7 @@ slopes get walked by the real walker. Until then relief is judged visually.
 
 `InputManager.PROFILES["game"]` holds the frozen game table below —
 defined but NOT consumed (mapped-not-consumed, `rename` precedent).
-`src/tools/input_audit.gd` validates it headless (bindings unique per
+`src/cli_tools/input_audit.gd` validates it headless (bindings unique per
 profile, pad+key coverage per capability, consumers name real actions, zero
 raw `Input.*` outside `input_manager.gd`). Layout (features/11 wins over
 DS3 PC where they conflict, DS3 fills the gaps):

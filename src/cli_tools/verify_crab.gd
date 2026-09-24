@@ -5,7 +5,7 @@ extends SceneTree
 ## asserts the expected clips (melee = sword_shield default, greatsword =
 ## two_hand, female = female strafe + melee backward fallback, adventure
 ## legacy untouched). Pure Moveset.resolve_clip — no scene, no autoloads.
-## Run: <godot> --headless --path . --script res://src/tools/verify_crab.gd
+## Run: <godot> --headless --path . --script res://src/cli_tools/verify_crab.gd
 const PACK := "res://scenes/anim_lab/player_pack.res"
 
 const CASES := [

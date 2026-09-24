@@ -18,7 +18,7 @@ is the base; this file only pins what the project adds or sharpens.
 | Folder | Contains |
 |---|---|
 | `scenes/` | `.tscn`; `tests/` interactive test scenes, `spikes/` throwaway experiments |
-| `src/` | GDScript by concept: `autoloads/`, `runtime/`, `editors/`, `ui/`, `dataio/`, `tools/` (headless validators + `tools/spikes/`) |
+| `src/` | GDScript by concept: `autoloads/`, `runtime/`, `ingame_editors/`, `ui/`, `dataio/`, `cli_tools/` (headless validators + `cli_tools/spikes/`) |
 | `data/` | JSON content only (`schema/`, `catalog/`, `items/`, `characters/`, `enemies/`, `worlds/`, `localization/`) |
 | `assets/` | 1st-party local sources, gitignored (packed at P10) |
 | `concepts_and_docs/` | design docs (English) |

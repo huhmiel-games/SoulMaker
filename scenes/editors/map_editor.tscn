@@ -1,10 +1,10 @@
 [gd_scene format=3 uid="uid://bbj2o1d33y53k"]
 
-[ext_resource type="Script" uid="uid://d3dqkwetg7f0o" path="res://src/editors/map_editor.gd" id="1"]
-[ext_resource type="Script" uid="uid://c18ex1d2emvvs" path="res://src/editors/orbit_camera.gd" id="2"]
-[ext_resource type="Script" uid="uid://bhitaha28qo03" path="res://src/editors/catalog_panel.gd" id="4"]
+[ext_resource type="Script" uid="uid://d3dqkwetg7f0o" path="res://src/ingame_editors/map_editor.gd" id="1"]
+[ext_resource type="Script" uid="uid://c18ex1d2emvvs" path="res://src/ingame_editors/orbit_camera.gd" id="2"]
+[ext_resource type="Script" uid="uid://bhitaha28qo03" path="res://src/ingame_editors/catalog_panel.gd" id="4"]
 [ext_resource type="Environment" path="res://scenes/editors/env_default.tres" id="5"]
-[ext_resource type="PackedScene" path="res://scenes/ui/editor_hud.tscn" id="6"]
+[ext_resource type="PackedScene" uid="uid://r3pi6du05b31" path="res://scenes/ui/editor_hud.tscn" id="6"]
 [ext_resource type="PackedScene" path="res://scenes/ui/modal_dialog.tscn" id="7"]
 
 [sub_resource type="StandardMaterial3D" id="selection_mat"]

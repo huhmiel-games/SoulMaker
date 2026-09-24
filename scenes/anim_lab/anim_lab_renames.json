@@ -1,5 +1,5 @@
 {
-	"_note": "Curated take aliases (old pack__take -> new action__body__stance__NN): replayed by PlayerPackBaker.bake_to on every bake BEFORE the hidden filter, so the lab dock and the game only ever see the new names. Double underscore = field boundary, single underscore = word separator. Source .glb files are never touched. Written by the lab's 'Rename current take' button (which also updates player_moveset.json clips); hand-editable + re-bake (--script res://src/tools/bake_player_pack.gd).",
+	"_note": "Curated take aliases (old pack__take -> new action__body__stance__NN): replayed by PlayerPackBaker.bake_to on every bake BEFORE the hidden filter, so the lab dock and the game only ever see the new names. Double underscore = field boundary, single underscore = word separator. Source .glb files are never touched. Written by the lab's 'Rename current take' button (which also updates player_moveset.json clips); hand-editable + re-bake (--script res://src/cli_tools/bake_player_pack.gd).",
 	"renames": {
 		"adventure__idle": "adventure__idle look around",
 		"adventure__idle (2)": "adventure__idle",
