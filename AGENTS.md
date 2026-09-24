@@ -33,7 +33,7 @@
 - `concepts_and_docs/` — design docs (English); `features.md` is the master list.
 - `data/` — all game content as JSON (data-driven):
   - `schema/` world/character/prefab schemas (versioned), `catalog/` starter manifest + its schema, `items/` item instances, `characters/` base humanoid + morphs, `enemies/` definitions, `worlds/` world compositions, `localization/` `en` key table (later).
-- `src/` — GDScript organized by concept: `autoloads/`, `runtime/` (combat, bonfire, camera, streaming), `ingame_editors/` (maker in-game), `ui/`, `dataio/` (JSON load/validate), `cli_tools/` (headless: `import_check.gd`, `build_pck`, data validation).
+- `src/` — GDScript organized by concept: `autoloads/`, `runtime/` (combat, bonfire, camera, streaming), `ingame_editors/` (maker in-game), `ui/`, `dataio/` (JSON load/validate), `cli_tools/` (headless: `import_check.gd`, `build_pck`, data validation), `editor_tools/` (`@tool` Godot-editor helpers, never in game).
 - `scenes/` — `.tscn` (main, prefabs, UI screens, humanoid template).
 - `creator_docs/` — short creator-facing docs (decision I).
 - `reference/` — read-only reference snippets salvaged from the sibling project `rpg-base` (toon shaders, state-machine pattern) plus the gitignored `godot47_docs/` class-ref cache; never imported by the game, see `reference/README.md`.

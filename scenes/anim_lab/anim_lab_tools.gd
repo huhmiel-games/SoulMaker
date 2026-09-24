@@ -590,44 +590,19 @@ func _execute_assign(obj: Dictionary, slot_name: String, body: String, stance: S
 ## shows what the write would change on the existing entry, Confirmer writes,
 ## Annuler drops. Editor-only (the button lives in the inspector).
 func _confirm_overwrite(slot_name: String, body: String, stance: String, short: String, loop: int, phases: Dictionary, diff: String) -> void:
-	if not Engine.is_editor_hint():
-		push_warning("[AnimLab] overwrite needs editor confirmation (headless: no-op)")
-		return
-	if is_instance_valid(_assign_dialog):
-		_assign_dialog.queue_free()
-		_assign_dialog = null
 	var where := "legacy" if body == "any" and stance == "any" else "variant {body:%s stance:%s}" % [body, stance]
-	var dlg := ConfirmationDialog.new()
-	dlg.title = "Overwrite moveset entry?"
-	dlg.dialog_text = "Assign '%s' would OVERWRITE slot '%s' %s:\n\n%s" % [short, slot_name, where, diff]
-	dlg.ok_button_text = "Overwrite"
-	dlg.cancel_button_text = "Cancel"
-	dlg.custom_minimum_size = Vector2(460, 0)
 	var params := {"slot": slot_name, "body": body, "stance": stance, "take": short, "loop": loop, "phases": phases}
-	dlg.confirmed.connect(_on_assign_confirmed.bind(params))
-	dlg.canceled.connect(_on_assign_canceled)
-	EditorInterface.get_base_control().add_child(dlg)
-	_assign_dialog = dlg
-	dlg.popup_centered()
+	_assign_dialog = EditorConfirm.ask("Overwrite moveset entry?",
+		"Assign '%s' would OVERWRITE slot '%s' %s:\n\n%s" % [short, slot_name, where, diff],
+		"Overwrite", _on_assign_confirmed.bind(params),
+		_assign_dialog if is_instance_valid(_assign_dialog) else null)
 
 
 ## Dialog Confirmed path: reloads the moveset fresh (never writes on stale
 ## data) and executes the pending assign.
 func _on_assign_confirmed(params: Dictionary) -> void:
-	_drop_assign_dialog()
-	_execute_assign(Moveset.load_object(), String(params["slot"]), String(params["body"]), String(params["stance"]), String(params["take"]), int(params["loop"]), params["phases"] as Dictionary)
-
-
-## Dialog Annuler path (or dialog replaced): drops the pending write.
-func _on_assign_canceled() -> void:
-	_drop_assign_dialog()
-	print("[AnimLab] overwrite canceled — moveset untouched")
-
-
-func _drop_assign_dialog() -> void:
-	if is_instance_valid(_assign_dialog):
-		_assign_dialog.queue_free()
 	_assign_dialog = null
+	_execute_assign(Moveset.load_object(), String(params["slot"]), String(params["body"]), String(params["stance"]), String(params["take"]), int(params["loop"]), params["phases"] as Dictionary)
 
 
 ## Points the picker at the take's first current usage after a write (the
