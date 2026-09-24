@@ -1,17 +1,26 @@
 @tool
 extends Node3D
 
-## AnimCreator step 1 — authoring-rig scaffold, hands position-only.
+## AnimCreator steps 1-2 — authoring-rig scaffold, hands position + wrist.
 ##
 ## Two hand handles + two elbow poles (plain scene nodes, moved with the
 ## standard Godot gizmo — mouse) drive the Phase 0-bis winning stack:
 ## FABRIK3D i64/d0.3 deterministic + BoneTwistDisperser3D on each arm.
+## Step 2 wrist follow is CODE-DRIVEN (global-pose override, relative mode):
+## CopyTransformModifier3D proved fully inert in 4.7.2 — node AND bone
+## references, minimal code-built skeleton, both pose channels, every flag
+## combo (axes/all, additive, absolute path, child order) — it processes
+## (signal fires) but never writes. So the tool applies the handle's
+## relative rotation itself each frame: rest cube = zero offset, turned
+## cube = poignée/revers at the wrist. The override wins non-destructively
+## and reads back through get_bone_global_pose (bake-safe, 1-frame lag in
+## live preview — invisible in the editor).
 ## TwoBoneIK3D stays as diagnostic fallback ([member solver_mode]).
 ## No InputManager, no key/mouse polling: this is an editor @tool scene
 ## (like anim_lab), not an in-game editor — the editor viewport IS the UI.
 ## Metrics publish to StateLabel (Label3D, editor-visible) + ready print.
-## Validator seam (tracking_error/elbow_dot/elbow_flexion/...) mirrors the
-## arm spike for the future bake guard (step 5).
+## Validator seam (tracking_error/elbow_dot/elbow_flexion/hand_bone_quat/...)
+## mirrors the arm spike for the future bake guard (step 5).
 ##
 ## API note: the FABRIK tuning setters (set_setting_count,
 ## set_root/end_bone_name, set_deterministic, set_max_iterations,
@@ -47,6 +56,13 @@ const FLEX_WARN := 150.0
 	set(v):
 		pole_dir = v
 		_apply_pole_dir()
+## Wrist orientation follow (step 2 gate): the handle's relative rotation
+## (vs its rest) is applied onto the hand bone as a global-pose override.
+## Toggle = A/B proof (off clears the override, hand falls back to solver).
+@export var wrist_copy := true:
+	set(v):
+		wrist_copy = v
+		_apply_wrist()
 @export_tool_button("Reset handles") var reset_action: Callable = reset_handles
 
 var _skeleton: Skeleton3D
@@ -56,6 +72,10 @@ var _twist := {}
 var _handles := {}
 var _poles := {}
 var _label: Label3D
+var _handle_rest_rot := {&"Left": Quaternion(), &"Right": Quaternion()}
+## Fresh solver snapshot per side (written mid-pipeline, consumed pre-pipeline).
+var _solve_pos := {}
+var _solve_fore := {}
 var _rest := {}
 var _elbow_rest := {}
 var _shoulder_rest := {}
@@ -98,11 +118,13 @@ func _build() -> void:
 		_snapshot_rest(side)
 		_build_two(side, handle, pole)
 		_build_fabrik(side, handle)
+		_handle_rest_rot[side] = handle.global_transform.basis.get_rotation_quaternion()
 	_apply_pole_dir()
 	_apply_fabrik_tuning()
 	_apply_solver()
+	_apply_wrist()
 	_built = true
-	print("[AnimCreator] ready — solver %s, fab i%d/d%.3f, pole %s (gizmo handles, no keys)" % [solver_mode, fab_iters, fab_delta, pole_dir])
+	print("[AnimCreator] ready — solver %s, fab i%d/d%.3f, pole %s, wrist %s (gizmo handles, no keys)" % [solver_mode, fab_iters, fab_delta, pole_dir, "on" if wrist_copy else "off"])
 
 
 func _find_skeleton() -> Skeleton3D:
@@ -195,6 +217,69 @@ func _build_fabrik(side: StringName, handle: Node3D) -> void:
 	_twist[side] = tw
 
 
+## Step 2 wrist follow (code-driven override, split across the pipeline):
+## the modifier signal stores fresh solver data (_store_solver_pose), and
+## _process writes the override from that snapshot (_apply_stored_wrist).
+## Position is NEVER read back and NEVER the handle (read-back self-pins the
+## first frame and hides the solver; the handle rips the hand past the arm's
+## max extension with zero visible limit — both reported 24/09 vs the spike)
+## — it is the stored parent-rebuilt solver origin, so the hand keeps the
+## honest solver position (stretch limit visible, like the spike).
+## Rotation is relative to the arm, never world-locked (reported 24/09:
+## FABRIK preserves end-bone world orientation, so fingers froze on X):
+## live parent × bind rest-local × cube delta — the wrist follows the
+## forearm when translating, plus the authored cube rotation on top.
+## No hand read-back anywhere, no feedback loop (the parent is never
+## overridden). get_bone_global_pose_no_override is unusable (bind-pose
+## semantics, not solver pose — verified by probes, avoided).
+## Solver snapshot (mid-pipeline, fresh): parent-rebuilt hand origin (pure
+## solver — no override on the parent) + parent world rotation (the wrist
+## base — see below). Written to the skeleton by _process.
+func _store_solver_pose(side: StringName) -> void:
+	if _skeleton == null or _handles.is_empty():
+		return
+	if not _handles.has(side):
+		return
+	var bones: Dictionary = ARM_BONES[side]
+	var hand_idx := _skeleton.find_bone(bones["end"])
+	if hand_idx == -1:
+		return
+	var parent_idx := _skeleton.get_bone_parent(hand_idx)
+	var parent_global: Transform3D = _skeleton.global_transform * _skeleton.get_bone_global_pose(parent_idx)
+	# Origin in skeleton space (override space); rotation in world frame.
+	_solve_pos[side] = (_skeleton.get_bone_global_pose(parent_idx) * _skeleton.get_bone_rest(hand_idx)).origin
+	_solve_fore[side] = parent_global.basis.get_rotation_quaternion()
+
+
+## Override write (pre-pipeline _process, from the stored snapshot): the hand
+## keeps the honest solver position and takes its orientation from the live
+## parent bone × the bind rest-local × the cube delta — i.e. the wrist is
+## relative to the arm (fingers follow the forearm when translating, like a
+## real wrist), plus the authored cube rotation on top. No read-back of the
+## hand, no feedback loop (the parent is never overridden).
+func _apply_stored_wrist() -> void:
+	if _skeleton == null or _handles.is_empty() or not wrist_copy:
+		return
+	if _solve_pos.is_empty():
+		return
+	for side in ARM_BONES:
+		if not _solve_pos.has(side) or not _solve_fore.has(side) or not _handles.has(side):
+			continue
+		var handle: Node3D = _handles[side]
+		var hq: Quaternion = handle.global_transform.basis.get_rotation_quaternion()
+		var h0: Quaternion = _handle_rest_rot.get(side, Quaternion())
+		var delta: Quaternion = h0.inverse() * hq
+		var hand_idx := _skeleton.find_bone((ARM_BONES[side] as Dictionary)["end"])
+		if hand_idx == -1:
+			continue
+		# Wrist relative to the arm: live parent × bind rest-local × delta.
+		var rest_local: Quaternion = _skeleton.get_bone_rest(hand_idx).basis.get_rotation_quaternion()
+		var world_q: Quaternion = (_solve_fore[side] as Quaternion) * rest_local * delta
+		var sk_q: Quaternion = _skeleton.global_transform.basis.get_rotation_quaternion()
+		var target := Transform3D(Basis(sk_q.inverse() * world_q * sk_q), _solve_pos[side] as Vector3)
+		_skeleton.set_bone_global_pose_override(hand_idx, target, 1.0, true)
+
+
 ## Solver switch: toggles active flags only — handles are user-owned, never
 ## reset here (unlike the spike, whose targets were code-driven).
 func _apply_solver() -> void:
@@ -206,6 +291,22 @@ func _apply_solver() -> void:
 		(_ik[side] as TwoBoneIK3D).active = solver_mode == "two"
 		(_fabrik[side] as FABRIK3D).active = solver_mode == "fabrik-arm" or solver_mode == "fabrik-twist"
 		(_twist[side] as BoneTwistDisperser3D).active = solver_mode == "fabrik-twist"
+	_apply_wrist()
+
+
+## Wrist toggle (A/B proof): off clears the override, the hand falls back
+## to the raw solver pose. Only our overrides live on this skeleton.
+## No other state to reset (no feedback loop by construction).
+func _apply_wrist() -> void:
+	if _skeleton == null:
+		return
+	if not wrist_copy:
+		_skeleton.clear_bones_global_pose_override()
+
+
+func set_wrist_copy(v: bool) -> void:
+	wrist_copy = v
+	_apply_wrist()
 
 
 func _apply_fabrik_tuning() -> void:
@@ -238,9 +339,16 @@ func _pole_dir_value() -> int:
 	return SkeletonModifier3D.SECONDARY_DIRECTION_MINUS_Z
 
 
-## Post-IK read (spike rule: only valid moment): hand tracking error +
-## elbow side vs the pole-side reference (dot < 0 = flipped) + flexion.
+## Post-IK read (spike rule: only valid moment) + solver snapshot.
+## PIPELINE ORDER (probes 24/09): node _process runs BEFORE skeleton
+## modifier processing (its reads see rest); modifier signals run post-solve
+## (fresh). A skeleton mutation made inside the signal does NOT survive
+## pipeline finalization (wrist follow fell to exactly 0.0°). So: the signal
+## only STORES fresh solver data, and _process WRITES the override from the
+## stored snapshot (1-frame lag, invisible, exact once settled — persistent
+## overrides set pre-pipeline do survive to render, proven twice).
 func _on_ik_processed(side: StringName) -> void:
+	_store_solver_pose(side)
 	var bones: Dictionary = ARM_BONES[side]
 	var hand_idx := _skeleton.find_bone(bones["end"])
 	var elbow_idx := _skeleton.find_bone(bones["middle"])
@@ -261,13 +369,16 @@ func _on_ik_processed(side: StringName) -> void:
 func _process(_delta: float) -> void:
 	if _label == null or _skeleton == null:
 		return
+	# Wrist write (pre-pipeline, from the stored snapshot — see
+	# _on_ik_processed): label only reads below.
+	_apply_stored_wrist()
 	var lines := PackedStringArray()
 	for side in [&"Left", &"Right"]:
 		var flip := "FLIP" if float(_dot[side]) < 0.0 else "ok"
 		var flex := float(_flex[side])
 		var fwarn := " OVERFLEX" if flex > FLEX_WARN else ""
 		lines.append("%s err=%.1fmm elbow=%s (dot %.2f) flex=%.0f%s dist=%.0fcm" % [String(side), float(_err[side]) * 1000.0, flip, float(_dot[side]), flex, fwarn, float(_prox[side]) * 100.0])
-	lines.append("solver %s | fab i%d/d%.3f | pole %s | gizmo: drag handles" % [solver_mode, fab_iters, fab_delta, pole_dir])
+	lines.append("solver %s | fab i%d/d%.3f | pole %s | wrist %s | gizmo: drag/rotate handles" % [solver_mode, fab_iters, fab_delta, pole_dir, "on" if wrist_copy else "off"])
 	_label.text = "\n".join(lines)
 
 
@@ -284,6 +395,10 @@ func reset_handles() -> void:
 		var elbow_l: Vector3 = _elbow_rest.get(side, Vector3.ZERO)
 		var elbow_w: Vector3 = _skeleton.to_global(elbow_l)
 		(_handles[side] as Node3D).global_position = _skeleton.to_global(_rest[side] as Vector3)
+		(_handles[side] as Node3D).global_rotation = Vector3.ZERO
+		# Zero-point follows the reset (else a saved rotated handle would
+		# leave a stale rest-rot and offset the wrist after reset).
+		_handle_rest_rot[side] = Quaternion()
 		(_poles[side] as Node3D).global_position = elbow_w + back * 0.45 + Vector3(0, 0.1, 0)
 	print("[AnimCreator] handles reset")
 
@@ -316,3 +431,16 @@ func elbow_flexion(side: StringName) -> float:
 
 func hand_shoulder_dist(side: StringName) -> float:
 	return float(_prox.get(side, 0.0))
+
+
+## World orientation of the hand bone (step 2 gate: follow angle).
+func hand_bone_quat(side: StringName) -> Quaternion:
+	if _skeleton == null:
+		return Quaternion()
+	var bones: Dictionary = ARM_BONES.get(side, {})
+	if bones.is_empty():
+		return Quaternion()
+	var hand_idx := _skeleton.find_bone(bones["end"])
+	if hand_idx == -1:
+		return Quaternion()
+	return (_skeleton.global_transform * _skeleton.get_bone_global_pose(hand_idx)).basis.get_rotation_quaternion()
