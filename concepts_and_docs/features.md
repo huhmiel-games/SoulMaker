@@ -157,6 +157,7 @@ Legend per column: *Phase* refers to the roadmap phase (P0-P13); *Ref* points to
 | Editor error surfacing + validation banner (jump-to) | 🔒 | P1 | features/09 | Inline errors at save/export/preview |
 | Ladders (climbable level objects) | 🔒 | P3 | features/07 | Uses §1 climb locomotion |
 | Illusory walls (disappear on trigger/roll) | 🔒 | P5 | features/07 | World object + flag |
+| Animation creator (in-Godot authoring rig: hand/feet handles → authored clips) | 🟡 | P4 | WORKLOG anim_creator | Adaptation-first takes + specials deferred; fabrik-twist stack |
 
 ## 8. Character system (P4)
 
