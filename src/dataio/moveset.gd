@@ -216,6 +216,66 @@ static func effective_phases(obj: Dictionary, slot: StringName, body: StringName
 	return out
 
 
+## Assigns a clip to a slot (anim-lab "Assign current take" seam — pure, no
+## player needed, no side effects): body+stance any/any rewrites the legacy
+## clips (active reset to 0), anything else upserts the matching variant
+## (created when absent, appended — resolve_clip sorts by score so an exact
+## match wins regardless of JSON order). [param loop] -1 = keep, 0/1 = set.
+## [param phases] entries >= 0 override the written entry (slot in legacy,
+## variant otherwise — the boot merge falls back per-key). Missing slots are
+## created ({clips, active 0, loop false}). Returns {"ok": true, "where":
+## "legacy"|"variant ..."} or {"ok": false, "error": ...} on unknown
+## body/stance. Unknown slots are written (caller warns — the loader ignores
+## them until KNOWN_SLOTS grows).
+static func assign_clip(obj: Dictionary, slot_name: String, body: String, stance: String, clip: String, loop: int = -1, phases: Dictionary = {}) -> Dictionary:
+	if not StringName(body) in KNOWN_BODIES:
+		return {"ok": false, "error": "unknown body '%s'" % body}
+	if not StringName(stance) in KNOWN_STANCES:
+		return {"ok": false, "error": "unknown stance '%s'" % stance}
+	var slots: Variant = obj.get("slots", {})
+	if not slots is Dictionary:
+		slots = {}
+		obj["slots"] = slots
+	var entry: Variant = (slots as Dictionary).get(slot_name, {})
+	if not (slots as Dictionary).has(slot_name) or not entry is Dictionary:
+		entry = {"clips": [], "active": 0, "loop": false}
+		(slots as Dictionary)[slot_name] = entry
+	var target: Dictionary = entry as Dictionary
+	var where := "legacy"
+	if not (body == "any" and stance == "any"):
+		target = _upsert_assign_variant(entry as Dictionary, body, stance)
+		where = "variant {body:%s stance:%s}" % [body, stance]
+	target["clips"] = [clip]
+	target["active"] = 0
+	if loop == 0:
+		target["loop"] = false
+	elif loop == 1:
+		target["loop"] = true
+	var merged: Dictionary = (target.get("phases", {}) as Dictionary).duplicate() if target.get("phases") is Dictionary else {}
+	for k in phases:
+		var v: Variant = phases[k]
+		if (v is float or v is int) and float(v) >= 0.0:
+			merged[k] = float(v)
+	if not merged.is_empty():
+		target["phases"] = merged
+	return {"ok": true, "where": where}
+
+
+## Returns the variant entry matching body/stance, creating
+## {match, clips: [], active: 0} when absent.
+static func _upsert_assign_variant(slot: Dictionary, body: String, stance: String) -> Dictionary:
+	for v in slot.get("variants", []):
+		if v is Dictionary:
+			var m := (v as Dictionary).get("match", {}) as Dictionary
+			if str(m.get("body", "any")) == body and str(m.get("stance", "any")) == stance:
+				return v as Dictionary
+	if not slot.has("variants"):
+		slot["variants"] = []
+	var created := {"match": {"body": body, "stance": stance}, "clips": [], "active": 0}
+	(slot["variants"] as Array).append(created)
+	return created
+
+
 ## Raw object ({} when missing/corrupt — JsonFile quarantines corruption).
 static func load_object() -> Dictionary:
 	return JsonFile.load_object(PATH)
