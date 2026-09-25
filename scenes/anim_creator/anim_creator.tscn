@@ -73,6 +73,41 @@ position = Vector3(-0.463, 1.5555, -0.523)
 mesh = SubResource("PoleMesh")
 surface_material_override/0 = SubResource("MatPole")
 
+[node name="LeftFootHandle" type="Node3D" parent="."]
+position = Vector3(0.1143, 0.0865, -0.0875)
+
+[node name="LeftFootCube" type="MeshInstance3D" parent="LeftFootHandle"]
+mesh = SubResource("CubeMesh")
+surface_material_override/0 = SubResource("MatL")
+
+[node name="RightFootHandle" type="Node3D" parent="."]
+position = Vector3(-0.1143, 0.0865, -0.0875)
+
+[node name="RightFootCube" type="MeshInstance3D" parent="RightFootHandle"]
+mesh = SubResource("CubeMesh")
+surface_material_override/0 = SubResource("MatR")
+
+[node name="LeftKnee" type="Node3D" parent="."]
+position = Vector3(0.1143, 0.6424, 0.4139)
+
+[node name="LeftKneeCube" type="MeshInstance3D" parent="LeftKnee"]
+mesh = SubResource("PoleMesh")
+surface_material_override/0 = SubResource("MatPole")
+
+[node name="RightKnee" type="Node3D" parent="."]
+position = Vector3(-0.1143, 0.6424, 0.4139)
+
+[node name="RightKneeCube" type="MeshInstance3D" parent="RightKnee"]
+mesh = SubResource("PoleMesh")
+surface_material_override/0 = SubResource("MatPole")
+
+[node name="HipsHandle" type="Node3D" parent="."]
+position = Vector3(0, 0.9491, -0.043)
+
+[node name="HipsCube" type="MeshInstance3D" parent="HipsHandle"]
+mesh = SubResource("CubeMesh")
+surface_material_override/0 = SubResource("MatPole")
+
 [node name="StateLabel" type="Label3D" parent="."]
 position = Vector3(0, 2.05, 0)
 billboard = 1
