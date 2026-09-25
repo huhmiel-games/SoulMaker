@@ -15,7 +15,8 @@ extends Node3D
 ## cube = poignée/revers at the wrist. The override wins non-destructively
 ## and reads back through get_bone_global_pose (bake-safe, 1-frame lag in
 ## live preview — invisible in the editor).
-## TwoBoneIK3D stays as diagnostic fallback ([member solver_mode]).
+## Twist-only: TwoBoneIK3D and bare FABRIK live in the spike as reference —
+## this tool builds only the Phase 0-bis winner, each wrist feature written once.
 ## No InputManager, no key/mouse polling: this is an editor @tool scene
 ## (like anim_lab), not an in-game editor — the editor viewport IS the UI.
 ## Metrics publish to StateLabel (Label3D, editor-visible) + ready print.
@@ -34,14 +35,9 @@ const ARM_BONES := {
 }
 const FLEX_WARN := 150.0
 
-## Active solver (inspector dropdown, no keys): fabrik-twist = Phase 0-bis
-## winner, fabrik-arm = same chain without disperser, two = analytic fallback.
-@export_enum("fabrik-twist", "fabrik-arm", "two") var solver_mode := "fabrik-twist":
-	set(v):
-		solver_mode = v
-		if is_node_ready():
-			_apply_solver()
-			print("[AnimCreator] solver %s" % v)
+## Solver is fixed: FABRIK3D i64/d0.3 deterministic + BoneTwistDisperser3D
+## (Phase 0-bis winner). No solver switch — TwoBone / bare FABRIK stay in
+## the spike; every wrist feature is implemented once.
 ## FABRIK budget (0-bis winning tuning — live matches measured).
 @export var fab_iters := 64:
 	set(v):
@@ -51,11 +47,8 @@ const FLEX_WARN := 150.0
 	set(v):
 		fab_delta = clampf(v, 0.01, 1.0)
 		_apply_fabrik_tuning()
-## Elbow pole side (TwoBone only — FABRIK holds its plane without a pole).
-@export_enum("+X", "-X", "+Y", "-Y", "+Z", "-Z") var pole_dir := "-Z":
-	set(v):
-		pole_dir = v
-		_apply_pole_dir()
+## Elbow poles are gizmo-moved scene nodes used only as the elbow-side
+## reference for the flip metric (FABRIK holds its plane without a pole).
 ## Wrist orientation follow (step 2 gate): the handle's relative rotation
 ## (vs its rest) is applied onto the hand bone as a global-pose override.
 ## Toggle = A/B proof (off clears the override, hand falls back to solver).
@@ -66,7 +59,6 @@ const FLEX_WARN := 150.0
 @export_tool_button("Reset handles") var reset_action: Callable = reset_handles
 
 var _skeleton: Skeleton3D
-var _ik := {}
 var _fabrik := {}
 var _twist := {}
 var _handles := {}
@@ -116,15 +108,12 @@ func _build() -> void:
 		_handles[side] = handle
 		_poles[side] = pole
 		_snapshot_rest(side)
-		_build_two(side, handle, pole)
 		_build_fabrik(side, handle)
 		_handle_rest_rot[side] = handle.global_transform.basis.get_rotation_quaternion()
-	_apply_pole_dir()
 	_apply_fabrik_tuning()
-	_apply_solver()
 	_apply_wrist()
 	_built = true
-	print("[AnimCreator] ready — solver %s, fab i%d/d%.3f, pole %s, wrist %s (gizmo handles, no keys)" % [solver_mode, fab_iters, fab_delta, pole_dir, "on" if wrist_copy else "off"])
+	print("[AnimCreator] ready — fabrik-twist, fab i%d/d%.3f, wrist %s (gizmo handles, no keys)" % [fab_iters, fab_delta, "on" if wrist_copy else "off"])
 
 
 func _find_skeleton() -> Skeleton3D:
@@ -142,7 +131,6 @@ func _find_skeleton() -> Skeleton3D:
 
 ## Frees previously built runtime modifiers (hot-reload / re-entry safety).
 func _clear_modifiers() -> void:
-	_ik.clear()
 	_fabrik.clear()
 	_twist.clear()
 	if _skeleton == null:
@@ -174,23 +162,6 @@ func _snapshot_rest(side: StringName) -> void:
 	_reach[side] = shoulder_w.distance_to(hand_w)
 
 
-func _build_two(side: StringName, handle: Node3D, pole: Node3D) -> void:
-	var bones: Dictionary = ARM_BONES[side]
-	var ik := TwoBoneIK3D.new()
-	ik.name = "%sHandIK" % String(side)
-	ik.set_setting_count(1)
-	ik.set_root_bone_name(0, bones["upper"])
-	ik.set_middle_bone_name(0, bones["middle"])
-	ik.set_end_bone_name(0, bones["end"])
-	ik.set_pole_direction(0, _pole_dir_value())
-	_skeleton.add_child(ik)
-	ik.set_target_node(0, ik.get_path_to(handle))
-	ik.set_pole_node(0, ik.get_path_to(pole))
-	ik.influence = 1.0
-	ik.modification_processed.connect(_on_ik_processed.bind(side))
-	_ik[side] = ik
-
-
 func _build_fabrik(side: StringName, handle: Node3D) -> void:
 	var bones: Dictionary = ARM_BONES[side]
 	var farm := FABRIK3D.new()
@@ -204,6 +175,7 @@ func _build_fabrik(side: StringName, handle: Node3D) -> void:
 	farm.set_max_iterations(fab_iters)
 	farm.set_angular_delta_limit(fab_delta)
 	farm.influence = 1.0
+	farm.active = true
 	farm.modification_processed.connect(_on_ik_processed.bind(side))
 	_fabrik[side] = farm
 	var tw := BoneTwistDisperser3D.new()
@@ -213,6 +185,7 @@ func _build_fabrik(side: StringName, handle: Node3D) -> void:
 	tw.set_root_bone_name(0, bones["upper"])
 	tw.set_end_bone_name(0, bones["end"])
 	tw.set_twist_from_rest(0, true)
+	tw.active = true
 	tw.modification_processed.connect(_on_ik_processed.bind(side))
 	_twist[side] = tw
 
@@ -280,20 +253,6 @@ func _apply_stored_wrist() -> void:
 		_skeleton.set_bone_global_pose_override(hand_idx, target, 1.0, true)
 
 
-## Solver switch: toggles active flags only — handles are user-owned, never
-## reset here (unlike the spike, whose targets were code-driven).
-func _apply_solver() -> void:
-	if not _built and _fabrik.is_empty():
-		return
-	for side in ARM_BONES:
-		if not _ik.has(side):
-			continue
-		(_ik[side] as TwoBoneIK3D).active = solver_mode == "two"
-		(_fabrik[side] as FABRIK3D).active = solver_mode == "fabrik-arm" or solver_mode == "fabrik-twist"
-		(_twist[side] as BoneTwistDisperser3D).active = solver_mode == "fabrik-twist"
-	_apply_wrist()
-
-
 ## Wrist toggle (A/B proof): off clears the override, the hand falls back
 ## to the raw solver pose. Only our overrides live on this skeleton.
 ## No other state to reset (no feedback loop by construction).
@@ -315,28 +274,6 @@ func _apply_fabrik_tuning() -> void:
 	for side in _fabrik:
 		(_fabrik[side] as FABRIK3D).set_max_iterations(fab_iters)
 		(_fabrik[side] as FABRIK3D).set_angular_delta_limit(fab_delta)
-
-
-func _apply_pole_dir() -> void:
-	if _ik.is_empty():
-		return
-	for side in _ik:
-		(_ik[side] as TwoBoneIK3D).set_pole_direction(0, _pole_dir_value())
-
-
-func _pole_dir_value() -> int:
-	match pole_dir:
-		"+X":
-			return SkeletonModifier3D.SECONDARY_DIRECTION_PLUS_X
-		"-X":
-			return SkeletonModifier3D.SECONDARY_DIRECTION_MINUS_X
-		"+Y":
-			return SkeletonModifier3D.SECONDARY_DIRECTION_PLUS_Y
-		"-Y":
-			return SkeletonModifier3D.SECONDARY_DIRECTION_MINUS_Y
-		"+Z":
-			return SkeletonModifier3D.SECONDARY_DIRECTION_PLUS_Z
-	return SkeletonModifier3D.SECONDARY_DIRECTION_MINUS_Z
 
 
 ## Post-IK read (spike rule: only valid moment) + solver snapshot.
@@ -378,7 +315,7 @@ func _process(_delta: float) -> void:
 		var flex := float(_flex[side])
 		var fwarn := " OVERFLEX" if flex > FLEX_WARN else ""
 		lines.append("%s err=%.1fmm elbow=%s (dot %.2f) flex=%.0f%s dist=%.0fcm" % [String(side), float(_err[side]) * 1000.0, flip, float(_dot[side]), flex, fwarn, float(_prox[side]) * 100.0])
-	lines.append("solver %s | fab i%d/d%.3f | pole %s | wrist %s | gizmo: drag/rotate handles" % [solver_mode, fab_iters, fab_delta, pole_dir, "on" if wrist_copy else "off"])
+	lines.append("fabrik-twist | fab i%d/d%.3f | wrist %s | gizmo: drag/rotate handles" % [fab_iters, fab_delta, "on" if wrist_copy else "off"])
 	_label.text = "\n".join(lines)
 
 
