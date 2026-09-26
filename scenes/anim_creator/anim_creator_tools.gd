@@ -102,6 +102,23 @@ const FLEX_WARN := 150.0
 	set(v):
 		ankle_copy = v
 		_apply_override_clear()
+## Torso authoring (phase 1, 25/09 : full-manuel — dos/cou/tête posés à la
+## main, pas portés par une take) : la rotation du TorsoHandle se répartit
+## sur la colonne (Spine 0.2 / Chest 0.3 / UpperChest 0.5, somme 1.0).
+## Statique (refs rest au build, le rig ne fait que translater) + translation
+## du handle ignorée (le corps bouge via hanches). Toggle = A/B proof.
+@export var torso_copy := true:
+	set(v):
+		torso_copy = v
+		_apply_override_clear()
+## Head authoring (même pattern) : Neck 1/3 + Head 2/3 du delta du HeadHandle.
+@export var head_copy := true:
+	set(v):
+		head_copy = v
+		_apply_override_clear()
+## Spine chain + authoring fractions (noms Superhero, sondés au build).
+const TORSO_SPLIT := [[&"Spine", 0.2], [&"Chest", 0.3], [&"UpperChest", 0.5]]
+const HEAD_SPLIT := [[&"Neck", 1.0 / 3.0], [&"Head", 2.0 / 3.0]]
 ## Diagnosis trace (human 25/09: overlay unreadable, paste Output instead) —
 ## prints a timestamped snapshot line ONLY on change (handle/pole moved, hips
 ## moved, or metric transition — throttled to 4 Hz during drags), plus an
@@ -119,7 +136,7 @@ var _handles := {}
 ## Code version printed at ready — stale-cache insurance (25/09: rapid
 ## edit/run cycles served mixed bytecode; if the printed REV isn't the
 ## latest, the run is void — reload).
-const SCRIPT_REV := 12
+const SCRIPT_REV := 15
 ## Auto-pole nodes (internal, invisible, created at build — never scene nodes,
 ## never user-touched; re-created on every _build, old ones freed).
 var _poles := {}
@@ -133,6 +150,15 @@ var _hips: Node3D
 var _hips_rest := Vector3.ZERO
 var _label: Label3D
 var _handle_rest_rot := {&"Left": Quaternion(), &"Right": Quaternion()}
+## Torso/head authoring handles (rotation seule) + refs rest statiques
+## (scene-space pos + rest-rot du handle, orientation/origine monde des os).
+var _torso: Node3D
+var _head: Node3D
+var _torso_rest_pos := Vector3.ZERO
+var _head_rest_pos := Vector3.ZERO
+var _torso_rest_rot := Quaternion()
+var _head_rest_rot := Quaternion()
+var _spine_rest := {}
 ## Fresh solver snapshot per side (written mid-pipeline, consumed pre-pipeline).
 var _solve_pos := {}
 var _solve_fore := {}
@@ -217,6 +243,43 @@ func _build() -> void:
 		push_error("[AnimCreator] HipsHandle node missing in scaffold")
 		return
 	_hips_rest = _hips.global_position
+	_torso = get_node_or_null("TorsoHandle") as Node3D
+	_head = get_node_or_null("HeadHandle") as Node3D
+	if _torso == null or _head == null:
+		push_error("[AnimCreator] TorsoHandle/HeadHandle node missing in scaffold")
+		return
+	_torso_rest_pos = _torso.global_position
+	_head_rest_pos = _head.global_position
+	_torso_rest_rot = _torso.global_transform.basis.get_rotation_quaternion()
+	_head_rest_rot = _head.global_transform.basis.get_rotation_quaternion()
+	# Refs rest statiques de la chaîne dos/cou : orientation monde, origine
+	# skeleton-space, et offset rest-local vs parent (pour la chaîne consciente
+	# ci-dessous — le parent porté peut être lui-même overridé).
+	_spine_rest.clear()
+	var parent_of := {&"Spine": &"Hips", &"Chest": &"Spine", &"UpperChest": &"Chest", &"Neck": &"UpperChest", &"Head": &"Neck"}
+	var parent_q := {}
+	var parent_p := {}
+	for pname in [&"Hips", &"Spine", &"Chest", &"UpperChest", &"Neck"]:
+		var pidx := _skeleton.find_bone(pname)
+		if pidx == -1:
+			push_error("[AnimCreator] spine bone missing: %s" % String(pname))
+			return
+		parent_q[pname] = (_skeleton.global_transform * _skeleton.get_bone_global_pose(pidx)).basis.get_rotation_quaternion()
+		parent_p[pname] = _skeleton.to_global(_skeleton.get_bone_global_pose(pidx).origin)
+	for entry in TORSO_SPLIT + HEAD_SPLIT:
+		var bidx := _skeleton.find_bone(entry[0])
+		if bidx == -1:
+			push_error("[AnimCreator] spine bone missing: %s" % String(entry[0]))
+			return
+		var q0: Quaternion = (_skeleton.global_transform * _skeleton.get_bone_global_pose(bidx)).basis.get_rotation_quaternion()
+		var p0: Vector3 = _skeleton.to_global(_skeleton.get_bone_global_pose(bidx).origin)
+		var pq: Quaternion = parent_q[parent_of[entry[0]]]
+		_spine_rest[entry[0]] = {
+			"q": q0,
+			"o": _skeleton.get_bone_global_pose(bidx).origin,
+			"off": (pq.inverse() * q0).normalized(),
+			"poff": pq.inverse() * (p0 - parent_p[parent_of[entry[0]]]),
+		}
 	for limb: StringName in LIMB_ORDER:
 		var handle := get_node_or_null(String((LIMB_NODES[limb] as Dictionary)["handle"])) as Node3D
 		if handle == null:
@@ -251,7 +314,7 @@ func _build() -> void:
 	for limb in LIMB_ORDER:
 		if _proxy.has(limb) and _handles.has(limb):
 			max_gap = maxf(max_gap, (_proxy[limb] as Node3D).global_position.distance_to((_handles[limb] as Node3D).global_position))
-	print("[AnimCreator r%d ready — arms two+pole, legs custom analytic, wrist %s ankle %s (5 handles + 4 cubes, no poles to steer) proxy_gap=%.1fmm" % [SCRIPT_REV, "on" if wrist_copy else "off", "on" if ankle_copy else "off", max_gap * 1000.0])
+	print("[AnimCreator r%d ready — arms two+pole, legs custom analytic, wrist %s ankle %s torso %s head %s (7 clickable handles, no poles to steer) proxy_gap=%.1fmm" % [SCRIPT_REV, "on" if wrist_copy else "off", "on" if ankle_copy else "off", "on" if torso_copy else "off", "on" if head_copy else "off", max_gap * 1000.0])
 
 
 func _find_skeleton() -> Skeleton3D:
@@ -663,6 +726,53 @@ func _apply_stored_ankle() -> void:
 		_skeleton.set_bone_global_pose_override(foot_idx, target, 1.0, true)
 
 
+## Torso/head writes (pre-pipeline _process, chaîne CONSCIENTE : chaque os
+## part du parent PORTÉ (résolu même frame, overridé ou non) × offset
+## rest-local × fraction du delta. Le torse penché porte donc nuque et tête
+## (bug 25/09 : writer tête sur base rest = nuque épinglée, cou étiré).
+## Toggles = gate d'ÉCRITURE seule (résolution toujours calculée pour chaîner).
+## Positions = rest (les vertèbres tournent sur place). Zéro = repos.
+func _apply_spine() -> void:
+	if _skeleton == null or _torso == null or _head == null:
+		return
+	if _spine_rest.is_empty():
+		return
+	var sk_q: Quaternion = _skeleton.global_transform.basis.get_rotation_quaternion()
+	var sk_inv: Transform3D = _skeleton.global_transform.affine_inverse()
+	var hips_idx := _skeleton.find_bone(&"Hips")
+	if hips_idx == -1:
+		return
+	# Hips jamais overridé : lectures live = vrai courant (point de départ).
+	var parent_q: Quaternion = (_skeleton.global_transform * _skeleton.get_bone_global_pose(hips_idx)).basis.get_rotation_quaternion()
+	var parent_p: Vector3 = _skeleton.to_global(_skeleton.get_bone_global_pose(hips_idx).origin)
+	var tdelta: Quaternion = _torso_rest_rot.inverse() * _torso.global_transform.basis.get_rotation_quaternion()
+	for entry in TORSO_SPLIT:
+		var ref: Dictionary = _spine_rest[entry[0]]
+		var q: Quaternion = (parent_q * (ref["off"] as Quaternion) * Quaternion().slerp(tdelta, float(entry[1]))).normalized()
+		var p: Vector3 = parent_p + parent_q * (ref["poff"] as Vector3)
+		parent_q = q
+		parent_p = p
+		if not torso_copy:
+			continue
+		var idx := _skeleton.find_bone(entry[0])
+		if idx == -1:
+			continue
+		_skeleton.set_bone_global_pose_override(idx, Transform3D(Basis(sk_q.inverse() * q), sk_inv * p), 1.0, true)
+	var hdelta: Quaternion = _head_rest_rot.inverse() * _head.global_transform.basis.get_rotation_quaternion()
+	for entry in HEAD_SPLIT:
+		var ref: Dictionary = _spine_rest[entry[0]]
+		var q: Quaternion = (parent_q * (ref["off"] as Quaternion) * Quaternion().slerp(hdelta, float(entry[1]))).normalized()
+		var p: Vector3 = parent_p + parent_q * (ref["poff"] as Vector3)
+		parent_q = q
+		parent_p = p
+		if not head_copy:
+			continue
+		var idx := _skeleton.find_bone(entry[0])
+		if idx == -1:
+			continue
+		_skeleton.set_bone_global_pose_override(idx, Transform3D(Basis(sk_q.inverse() * q), sk_inv * p), 1.0, true)
+
+
 ## Override toggles (A/B proofs): turning anything OFF clears ALL overrides
 ## first (stale persistent locks otherwise survive toggle-off and pin bones —
 ## measured 25/09: thigh lock froze the leg with the writer disabled). The
@@ -762,6 +872,8 @@ func _process(delta: float) -> void:
 	# the stateful solver. Twist handled as motion transient via slew above.)
 	_apply_stored_wrist()
 	_apply_stored_ankle()
+	# Torso/head writes (same frame — static refs + live Hips, no snapshot needed).
+	_apply_spine()
 	var event_limb := &""
 	for limb in LIMB_ORDER:
 		var f := _limb_flag(limb)
@@ -824,6 +936,14 @@ func _trace_signature() -> Array:
 			key.append(int(round(ue.x)))
 			key.append(int(round(ue.y)))
 			key.append(int(round(ue.z)))
+	# Torso/head handle ROTATIONS only (translations ignored by design —
+	# tracking them would log moves with zero effect).
+	for n in [_torso, _head]:
+		if n != null:
+			var te: Vector3 = (n as Node3D).global_rotation * 180.0 / PI
+			key.append(int(round(te.x)))
+			key.append(int(round(te.y)))
+			key.append(int(round(te.z)))
 	return key
 
 
@@ -850,7 +970,7 @@ func _write_label() -> void:
 		var flex := float(_flex[limb])
 		var fwarn := " OVERFLEX" if flex > FLEX_WARN else ""
 		lines.append("%s err=%.1fmm %s=%s (dot %.2f) flex=%.0f%s dist=%.0fcm" % [String(limb), float(_err[limb]) * 1000.0, joint, _limb_flag(limb), float(_dot[limb]), flex, fwarn, float(_prox[limb]) * 100.0])
-	lines.append("two+pole auto all limbs | wrist %s ankle %s | body +%.0fcm | gizmo: 5 handles + 4 cubes" % ["on" if wrist_copy else "off", "on" if ankle_copy else "off", (_hips.global_position - _hips_rest).length() * 100.0 if _hips != null else 0.0])
+	lines.append("arms two / legs custom | wrist %s ankle %s torso %s head %s | body +%.0fcm | gizmo: 7 clickable handles" % ["on" if wrist_copy else "off", "on" if ankle_copy else "off", "on" if torso_copy else "off", "on" if head_copy else "off", (_hips.global_position - _hips_rest).length() * 100.0 if _hips != null else 0.0])
 	_label.text = "\n".join(lines)
 
 
@@ -883,6 +1003,11 @@ func _print_trace(is_event: bool, event_limb: String) -> void:
 			var ub: Vector3 = uq.get_euler() * 180.0 / PI
 			ue = Vector3(roundf(ub.x) + 0.0, roundf(ub.y) + 0.0, roundf(ub.z) + 0.0)
 		parts.append("%s h=(%.2f,%.2f,%.2f) r=(%.0f,%.0f,%.0f) bone=(%.0f,%.0f,%.0f) ubone=(%.0f,%.0f,%.0f) pole=(%.2f,%.2f,%.2f) err=%.1f dot=%.2f flex=%.0f bow=%.0f %s" % [String(limb), hp.x, hp.y, hp.z, he.x, he.y, he.z, be.x, be.y, be.z, ue.x, ue.y, ue.z, pp.x, pp.y, pp.z, float(_err.get(limb, -1.0)) * 1000.0, float(_dot.get(limb, 0.0)), float(_flex.get(limb, 0.0)), float(_bow.get(limb, 0.0)) * 1000.0, _limb_flag(limb)])
+	for n in [&"torso", &"head"]:
+		var nd: Node3D = _torso if n == &"torso" else _head
+		if nd != null:
+			var ne: Vector3 = nd.global_rotation * 180.0 / PI
+			parts.append("%s r=(%.0f,%.0f,%.0f)" % [String(n), roundf(ne.x), roundf(ne.y), roundf(ne.z)])
 	var tag := "EVENT %s" % event_limb if is_event else "snap"
 	print("[AnimCreator %s t=%.1f] %s" % [tag, _trace_elapsed, " | ".join(parts)])
 
@@ -911,6 +1036,15 @@ func reset_handles() -> void:
 		_handle_rest_rot[limb] = Quaternion()
 		if _proxy.has(limb):
 			(_proxy[limb] as Node3D).global_position = (_handles[limb] as Node3D).global_position
+	# Torso/head handles: free authoring nodes — back to scene rest pos/rot.
+	if _torso != null:
+		_torso.global_position = _torso_rest_pos
+		_torso.global_rotation = Vector3.ZERO
+		_torso_rest_rot = Quaternion()
+	if _head != null:
+		_head.global_position = _head_rest_pos
+		_head.global_rotation = Vector3.ZERO
+		_head_rest_rot = Quaternion()
 	# Stale-snapshot pop (log humain 25/09 : reset posé = 1 frame EVENT err 335
 	# bow −99 — les writers rejouaient le snapshot d'avant-reset pendant une
 	# frame). Clear overrides + snapshots (les writers skippent sur snapshot

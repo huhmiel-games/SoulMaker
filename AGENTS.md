@@ -115,4 +115,5 @@ see below.
 - Check the docs version before using a feature (use 4.7 docs over stable when they differ).
 - **Class API**: answer from `reference/godot47_docs/` (Read/Grep), never webfetch. Add a class to the cache on demand (see `concepts_and_docs/godot47_api_notes.md`).
 - Do not add files inside `.godot/` (editor cache).
+- **No `#` comments in `.tscn` files** (2026-09-25: silently breaks parsing — the following instanced node loads empty, e.g. RigRoot without Skeleton3D + `skeleton not resolved`, character gone with no parse error). Keep notes in colocated `.gd` or docs.
 - **godotty** (terminal inside the editor, to run opencode) is an editor-only personal tool: it lives in `addons/godotty/`, is gitignored, and never appears in the game or the build (its `*.editor.*` GDExtension tags only load in the editor binary). Install manually; a fresh clone does not have it.
