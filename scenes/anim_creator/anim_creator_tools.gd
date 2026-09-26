@@ -5,7 +5,9 @@ extends Node3D
 ##
 ## DOCTRINE (human 25/09, after a day of fighting steerable planes): the rig
 ## CONSTRAINS, the user places. No steerable poles, no solver choice — one
-## solver everywhere (TwoBoneIK3D analytic + AUTOMATIC pole per limb), honest
+## analytic solver per limb family (arms: TwoBoneIK3D + AUTOMATIC pole ;
+## legs: custom analytic, stateless + explicit anatomical branch — TwoBone
+## prouvé bistable sur cuisse, nudge 5 mm = flip 140° permanent), honest
 ## stretch past reach, wrist/ankle toggles for the extremities. The user
 ## places 5 handles (2 hands, 2 feet, hips) + 4 cube rotations; every other
 ## pose must be anatomically valid by construction (impossible poses are
@@ -121,7 +123,7 @@ var _handles := {}
 ## Code version printed at ready — stale-cache insurance (25/09: rapid
 ## edit/run cycles served mixed bytecode; if the printed REV isn't the
 ## latest, the run is void — reload).
-const SCRIPT_REV := 8
+const SCRIPT_REV := 11
 ## Auto-pole nodes (internal, invisible, created at build — never scene nodes,
 ## never user-touched; re-created on every _build, old ones freed).
 var _poles := {}
@@ -179,6 +181,18 @@ var _ankle_rest := {}
 ## the twist de-lock (captured at build, skeleton at rest).
 var _upper_rest_w := {}
 var _roll_axis := {}
+## Custom analytic leg solver refs (25/09 : TwoBoneIK3D prouvé bistable —
+## nudge 5 mm = flip 140° permanent à pôles/solver-inputs identiques.
+## Le solveur custom est STATELESS (pur fonction des inputs) + branche
+## EXPLICITE (côté anatomique imposé, roll minimal vs rest) : le flip est
+## impossible par construction. Bras inchangés (TwoBone stable, gaté).
+## Per leg: L1/L2 rest lengths, rest world orients (upper/middle/end),
+## rest-local length dirs, constant bend-side ref (world).
+var _leg_len := {}
+var _leg_rest_w := {}
+var _leg_len_local := {}
+var _leg_bend_ref := {}
+var _leg_side := {}
 
 
 ## Limb table lookup (arms vs legs share every solver feature).
@@ -229,7 +243,12 @@ func _build() -> void:
 		proxy.global_position = handle.global_position
 		_proxy[limb] = proxy
 		_snapshot_rest(limb)
-		_build_two(limb, proxy, pole)
+		# Legs: custom analytic solver (stateless, explicit branch — see
+		# _solve_leg). Arms keep TwoBone (stable, gated — _build_two).
+		if ARM_BONES.has(limb):
+			_build_two(limb, proxy, pole)
+		elif LEG_BONES.has(limb):
+			_capture_leg_refs(limb)
 		if LEG_BONES.has(limb):
 			_ankle_rest[limb] = (_skeleton.global_transform * _skeleton.get_bone_global_pose(_skeleton.find_bone((LEG_BONES[limb] as Dictionary)["end"]))).basis.get_rotation_quaternion()
 		# Twist de-lock references (skeleton known at rest here): upper-bone
@@ -250,7 +269,13 @@ func _build() -> void:
 	_update_auto_poles()
 	_apply_override_clear()
 	_built = true
-	print("[AnimCreator r%d ready — two+pole auto all limbs, wrist %s ankle %s (5 handles + 4 cubes, no poles to steer)" % [SCRIPT_REV, "on" if wrist_copy else "off", "on" if ankle_copy else "off"])
+	# Stale-build detector (25/09 : proxies snappés sur handles au build — si
+	# les globals n'étaient pas propagées, le solve part de travers).
+	var max_gap := 0.0
+	for limb in LIMB_ORDER:
+		if _proxy.has(limb) and _handles.has(limb):
+			max_gap = maxf(max_gap, (_proxy[limb] as Node3D).global_position.distance_to((_handles[limb] as Node3D).global_position))
+	print("[AnimCreator r%d ready — arms two+pole, legs custom analytic, wrist %s ankle %s (5 handles + 4 cubes, no poles to steer) proxy_gap=%.1fmm" % [SCRIPT_REV, "on" if wrist_copy else "off", "on" if ankle_copy else "off", max_gap * 1000.0])
 
 
 func _find_skeleton() -> Skeleton3D:
@@ -346,6 +371,180 @@ func _build_two(limb: StringName, target: Node3D, pole: Node3D) -> void:
 	ik.active = true
 	ik.modification_processed.connect(_on_ik_processed.bind(limb))
 	_two[limb] = ik
+
+
+## Custom leg references (build time, skeleton at rest): rest lengths,
+## rest world orientations, rest-local length dirs, constant bend-side ref.
+func _capture_leg_refs(limb: StringName) -> void:
+	var bones: Dictionary = LEG_BONES[limb]
+	var u_idx := _skeleton.find_bone(bones["upper"])
+	var j_idx := _skeleton.find_bone(bones["middle"])
+	var e_idx := _skeleton.find_bone(bones["end"])
+	if u_idx == -1 or j_idx == -1 or e_idx == -1:
+		push_error("[AnimCreator] leg bones missing: %s" % String(limb))
+		return
+	var u_w: Vector3 = _skeleton.to_global(_skeleton.get_bone_global_pose(u_idx).origin)
+	var j_w: Vector3 = _skeleton.to_global(_skeleton.get_bone_global_pose(j_idx).origin)
+	var e_w: Vector3 = _skeleton.to_global(_skeleton.get_bone_global_pose(e_idx).origin)
+	_leg_len[limb] = [u_w.distance_to(j_w), j_w.distance_to(e_w)]
+	var rw := {}
+	for key in [&"upper", &"middle", &"end"]:
+		var idx := _skeleton.find_bone((bones as Dictionary)[key])
+		rw[key] = (_skeleton.global_transform * _skeleton.get_bone_global_pose(idx)).basis.get_rotation_quaternion()
+	_leg_rest_w[limb] = rw
+	var u_pose: Transform3D = _skeleton.get_bone_global_pose(u_idx)
+	var j_pose: Transform3D = _skeleton.get_bone_global_pose(j_idx)
+	var ll := {}
+	ll[&"upper"] = (u_pose.affine_inverse() * j_pose.origin).normalized()
+	ll[&"middle"] = (j_pose.affine_inverse() * _skeleton.get_bone_global_pose(e_idx).origin).normalized()
+	_leg_len_local[limb] = ll
+	# Constant bend-side ref: rest thigh dir × anatomical pole dir (world).
+	# The knee bends toward the pole by design — enforcement target below.
+	var t10: Vector3 = (j_w - u_w).normalized()
+	var pole_w: Vector3 = (_skeleton.global_transform.basis * LEG_POLE_DIR).normalized()
+	var ref: Vector3 = t10.cross(pole_w)
+	if ref.length() < 0.001:
+		ref = Vector3(1, 0, 0)
+	_leg_bend_ref[limb] = ref.normalized()
+	# Per-bone enforcement side (bind parity — sonde 21 : thigh X → -X monde
+	# comme bendRef, shin X → +X monde, opposé. Imposer le même côté aux deux
+	# roulait le tibia de 180° au repos avec des positions exactes).
+	var side := {}
+	for key in [&"upper", &"middle"]:
+		var q0: Quaternion = rw[key]
+		var s: float = signf(((q0 * Vector3(1, 0, 0)).normalized()).dot(_leg_bend_ref[limb]))
+		side[key] = s if s != 0.0 else 1.0
+	_leg_side[limb] = side
+
+
+## Custom analytic leg solve (STATELESS — pure function of live inputs).
+## Law of cosines for positions (honest stretch past reach, like TwoBone),
+## explicit basis construction for orientations: shortest-arc length mapping
+## (minimal roll vs rest) + roll correction enforcing the anatomical bend
+## side (constant ref). The TwoBone 140° bistability cannot occur: same
+## inputs → same outputs, clean branch by construction. Runs pre-pipeline
+## in _process (same frame — no signal split); fills the same metric/seam
+## dicts as the signal path so trace + bake guard are untouched.
+func _solve_leg(limb: StringName) -> void:
+	if not _leg_len.has(limb) or not _proxy.has(limb) or not _poles.has(limb):
+		return
+	var bones: Dictionary = LEG_BONES[limb]
+	var u_idx := _skeleton.find_bone(bones["upper"])
+	var j_idx := _skeleton.find_bone(bones["middle"])
+	var e_idx := _skeleton.find_bone(bones["end"])
+	var r_idx := _skeleton.find_bone(bones["shoulder"])
+	if u_idx == -1 or j_idx == -1 or e_idx == -1 or r_idx == -1:
+		return
+	var lens: Array = _leg_len[limb]
+	var l1: float = lens[0]
+	var l2: float = lens[1]
+	var reach: float = l1 + l2
+	var h_w: Vector3 = _skeleton.to_global(_skeleton.get_bone_global_pose(u_idx).origin)
+	var root_w: Vector3 = _skeleton.to_global(_skeleton.get_bone_global_pose(r_idx).origin)
+	var target_w: Vector3 = (_proxy[limb] as Node3D).global_position
+	var pole_w: Vector3 = (_poles[limb] as Node3D).global_position
+	var axis: Vector3 = target_w - h_w
+	var d: float = axis.length()
+	if d < 0.0001:
+		return
+	var dir: Vector3 = axis / d
+	# Honest stretch: foot stops at reach, err carries the over-reach.
+	var dist: float = minf(d, reach)
+	var f_w: Vector3 = h_w + dir * dist
+	_err[limb] = maxf(0.0, d - reach)
+	# Knee: law of cosines (angle at hip) + pole-side height.
+	var cos_a := 1.0
+	if dist > 0.0001 and l1 > 0.0001:
+		cos_a = clampf((l1 * l1 + dist * dist - l2 * l2) / (2.0 * l1 * dist), -1.0, 1.0)
+	var sin_a: float = sqrt(maxf(0.0, 1.0 - cos_a * cos_a))
+	var n: Vector3 = (pole_w - h_w) - dir * ((pole_w - h_w).dot(dir))
+	if n.length() < 0.0001:
+		var bref: Vector3 = _leg_bend_ref[limb]
+		n = bref - dir * (bref.dot(dir))
+	if n.length() < 0.0001:
+		n = Vector3(0, 0, 1) - dir * dir.z
+	n = n.normalized()
+	var k_w: Vector3 = h_w + (dir * cos_a + n * sin_a) * l1
+	var t1: Vector3 = (k_w - h_w) / maxf(l1, 0.0001)
+	var t2: Vector3 = (f_w - k_w) / maxf(l2, 0.0001)
+	if t2.length() < 0.5:
+		t2 = dir
+	else:
+		t2 = t2.normalized()
+	# Bend axis, sign-enforced to the anatomical side (THE anti-flip lock).
+	var bend: Vector3 = t1.cross(t2)
+	var bref2: Vector3 = _leg_bend_ref[limb]
+	if bend.length() < 0.0001:
+		bend = bref2 - t1 * (bref2.dot(t1))
+	if bend.length() < 0.0001:
+		bend = Vector3(1, 0, 0) - t1 * t1.x
+	bend = bend.normalized()
+	if bend.dot(bref2) < 0.0:
+		bend = -bend
+	var sk_basis: Basis = _skeleton.global_transform.basis
+	var sk_inv: Basis = sk_basis.inverse()
+	var rw: Dictionary = _leg_rest_w[limb]
+	var ll: Dictionary = _leg_len_local[limb]
+	# Thigh + shin orientations: shortest-arc length map × roll correction.
+	# Per-bone side (bind parity): each bone's X returns to its own rest side.
+	var side: Dictionary = _leg_side[limb]
+	var q_thigh: Quaternion = _aim_bone(rw[&"upper"], ll[&"upper"], t1, bend * float(side.get(&"upper", 1.0)))
+	var q_shin: Quaternion = _aim_bone(rw[&"middle"], ll[&"middle"], t2, bend * float(side.get(&"middle", 1.0)))
+	# Skeleton-space override targets (same space as the wrist writer).
+	var thigh_pos_sk: Vector3 = (_skeleton.get_bone_global_pose(r_idx) * _skeleton.get_bone_rest(u_idx)).origin
+	var thigh_sk := Transform3D(Basis(sk_inv * Basis(q_thigh)), thigh_pos_sk)
+	var shin_pos_sk: Vector3 = (thigh_sk * _skeleton.get_bone_rest(j_idx)).origin
+	var shin_sk := Transform3D(Basis(sk_inv * Basis(q_shin)), shin_pos_sk)
+	var foot_pos_sk: Vector3 = (shin_sk * _skeleton.get_bone_rest(e_idx)).origin
+	_skeleton.set_bone_global_pose_override(u_idx, thigh_sk, 1.0, true)
+	_skeleton.set_bone_global_pose_override(j_idx, shin_sk, 1.0, true)
+	_solve_pos[limb] = foot_pos_sk
+	_solve_upper[limb] = q_thigh
+	_solve_middle[limb] = q_shin
+	_solve_upper_det[limb] = 1.0
+	# Foot orientation: ankle ON = world-flat × cube delta (ankle writer
+	# consumes _solve_pos, unchanged); OFF = follow the shin (rest-local
+	# offset carried — relative mode like the wrist).
+	var handle: Node3D = _handles[limb]
+	var hq: Quaternion = handle.global_transform.basis.get_rotation_quaternion()
+	var h0: Quaternion = _handle_rest_rot.get(limb, Quaternion())
+	var delta: Quaternion = h0.inverse() * hq
+	var foot_q: Quaternion
+	if ankle_copy:
+		foot_q = (_ankle_rest[limb] as Quaternion) * delta
+	else:
+		var q_shin0: Quaternion = rw[&"middle"]
+		var q_foot0: Quaternion = rw[&"end"]
+		foot_q = q_shin * (q_shin0.inverse() * q_foot0) * delta
+	_solve_end[limb] = foot_q
+	if not ankle_copy:
+		_skeleton.set_bone_global_pose_override(e_idx, Transform3D(Basis(sk_inv * Basis(foot_q)), foot_pos_sk), 1.0, true)
+	# Metrics — same formulas as the signal path (parity by construction).
+	_prox[limb] = f_w.distance_to(root_w)
+	_flex[limb] = rad_to_deg((k_w - root_w).angle_to(f_w - k_w))
+	var chain_w: Vector3 = h_w
+	var pole: Node3D = _poles[limb]
+	var ref_v: Vector3 = (pole.global_position - chain_w).normalized()
+	var dv: Vector3 = (k_w - chain_w).normalized()
+	_dot[limb] = ref_v.dot(dv)
+	var lax: Vector3 = f_w - root_w
+	if lax.length() > 0.001 and _bow_ref.has(limb):
+		var ldir: Vector3 = lax.normalized()
+		var off_world: Vector3 = (k_w - root_w) - ldir * ((k_w - root_w).dot(ldir))
+		var off_sk: Vector3 = sk_basis.inverse() * off_world
+		_bow[limb] = off_sk.dot(_bow_ref[limb] as Vector3)
+
+
+## Bone aiming helper: rest orientation carried by shortest-arc length map,
+## then roll-corrected so local X lands on the enforced bend axis.
+## Deterministic, continuous, minimal roll — the anti-bistability core.
+func _aim_bone(q_rest0: Quaternion, l_local: Vector3, t_world: Vector3, bend_world: Vector3) -> Quaternion:
+	var l_w0: Vector3 = (q_rest0 * l_local).normalized()
+	var q1 := Quaternion(l_w0, t_world)
+	var x1: Vector3 = (q1 * q_rest0) * Vector3(1, 0, 0)
+	var ang: float = atan2(x1.cross(bend_world).dot(t_world), x1.dot(bend_world))
+	var q_roll := Quaternion(t_world, ang)
+	return (q_roll * q1 * q_rest0).normalized()
 
 
 ## Auto-pole placement (the constraint, pre-pipeline like the hips follow).
@@ -582,6 +781,11 @@ func _process(delta: float) -> void:
 			rig.global_position = goal if rd.length() <= step else rig.global_position + rd.normalized() * step
 	if _label == null or _skeleton == null:
 		return
+	# Custom leg solve (same frame, pre-pipeline — stateless analytic, fills
+	# the leg snapshot dicts + writes thigh/shin overrides; the ankle writer
+	# below consumes the fresh _solve_pos like it did the signal snapshot).
+	for limb in LEG_BONES:
+		_solve_leg(limb)
 	# Wrist + ankle writes (pre-pipeline, from the stored snapshot — see
 	# _on_ik_processed): trace/label only read below.
 	# (Thigh de-twist writer removed 25/09: persistent root overrides deadlock
@@ -637,11 +841,19 @@ func _trace_signature() -> Array:
 			key.append(int(round(p.global_position.y * 1000.0)))
 			key.append(int(round(p.global_position.z * 1000.0)))
 		# Settled metrics (0.1mm / 0.01 / 1deg / mm): prints the post-move
-		# solve once after the handles stop, then silence.
+		# solve once after the handles stop, then silence. Upper-bone euler
+		# included (25/09 : le roll de cuisse est invisible à err/dot/flex/bow
+		# — sans ça le log dit « ok » pendant que la fesse est inversée).
 		key.append(int(round(float(_err.get(limb, 0.0)) * 10000.0)))
 		key.append(int(round(float(_dot.get(limb, 0.0)) * 100.0)))
 		key.append(int(round(float(_flex.get(limb, 0.0)))))
 		key.append(int(round(float(_bow.get(limb, 0.0)) * 1000.0)))
+		if _solve_upper.has(limb):
+			var uq: Quaternion = _solve_upper[limb]
+			var ue: Vector3 = uq.get_euler() * 180.0 / PI
+			key.append(int(round(ue.x)))
+			key.append(int(round(ue.y)))
+			key.append(int(round(ue.z)))
 	return key
 
 
@@ -695,26 +907,50 @@ func _print_trace(is_event: bool, event_limb: String) -> void:
 			var q: Quaternion = _solve_end[limb]
 			var eb: Vector3 = q.get_euler() * 180.0 / PI
 			be = Vector3(roundf(eb.x) + 0.0, roundf(eb.y) + 0.0, roundf(eb.z) + 0.0)
-		parts.append("%s h=(%.2f,%.2f,%.2f) r=(%.0f,%.0f,%.0f) bone=(%.0f,%.0f,%.0f) pole=(%.2f,%.2f,%.2f) err=%.1f dot=%.2f flex=%.0f bow=%.0f %s" % [String(limb), hp.x, hp.y, hp.z, he.x, he.y, he.z, be.x, be.y, be.z, pp.x, pp.y, pp.z, float(_err.get(limb, -1.0)) * 1000.0, float(_dot.get(limb, 0.0)), float(_flex.get(limb, 0.0)), float(_bow.get(limb, 0.0)) * 1000.0, _limb_flag(limb)])
+		var ue := Vector3.ZERO
+		if _solve_upper.has(limb):
+			var uq: Quaternion = _solve_upper[limb]
+			var ub: Vector3 = uq.get_euler() * 180.0 / PI
+			ue = Vector3(roundf(ub.x) + 0.0, roundf(ub.y) + 0.0, roundf(ub.z) + 0.0)
+		parts.append("%s h=(%.2f,%.2f,%.2f) r=(%.0f,%.0f,%.0f) bone=(%.0f,%.0f,%.0f) ubone=(%.0f,%.0f,%.0f) pole=(%.2f,%.2f,%.2f) err=%.1f dot=%.2f flex=%.0f bow=%.0f %s" % [String(limb), hp.x, hp.y, hp.z, he.x, he.y, he.z, be.x, be.y, be.z, ue.x, ue.y, ue.z, pp.x, pp.y, pp.z, float(_err.get(limb, -1.0)) * 1000.0, float(_dot.get(limb, 0.0)), float(_flex.get(limb, 0.0)), float(_bow.get(limb, 0.0)) * 1000.0, _limb_flag(limb)])
 	var tag := "EVENT %s" % event_limb if is_event else "snap"
 	print("[AnimCreator %s t=%.1f] %s" % [tag, _trace_elapsed, " | ".join(parts)])
 
 
-## Re-snaps user handles to rest (Reset button). Auto-poles need no reset
-## (recomputed every frame); the hips handle re-snaps (RigRoot follows back
-## via _process).
+## Re-snaps user handles to rest (Reset button). ATOMIC (log humain 25/09 :
+## reset pendant hips baissé plaçait les handles 21 cm trop bas — to_global
+## dans le frame déplacé — d'où le « reset 2x » : le 1er posait faux, le 2e
+## corrigeait une fois le rig remonté). Ordre : 1) hips au repos, 2) rig
+## snappé (pas de slew), 3) handles placés dans le frame corrigé, 4) proxies
+## snappés sur les handles (pas de chase — le slew ne sert qu'aux drags).
+## Auto-poles need no reset (recomputed every frame).
 func reset_handles() -> void:
 	if _skeleton == null or _handles.is_empty():
 		push_warning("[AnimCreator] reset: rig not built yet")
 		return
+	if _hips != null:
+		_hips.global_position = _hips_rest
+		var rig := get_node_or_null("RigRoot") as Node3D
+		if rig != null:
+			rig.global_position = _hips.global_position - _hips_rest
 	for limb in LIMB_ORDER:
 		(_handles[limb] as Node3D).global_position = _skeleton.to_global(_rest[limb] as Vector3)
 		(_handles[limb] as Node3D).global_rotation = Vector3.ZERO
 		# Zero-point follows the reset (else a saved rotated handle would
 		# leave a stale rest-rot and offset the wrist after reset).
 		_handle_rest_rot[limb] = Quaternion()
-	if _hips != null:
-		_hips.global_position = _hips_rest
+		if _proxy.has(limb):
+			(_proxy[limb] as Node3D).global_position = (_handles[limb] as Node3D).global_position
+	# Stale-snapshot pop (log humain 25/09 : reset posé = 1 frame EVENT err 335
+	# bow −99 — les writers rejouaient le snapshot d'avant-reset pendant une
+	# frame). Clear overrides + snapshots (les writers skippent sur snapshot
+	# vide, les signaux remplissent dès le prochain solve frais).
+	_apply_override_clear()
+	_solve_pos.clear()
+	_solve_fore.clear()
+	_solve_end.clear()
+	_solve_upper.clear()
+	_solve_middle.clear()
 	print("[AnimCreator] handles reset")
 	if trace_log:
 		_print_trace(false, "")
