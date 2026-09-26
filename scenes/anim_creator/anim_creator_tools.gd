@@ -80,9 +80,6 @@ const POLE_DIST := 0.45
 ## sagittal motions (thighs never leave the YZ plane). Mirrored per side
 ## (outward). Small on purpose: knees must still track forward over the toes.
 const LEG_POLE_LAT := 0.0
-## TEMP 25/09 pole search (remove after): when true, _update_auto_poles skips
-## (probe positions _poles directly to map twist_vs_bind over directions).
-var lock_poles := false
 const LIMB_ORDER := [&"Left", &"Right", &"LeftLeg", &"RightLeg"]
 const FLEX_WARN := 150.0
 
@@ -118,12 +115,11 @@ const TRACE_MIN_INTERVAL := 0.25
 
 var _skeleton: Skeleton3D
 var _two := {}
-var _twist := {}
 var _handles := {}
 ## Code version printed at ready — stale-cache insurance (25/09: rapid
 ## edit/run cycles served mixed bytecode; if the printed REV isn't the
 ## latest, the run is void — reload).
-const SCRIPT_REV := 11
+const SCRIPT_REV := 12
 ## Auto-pole nodes (internal, invisible, created at build — never scene nodes,
 ## never user-touched; re-created on every _build, old ones freed).
 var _poles := {}
@@ -172,15 +168,9 @@ var _solve_upper := {}
 var _solve_middle := {}
 ## Upper-bone staged origin per limb (skeleton space, in-signal).
 var _solve_upper_pos := {}
-## TEMP 25/09 staged thigh basis determinant (mirror hunt).
-var _solve_upper_det := {}
 ## Foot rest world orientation per leg (ankle reference — static, captured at
 ## build; the rig only ever translates so it stays valid for the session).
 var _ankle_rest := {}
-## Upper-bone rest world orientation + long axis (rest-local) per limb, for
-## the twist de-lock (captured at build, skeleton at rest).
-var _upper_rest_w := {}
-var _roll_axis := {}
 ## Custom analytic leg solver refs (25/09 : TwoBoneIK3D prouvé bistable —
 ## nudge 5 mm = flip 140° permanent à pôles/solver-inputs identiques.
 ## Le solveur custom est STATELESS (pur fonction des inputs) + branche
@@ -251,20 +241,6 @@ func _build() -> void:
 			_capture_leg_refs(limb)
 		if LEG_BONES.has(limb):
 			_ankle_rest[limb] = (_skeleton.global_transform * _skeleton.get_bone_global_pose(_skeleton.find_bone((LEG_BONES[limb] as Dictionary)["end"]))).basis.get_rotation_quaternion()
-		# Twist de-lock references (skeleton known at rest here): upper-bone
-		# rest world orientation + long axis in rest-local space (from rest
-		# joint positions — hip→knee for legs, shoulder→elbow for arms).
-		var ub: Dictionary = _bones_of(limb)
-		var u_idx := _skeleton.find_bone(ub["upper"])
-		var j_idx := _skeleton.find_bone(ub["middle"])
-		var r_idx := _skeleton.find_bone(ub["shoulder"])
-		if u_idx != -1 and j_idx != -1 and r_idx != -1:
-			var qw: Quaternion = (_skeleton.global_transform * _skeleton.get_bone_global_pose(u_idx)).basis.get_rotation_quaternion()
-			_upper_rest_w[limb] = qw
-			var jw: Vector3 = _skeleton.to_global(_skeleton.get_bone_global_pose(j_idx).origin)
-			var rw: Vector3 = _skeleton.to_global(_skeleton.get_bone_global_pose(r_idx).origin)
-			if jw.distance_to(rw) > 0.001:
-				_roll_axis[limb] = (qw.inverse() * (jw - rw)).normalized()
 		_handle_rest_rot[limb] = handle.global_transform.basis.get_rotation_quaternion()
 	_update_auto_poles()
 	_apply_override_clear()
@@ -295,7 +271,6 @@ func _find_skeleton() -> Skeleton3D:
 ## Keeps every historical suffix so stale pre-doctrine nodes get collected.
 func _clear_modifiers() -> void:
 	_two.clear()
-	_twist.clear()
 	if _skeleton == null:
 		return
 	for child in _skeleton.get_children():
@@ -501,7 +476,6 @@ func _solve_leg(limb: StringName) -> void:
 	_solve_pos[limb] = foot_pos_sk
 	_solve_upper[limb] = q_thigh
 	_solve_middle[limb] = q_shin
-	_solve_upper_det[limb] = 1.0
 	# Foot orientation: ankle ON = world-flat × cube delta (ankle writer
 	# consumes _solve_pos, unchanged); OFF = follow the shin (rest-local
 	# offset carried — relative mode like the wrist).
@@ -558,8 +532,6 @@ func _aim_bone(q_rest0: Quaternion, l_local: Vector3, t_world: Vector3, bend_wor
 ## transforms — no bone reads, no solver feedback.
 func _update_auto_poles() -> void:
 	if _skeleton == null or _poles.is_empty() or _joint_rest.is_empty():
-		return
-	if lock_poles:
 		return
 	for limb in LIMB_ORDER:
 		if not _poles.has(limb) or not _joint_rest.has(limb) or not _upper_rest.has(limb) or not _proxy.has(limb):
@@ -624,8 +596,6 @@ func _store_solver_pose(side: StringName) -> void:
 		# Upper-bone origin (skeleton space = override space, kept for future
 		# bake-guard use).
 		_solve_upper_pos[side] = _skeleton.get_bone_global_pose(upper_idx).origin
-		# TEMP 25/09: staged basis sanity (mirror hunt) — remove after probe.
-		_solve_upper_det[side] = (_skeleton.global_transform * _skeleton.get_bone_global_pose(upper_idx)).basis.determinant()
 	# Middle-bone (shin/forearm) world orientation, same slot (chain twist
 	# audit: thigh-only vs chain-wide de-twist decision).
 	var middle_idx := _skeleton.find_bone(bones["middle"])
@@ -1039,8 +1009,3 @@ func upper_bone_quat(limb: StringName) -> Quaternion:
 ## World orientation of the middle bone (shin / forearm), IN-SIGNAL stored.
 func middle_bone_quat(limb: StringName) -> Quaternion:
 	return _solve_middle.get(limb, Quaternion())
-
-
-## TEMP 25/09 staged thigh basis determinant (mirror hunt).
-func thigh_basis_det(limb: StringName) -> float:
-	return float(_solve_upper_det.get(limb, 1.0))
