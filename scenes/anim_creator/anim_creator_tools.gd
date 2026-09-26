@@ -127,6 +127,14 @@ const FLEX_WARN := 150.0
 	set(v):
 		knee_copy = v
 		_apply_override_clear()
+## Pelvis authoring (25/09 : bascule/torsion du bassin — tout penché réaliste
+## commence là) : la rotation du handle hanches oriente l'os Hips (la
+## translation suit le rig comme avant). Jambes + dos partent du bassin
+## RÉSOLU (threadé, même pattern que la chaîne dos). Toggle = A/B proof.
+@export var pelvis_copy := true:
+	set(v):
+		pelvis_copy = v
+		_apply_override_clear()
 ## Max user pole offset (plane health: l'auto-pôle est à 0.45, l'offset ne
 ## peut pas le ramener sur la ligne — pas de dégénérescence possible).
 const KNEE_OFF_MAX := 0.3
@@ -150,7 +158,7 @@ var _handles := {}
 ## Code version printed at ready — stale-cache insurance (25/09: rapid
 ## edit/run cycles served mixed bytecode; if the printed REV isn't the
 ## latest, the run is void — reload).
-const SCRIPT_REV := 19
+const SCRIPT_REV := 20
 ## Auto-pole nodes (internal, invisible, created at build — never scene nodes,
 ## never user-touched; re-created on every _build, old ones freed).
 var _poles := {}
@@ -162,6 +170,16 @@ var _proxy := {}
 ## planted while the body moves (translation only). Scene-space rest + node.
 var _hips: Node3D
 var _hips_rest := Vector3.ZERO
+var _hips_rest_rot := Quaternion()
+var _hips_rest_w := Quaternion()
+## Bassin résolu (monde, ce frame) : orientation = repos × delta handle
+## (identité si toggle off), position = live (rotation sur place).
+## Jambes + dos + pôles partent d'ici, jamais du repos.
+var _hips_sq := Quaternion()
+var _hips_sp := Vector3.ZERO
+## Offset rest-local hanches→haut-cuisse par jambe (le tilt du bassin
+## déplace le haut des cuisses — threadé dans solveur + pôles).
+var _hip_off := {}
 var _label: Label3D
 var _handle_rest_rot := {&"Left": Quaternion(), &"Right": Quaternion()}
 ## Torso/head authoring handles (rotation seule) + refs rest statiques
@@ -271,6 +289,16 @@ func _build() -> void:
 		push_error("[AnimCreator] HipsHandle node missing in scaffold")
 		return
 	_hips_rest = _hips.global_position
+	_hips_rest_rot = _hips.global_transform.basis.get_rotation_quaternion()
+	# Refs bassin résolu : orientation monde repos + offsets hanches→cuisses.
+	var hips_rest_w: Quaternion = (_skeleton.global_transform * _skeleton.get_bone_global_pose(_skeleton.find_bone(&"Hips"))).basis.get_rotation_quaternion()
+	var hips_rest_p: Vector3 = _skeleton.to_global(_skeleton.get_bone_global_pose(_skeleton.find_bone(&"Hips")).origin)
+	_hips_rest_w = hips_rest_w
+	_hips_sq = hips_rest_w
+	_hips_sp = hips_rest_p
+	for leg in LEG_BONES:
+		var tu: Vector3 = _skeleton.to_global(_skeleton.get_bone_global_pose(_skeleton.find_bone((LEG_BONES[leg] as Dictionary)["upper"])).origin)
+		_hip_off[leg] = hips_rest_w.inverse() * (tu - hips_rest_p)
 	_torso = get_node_or_null("TorsoHandle") as Node3D
 	_head = get_node_or_null("HeadHandle") as Node3D
 	if _torso == null or _head == null:
@@ -515,7 +543,10 @@ func _solve_leg(limb: StringName) -> void:
 	var l1: float = lens[0]
 	var l2: float = lens[1]
 	var reach: float = l1 + l2
+	# Haut-cuisse threadé du bassin résolu (le tilt déplace les hanches).
 	var h_w: Vector3 = _skeleton.to_global(_skeleton.get_bone_global_pose(u_idx).origin)
+	if _hip_off.has(limb):
+		h_w = _hips_sp + _hips_sq * (_hip_off[limb] as Vector3)
 	var root_w: Vector3 = _skeleton.to_global(_skeleton.get_bone_global_pose(r_idx).origin)
 	var target_w: Vector3 = (_proxy[limb] as Node3D).global_position
 	var pole_w: Vector3 = (_poles[limb] as Node3D).global_position
@@ -567,7 +598,8 @@ func _solve_leg(limb: StringName) -> void:
 	var q_thigh: Quaternion = _aim_bone(rw[&"upper"], ll[&"upper"], t1, bend * float(side.get(&"upper", 1.0)))
 	var q_shin: Quaternion = _aim_bone(rw[&"middle"], ll[&"middle"], t2, bend * float(side.get(&"middle", 1.0)))
 	# Skeleton-space override targets (same space as the wrist writer).
-	var thigh_pos_sk: Vector3 = (_skeleton.get_bone_global_pose(r_idx) * _skeleton.get_bone_rest(u_idx)).origin
+	# Le haut-cuisse part du bassin résolu (origine monde → skeleton space).
+	var thigh_pos_sk: Vector3 = _skeleton.global_transform.affine_inverse() * h_w
 	var thigh_sk := Transform3D(Basis(sk_inv * Basis(q_thigh)), thigh_pos_sk)
 	var shin_pos_sk: Vector3 = (thigh_sk * _skeleton.get_bone_rest(j_idx)).origin
 	var shin_sk := Transform3D(Basis(sk_inv * Basis(q_shin)), shin_pos_sk)
@@ -642,6 +674,9 @@ func _update_auto_poles() -> void:
 			var side_sign := 1.0 if String(limb).begins_with("Left") else -1.0
 			fwd = Vector3(side_sign * LEG_POLE_LAT, 0.0, 1.0).normalized()
 		var root_w: Vector3 = _skeleton.to_global(_upper_rest[limb] as Vector3)
+		# Jambes : le haut des cuisses suit le tilt du bassin (threadé).
+		if LEG_BONES.has(limb) and _hip_off.has(limb):
+			root_w = _hips_sp + _hips_sq * (_hip_off[limb] as Vector3)
 		var target_w: Vector3 = (_proxy[limb] as Node3D).global_position
 		var line: Vector3 = target_w - root_w
 		if line.length() < 0.05:
@@ -777,7 +812,8 @@ func _apply_stored_ankle() -> void:
 ## part du parent PORTÉ (résolu même frame, overridé ou non) × offset
 ## rest-local × fraction du delta. Le torse penché porte donc nuque et tête
 ## (bug 25/09 : writer tête sur base rest = nuque épinglée, cou étiré).
-## Toggles = gate d'ÉCRITURE seule (résolution toujours calculée pour chaîner).
+## Départ = bassin RÉSOLU (tilt threadé). Toggles = gate d'ÉCRITURE seule
+## (résolution toujours calculée pour chaîner).
 ## Positions = rest (les vertèbres tournent sur place). Zéro = repos.
 func _apply_spine() -> void:
 	if _skeleton == null or _torso == null or _head == null:
@@ -786,12 +822,9 @@ func _apply_spine() -> void:
 		return
 	var sk_q: Quaternion = _skeleton.global_transform.basis.get_rotation_quaternion()
 	var sk_inv: Transform3D = _skeleton.global_transform.affine_inverse()
-	var hips_idx := _skeleton.find_bone(&"Hips")
-	if hips_idx == -1:
-		return
-	# Hips jamais overridé : lectures live = vrai courant (point de départ).
-	var parent_q: Quaternion = (_skeleton.global_transform * _skeleton.get_bone_global_pose(hips_idx)).basis.get_rotation_quaternion()
-	var parent_p: Vector3 = _skeleton.to_global(_skeleton.get_bone_global_pose(hips_idx).origin)
+	# Départ = bassin résolu (tilt du pelvis inclus, calculé par _solve_hips).
+	var parent_q: Quaternion = _hips_sq
+	var parent_p: Vector3 = _hips_sp
 	var tdelta: Quaternion = _torso_rest_rot.inverse() * _torso.global_transform.basis.get_rotation_quaternion()
 	for entry in TORSO_SPLIT:
 		var ref: Dictionary = _spine_rest[entry[0]]
@@ -841,6 +874,25 @@ func set_wrist_copy(v: bool) -> void:
 func set_ankle_copy(v: bool) -> void:
 	ankle_copy = v
 	_apply_override_clear()
+
+
+## Bassin résolu (pré-pipeline, avant pôles/jambes/dos) : orientation =
+## repos × delta handle (identité si toggle off → parité exacte), position =
+## live (rotation sur place, l'origine ne bouge pas).
+func _solve_hips() -> void:
+	if _skeleton == null or _hips == null or _hip_off.is_empty():
+		return
+	var delta: Quaternion = Quaternion()
+	if pelvis_copy:
+		delta = _hips_rest_rot.inverse() * _hips.global_transform.basis.get_rotation_quaternion()
+	_hips_sq = (_hips_rest_w * delta).normalized()
+	var hips_idx := _skeleton.find_bone(&"Hips")
+	if hips_idx == -1:
+		return
+	_hips_sp = _skeleton.to_global(_skeleton.get_bone_global_pose(hips_idx).origin)
+	if pelvis_copy:
+		var sk_q: Quaternion = _skeleton.global_transform.basis.get_rotation_quaternion()
+		_skeleton.set_bone_global_pose_override(hips_idx, Transform3D(Basis(sk_q.inverse() * _hips_sq), _skeleton.get_bone_global_pose(hips_idx).origin), 1.0, true)
 
 
 ## Post-IK read (spike rule: only valid moment) + solver snapshot.
@@ -898,9 +950,9 @@ func _process(delta: float) -> void:
 			var hx: Vector3 = (_handles[limb] as Node3D).global_position
 			var d: Vector3 = hx - px.global_position
 			px.global_position = hx if d.length() <= step else px.global_position + d.normalized() * step
-	# Constraints next: auto-poles pin the bend planes, then the rig eases
-	# toward the hips handle. Limb handles are scene-space so planted feet
-	# stay planted and the IK re-solves around them.
+	# Constraints next: bassin résolu d'abord (jambes + dos + pôles partent
+	# de là), puis auto-poles, puis le rig vers le handle hanches.
+	_solve_hips()
 	_update_auto_poles()
 	if _hips != null:
 		var rig := get_node_or_null("RigRoot") as Node3D
@@ -973,6 +1025,11 @@ func _process(delta: float) -> void:
 func _trace_signature() -> Array:
 	var key: Array = []
 	key.append(int(round((_hips.global_position - _hips_rest).length() * 1000.0)) if _hips != null else 0)
+	if _hips != null:
+		var he: Vector3 = _hips.global_rotation * 180.0 / PI
+		key.append(int(round(he.x)))
+		key.append(int(round(he.y)))
+		key.append(int(round(he.z)))
 	for limb in LIMB_ORDER:
 		var h: Node3D = _handles.get(limb)
 		var p: Node3D = _poles.get(limb)
@@ -1053,6 +1110,9 @@ func _write_label() -> void:
 func _print_trace(is_event: bool, event_limb: String) -> void:
 	var parts := PackedStringArray()
 	parts.append("hips=+%.0fcm" % ((_hips.global_position - _hips_rest).length() * 1000.0 / 10.0 if _hips != null else 0.0))
+	if _hips != null:
+		var hre: Vector3 = _hips.global_rotation * 180.0 / PI
+		parts.append("hipsrot r=(%.0f,%.0f,%.0f)" % [roundf(hre.x), roundf(hre.y), roundf(hre.z)])
 	for limb in LIMB_ORDER:
 		var h: Node3D = _handles.get(limb)
 		var p: Node3D = _poles.get(limb)
@@ -1103,6 +1163,8 @@ func reset_handles() -> void:
 		return
 	if _hips != null:
 		_hips.global_position = _hips_rest
+		_hips.global_rotation = Vector3.ZERO
+		_hips_rest_rot = Quaternion()
 		var rig := get_node_or_null("RigRoot") as Node3D
 		if rig != null:
 			rig.global_position = _hips.global_position - _hips_rest

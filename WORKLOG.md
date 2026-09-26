@@ -4,6 +4,7 @@
 
 ## Current thread
 
+- **Rotation du bassin (25/09, REV 20, demande humaine)** — handle hanches 6DOF : rotation → override os `Hips` (toggle `pelvis_copy`), avec thread du bassin RÉSOLU dans pôles (haut-cuisses), solveur jambes (origine thigh) et départ chaîne dos. Preuves : OFF ignore (0.0), ON tilt 20° exact, jambes err 0.00 (pas de dislocation), Reset 0.0, dos/Reset/sweep/silence verts. UNCOMMITTED — recette + commit sur ordre.
 - **Follow intelligent + placements (25/09, REV 19)** — le follow écrasait les placements manuels en live (tool actif dans l'éditeur) : maintenant il ADOPTE tout déplacement du cube comme nouvel offset (seuil 1 mm) au lieu de l'écraser ; torse z=0 et tête haute (haut sphère ≈ haut du crâne) posés en scène sur demande. Preuves : déplacement +100 mm adopté puis suivi à l'identique en accroupi, Reset/sweep/silence verts. UNCOMMITTED — recette + commit sur ordre.
 - **Sphère tête sur la tête (25/09, demande humaine : offset +20 cm inutile)** — rien ne l'imposait (placement initial) : posée sur l'os (offset 3 mm, follow intact en accroupi). UNCOMMITTED.
 - **Meshes par type (25/09, demande humaine : resize l'un = resize tous)** — chaque partie a son mesh : `HandBox` (mains), `FootBox` (pieds), `HipsBall` sphère (taille manuelle humaine conservée : r 0.2), `HeadBall` sphère, `TorsoCube`, `KneeBox` ; `CubeMesh` générique supprimé. L'humain resize dans l'éditeur par type. Scène rechargée verte (r18 ready, Reset OK). UNCOMMITTED — recette + commit sur ordre.
