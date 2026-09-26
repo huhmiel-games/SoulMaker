@@ -4,16 +4,19 @@ extends Node3D
 ## AnimCreator — authoring-rig scaffold, hands + wrist, feet + ankle.
 ##
 ## DOCTRINE (human 25/09, after a day of fighting steerable planes): the rig
-## CONSTRAINS, the user places. No steerable poles, no solver choice — one
-## analytic solver per limb family (arms: TwoBoneIK3D + AUTOMATIC pole ;
-## legs: custom analytic, stateless + explicit anatomical branch — TwoBone
-## prouvé bistable sur cuisse, nudge 5 mm = flip 140° permanent), honest
-## stretch past reach, wrist/ankle toggles for the extremities. The user
-## places 5 handles (2 hands, 2 feet, hips) + 4 cube rotations; every other
-## pose must be anatomically valid by construction (impossible poses are
-## refused by the plane/limits, never authored).
+## CONSTRAINS, the user places. Poles stay automatic (plane pinned); knee
+## handles add a BOUNDED offset (steering inside the pinned plane — 25/09 :
+## placer le genou, pas rouler la cuisse). One analytic solver per limb
+## family (arms: TwoBoneIK3D + auto-pole ; legs: custom analytic, stateless
+## + explicit anatomical branch — TwoBone prouvé bistable sur cuisse, nudge
+## 5 mm = flip 140° permanent), honest stretch past reach, wrist/ankle/
+## torso/head toggles for the extremities. The user places 9 handles (2
+## hands, 2 feet, hips, torso, head, 2 knees); every other pose must be
+## anatomically valid by construction (impossible poses are refused by the
+## plane/limits, never authored).
 ## Auto-pole rule (same pre-pipeline slot as the hips follow): pole = chain
-## root world pos + fixed anatomical offset (elbows down-back, knees forward).
+## root world pos + fixed anatomical offset (elbows down-back, knees forward)
+## + bounded knee-handle offset (legs).
 ## Internal Node3Ds, invisible, never user-touched — the trace logs their
 ## positions so the constraint stays observable. Torso handle = deferred.
 ## Step 2 wrist follow is CODE-DRIVEN (global-pose override, relative mode):
@@ -116,6 +119,17 @@ const FLEX_WARN := 150.0
 	set(v):
 		head_copy = v
 		_apply_override_clear()
+## Knee steering (phase 2, 25/09 : placer le GENOU, pas rouler la cuisse) :
+## le handle genou décale le pôle auto (offset borné, même direction) — le
+## genou suit dans son cercle anatomique, plan/reach/côté toujours contraints.
+## Zéro = pôle auto pur (parité exacte). Toggle = A/B proof.
+@export var knee_copy := true:
+	set(v):
+		knee_copy = v
+		_apply_override_clear()
+## Max user pole offset (plane health: l'auto-pôle est à 0.45, l'offset ne
+## peut pas le ramener sur la ligne — pas de dégénérescence possible).
+const KNEE_OFF_MAX := 0.3
 ## Spine chain + authoring fractions (noms Superhero, sondés au build).
 const TORSO_SPLIT := [[&"Spine", 0.2], [&"Chest", 0.3], [&"UpperChest", 0.5]]
 const HEAD_SPLIT := [[&"Neck", 1.0 / 3.0], [&"Head", 2.0 / 3.0]]
@@ -136,7 +150,7 @@ var _handles := {}
 ## Code version printed at ready — stale-cache insurance (25/09: rapid
 ## edit/run cycles served mixed bytecode; if the printed REV isn't the
 ## latest, the run is void — reload).
-const SCRIPT_REV := 15
+const SCRIPT_REV := 17
 ## Auto-pole nodes (internal, invisible, created at build — never scene nodes,
 ## never user-touched; re-created on every _build, old ones freed).
 var _poles := {}
@@ -159,6 +173,9 @@ var _head_rest_pos := Vector3.ZERO
 var _torso_rest_rot := Quaternion()
 var _head_rest_rot := Quaternion()
 var _spine_rest := {}
+## Knee steering handles (rotation ignorée, position = offset du pôle auto).
+var _knee := {}
+var _knee_rest_pos := {}
 ## Fresh solver snapshot per side (written mid-pipeline, consumed pre-pipeline).
 var _solve_pos := {}
 var _solve_fore := {}
@@ -252,6 +269,13 @@ func _build() -> void:
 	_head_rest_pos = _head.global_position
 	_torso_rest_rot = _torso.global_transform.basis.get_rotation_quaternion()
 	_head_rest_rot = _head.global_transform.basis.get_rotation_quaternion()
+	for leg in LEG_BONES:
+		var kh := get_node_or_null("LeftKneeHandle" if leg == &"LeftLeg" else "RightKneeHandle") as Node3D
+		if kh == null:
+			push_error("[AnimCreator] KneeHandle node missing in scaffold")
+			return
+		_knee[leg] = kh
+		_knee_rest_pos[leg] = kh.global_position
 	# Refs rest statiques de la chaîne dos/cou : orientation monde, origine
 	# skeleton-space, et offset rest-local vs parent (pour la chaîne consciente
 	# ci-dessous — le parent porté peut être lui-même overridé).
@@ -314,7 +338,7 @@ func _build() -> void:
 	for limb in LIMB_ORDER:
 		if _proxy.has(limb) and _handles.has(limb):
 			max_gap = maxf(max_gap, (_proxy[limb] as Node3D).global_position.distance_to((_handles[limb] as Node3D).global_position))
-	print("[AnimCreator r%d ready — arms two+pole, legs custom analytic, wrist %s ankle %s torso %s head %s (7 clickable handles, no poles to steer) proxy_gap=%.1fmm" % [SCRIPT_REV, "on" if wrist_copy else "off", "on" if ankle_copy else "off", "on" if torso_copy else "off", "on" if head_copy else "off", max_gap * 1000.0])
+	print("[AnimCreator r%d ready — arms two+pole, legs custom analytic, wrist %s ankle %s torso %s head %s (9 clickable handles, no poles to steer) proxy_gap=%.1fmm" % [SCRIPT_REV, "on" if wrist_copy else "off", "on" if ankle_copy else "off", "on" if torso_copy else "off", "on" if head_copy else "off", max_gap * 1000.0])
 
 
 func _find_skeleton() -> Skeleton3D:
@@ -613,8 +637,17 @@ func _update_auto_poles() -> void:
 		if perp.length() < 0.05:
 			continue
 		var dir: Vector3 = perp.normalized()
-		(_poles[limb] as Node3D).global_position = _skeleton.to_global(_joint_rest[limb] as Vector3) + dir * POLE_DIST
-		_bow_ref[limb] = (_skeleton.global_transform.basis.inverse() * dir).normalized()
+		var pole_node: Node3D = _poles[limb]
+		pole_node.global_position = _skeleton.to_global(_joint_rest[limb] as Vector3) + dir * POLE_DIST
+		# Knee steering (phase 2) : l'offset du handle genou décale le pôle
+		# (borné) — le genou suit dans son cercle, le plan reste épinglé par
+		# construction. Zéro = pôle auto pur (parité exacte).
+		if LEG_BONES.has(limb) and knee_copy and _knee.has(limb):
+			var off: Vector3 = (_knee[limb] as Node3D).global_position - (_knee_rest_pos.get(limb, (_knee[limb] as Node3D).global_position) as Vector3)
+			if off.length() > KNEE_OFF_MAX:
+				off = off.normalized() * KNEE_OFF_MAX
+			pole_node.global_position += off
+		_bow_ref[limb] = (_skeleton.global_transform.basis.inverse() * (pole_node.global_position - _skeleton.to_global(_joint_rest[limb] as Vector3)).normalized()).normalized()
 
 
 ## Step 2 wrist follow (code-driven override, split across the pipeline):
@@ -944,6 +977,13 @@ func _trace_signature() -> Array:
 			key.append(int(round(te.x)))
 			key.append(int(round(te.y)))
 			key.append(int(round(te.z)))
+	# Knee handle POSITIONS (c'est la position qui pilote — rot ignorée).
+	for leg in LEG_BONES:
+		if _knee.has(leg):
+			var kp: Vector3 = (_knee[leg] as Node3D).global_position
+			key.append(int(round(kp.x * 1000.0)))
+			key.append(int(round(kp.y * 1000.0)))
+			key.append(int(round(kp.z * 1000.0)))
 	return key
 
 
@@ -970,7 +1010,7 @@ func _write_label() -> void:
 		var flex := float(_flex[limb])
 		var fwarn := " OVERFLEX" if flex > FLEX_WARN else ""
 		lines.append("%s err=%.1fmm %s=%s (dot %.2f) flex=%.0f%s dist=%.0fcm" % [String(limb), float(_err[limb]) * 1000.0, joint, _limb_flag(limb), float(_dot[limb]), flex, fwarn, float(_prox[limb]) * 100.0])
-	lines.append("arms two / legs custom | wrist %s ankle %s torso %s head %s | body +%.0fcm | gizmo: 7 clickable handles" % ["on" if wrist_copy else "off", "on" if ankle_copy else "off", "on" if torso_copy else "off", "on" if head_copy else "off", (_hips.global_position - _hips_rest).length() * 100.0 if _hips != null else 0.0])
+	lines.append("arms two / legs custom | wrist %s ankle %s torso %s head %s | body +%.0fcm | gizmo: 9 clickable handles" % ["on" if wrist_copy else "off", "on" if ankle_copy else "off", "on" if torso_copy else "off", "on" if head_copy else "off", (_hips.global_position - _hips_rest).length() * 100.0 if _hips != null else 0.0])
 	_label.text = "\n".join(lines)
 
 
@@ -1008,6 +1048,11 @@ func _print_trace(is_event: bool, event_limb: String) -> void:
 		if nd != null:
 			var ne: Vector3 = nd.global_rotation * 180.0 / PI
 			parts.append("%s r=(%.0f,%.0f,%.0f)" % [String(n), roundf(ne.x), roundf(ne.y), roundf(ne.z)])
+	for leg in LEG_BONES:
+		if _knee.has(leg):
+			var kp: Vector3 = (_knee[leg] as Node3D).global_position
+			var side_tag := "L" if String(leg).begins_with("Left") else "R"
+			parts.append("knee%s=(%.2f,%.2f,%.2f)" % [side_tag, kp.x, kp.y, kp.z])
 	var tag := "EVENT %s" % event_limb if is_event else "snap"
 	print("[AnimCreator %s t=%.1f] %s" % [tag, _trace_elapsed, " | ".join(parts)])
 
@@ -1045,6 +1090,10 @@ func reset_handles() -> void:
 		_head.global_position = _head_rest_pos
 		_head.global_rotation = Vector3.ZERO
 		_head_rest_rot = Quaternion()
+	for leg in LEG_BONES:
+		if _knee.has(leg):
+			(_knee[leg] as Node3D).global_position = _knee_rest_pos.get(leg, (_knee[leg] as Node3D).global_position)
+			(_knee[leg] as Node3D).global_rotation = Vector3.ZERO
 	# Stale-snapshot pop (log humain 25/09 : reset posé = 1 frame EVENT err 335
 	# bow −99 — les writers rejouaient le snapshot d'avant-reset pendant une
 	# frame). Clear overrides + snapshots (les writers skippent sur snapshot

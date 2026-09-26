@@ -82,6 +82,16 @@ position = Vector3(0, 1.6, 0.18)
 mesh = SubResource("CubeMesh")
 surface_material_override/0 = SubResource("MatH")
 
+[node name="LeftKneeHandle" type="MeshInstance3D" parent="."]
+position = Vector3(0.19, 0.54, 0.02)
+mesh = SubResource("CubeMesh")
+surface_material_override/0 = SubResource("MatL")
+
+[node name="RightKneeHandle" type="MeshInstance3D" parent="."]
+position = Vector3(-0.19, 0.54, 0.02)
+mesh = SubResource("CubeMesh")
+surface_material_override/0 = SubResource("MatR")
+
 [node name="StateLabel" type="Label3D" parent="."]
 position = Vector3(0, 2.05, 0)
 billboard = 1
