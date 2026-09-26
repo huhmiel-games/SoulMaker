@@ -1,13 +1,13 @@
-[gd_scene format=3]
+[gd_scene format=3 uid="uid://dk0w8i0laatkt"]
 
-[ext_resource type="PackedScene" path="res://assets/meshes/characters/Superhero_Male_FullBody.gltf" id="1"]
-[ext_resource type="Script" path="res://scenes/anim_creator/anim_creator_tools.gd" id="2"]
+[ext_resource type="PackedScene" uid="uid://uedsfngbxgvc" path="res://assets/meshes/characters/Superhero_Male_FullBody.gltf" id="1"]
+[ext_resource type="Script" uid="uid://dvi825508t1gs" path="res://scenes/anim_creator/anim_creator_tools.gd" id="2"]
 
 [sub_resource type="BoxMesh" id="FloorBox"]
 size = Vector3(12, 0.1, 12)
 
-[sub_resource type="BoxMesh" id="CubeMesh"]
-size = Vector3(0.06, 0.06, 0.06)
+[sub_resource type="BoxMesh" id="HandBox"]
+size = Vector3(0.08, 0.08, 0.08)
 
 [sub_resource type="StandardMaterial3D" id="MatL"]
 transparency = 1
@@ -19,82 +19,97 @@ transparency = 1
 shading_mode = 0
 albedo_color = Color(0.2, 0.8, 1, 0.6)
 
+[sub_resource type="BoxMesh" id="FootBox"]
+size = Vector3(0.105, 0.216, 0.208)
+
+[sub_resource type="SphereMesh" id="HipsBall"]
+radius = 0.2
+height = 0.4
+
 [sub_resource type="StandardMaterial3D" id="MatPole"]
 transparency = 1
 shading_mode = 0
-albedo_color = Color(0.7, 0.7, 0.7, 0.6)
+albedo_color = Color(0.69803923, 0.14901961, 0.69803923, 0.6)
+
+[sub_resource type="BoxMesh" id="TorsoCube"]
+size = Vector3(0.35898438, 0.1, 0.31574708)
+
+[sub_resource type="SphereMesh" id="HeadBall"]
+radius = 0.125
+height = 0.25
 
 [sub_resource type="StandardMaterial3D" id="MatH"]
 transparency = 1
 shading_mode = 0
 albedo_color = Color(1, 0.9, 0.4, 0.85)
 
-[node name="AnimCreator" type="Node3D"]
+[sub_resource type="BoxMesh" id="KneeBox"]
+size = Vector3(0.13, 0.13, 0.13)
+
+[node name="AnimCreator" type="Node3D" unique_id=129478595]
 script = ExtResource("2")
 
-[node name="RigRoot" parent="." instance=ExtResource("1")]
+[node name="RigRoot" parent="." unique_id=374395227 instance=ExtResource("1")]
 
-[node name="Sun" type="DirectionalLight3D" parent="."]
-rotation = Vector3(-0.95993, -0.61087, 0)
+[node name="Sun" type="DirectionalLight3D" parent="." unique_id=541135151]
+transform = Transform3D(0.8191493, 0.46984914, -0.32899266, 0, 0.57357734, 0.8191514, 0.5735803, -0.67100734, 0.4698455, 0, 0, 0)
 shadow_enabled = true
 
-[node name="Floor" type="MeshInstance3D" parent="."]
-position = Vector3(0, -0.05, 0)
+[node name="Floor" type="MeshInstance3D" parent="." unique_id=1220164098]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.05, 0)
 mesh = SubResource("FloorBox")
 
-[node name="Camera" type="Camera3D" parent="."]
-position = Vector3(0.89, 1.31, 2.43)
-rotation = Vector3(-0.1, 0.35, 0)
+[node name="Camera" type="Camera3D" parent="." unique_id=155257539]
+transform = Transform3D(0.9393727, -0.03423266, 0.34118474, 0, 0.9950042, 0.09983342, -0.3428978, -0.09378079, 0.9346798, 0.89, 1.31, 2.43)
 current = true
 
-[node name="LeftHandle" type="MeshInstance3D" parent="."]
-position = Vector3(0.7065, 1.4555, -0.0654)
-mesh = SubResource("CubeMesh")
+[node name="LeftHandle" type="MeshInstance3D" parent="." unique_id=1569973038]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.706487, 1.4555, -0.06539998)
+mesh = SubResource("HandBox")
 surface_material_override/0 = SubResource("MatL")
 
-[node name="RightHandle" type="MeshInstance3D" parent="."]
-position = Vector3(-0.7065, 1.4555, -0.0654)
-mesh = SubResource("CubeMesh")
+[node name="RightHandle" type="MeshInstance3D" parent="." unique_id=1575932094]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.70648694, 1.4555, -0.06539998)
+mesh = SubResource("HandBox")
 surface_material_override/0 = SubResource("MatR")
 
-[node name="LeftFootHandle" type="MeshInstance3D" parent="."]
-position = Vector3(0.1143, 0.0865, -0.0875)
-mesh = SubResource("CubeMesh")
+[node name="LeftFootHandle" type="MeshInstance3D" parent="." unique_id=1000162880]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.11430513, 0.08649978, -0.087500274)
+mesh = SubResource("FootBox")
 surface_material_override/0 = SubResource("MatL")
 
-[node name="RightFootHandle" type="MeshInstance3D" parent="."]
-position = Vector3(-0.1143, 0.0865, -0.0875)
-mesh = SubResource("CubeMesh")
+[node name="RightFootHandle" type="MeshInstance3D" parent="." unique_id=1725261931]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.11430513, 0.08649978, -0.087500274)
+mesh = SubResource("FootBox")
 surface_material_override/0 = SubResource("MatR")
 
-[node name="HipsHandle" type="MeshInstance3D" parent="."]
-position = Vector3(0, 0.9491, -0.043)
-mesh = SubResource("CubeMesh")
+[node name="HipsHandle" type="MeshInstance3D" parent="." unique_id=1219772756]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9491, -0.043)
+mesh = SubResource("HipsBall")
 surface_material_override/0 = SubResource("MatPole")
 
-[node name="TorsoHandle" type="MeshInstance3D" parent="."]
-position = Vector3(0, 1.31, 0.26)
-mesh = SubResource("CubeMesh")
+[node name="TorsoHandle" type="MeshInstance3D" parent="." unique_id=1478304698]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.31, 0)
+mesh = SubResource("TorsoCube")
 surface_material_override/0 = SubResource("MatPole")
 
-[node name="HeadHandle" type="MeshInstance3D" parent="."]
-position = Vector3(0, 1.6, 0.18)
-mesh = SubResource("CubeMesh")
+[node name="HeadHandle" type="MeshInstance3D" parent="." unique_id=483133186]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.68, -0.02)
+mesh = SubResource("HeadBall")
 surface_material_override/0 = SubResource("MatH")
 
-[node name="LeftKneeHandle" type="MeshInstance3D" parent="."]
-position = Vector3(0.19, 0.54, 0.02)
-mesh = SubResource("CubeMesh")
+[node name="LeftKneeHandle" type="MeshInstance3D" parent="." unique_id=844197196]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.19, 0.54, 0.02)
+mesh = SubResource("KneeBox")
 surface_material_override/0 = SubResource("MatL")
 
-[node name="RightKneeHandle" type="MeshInstance3D" parent="."]
-position = Vector3(-0.19, 0.54, 0.02)
-mesh = SubResource("CubeMesh")
+[node name="RightKneeHandle" type="MeshInstance3D" parent="." unique_id=1892956835]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.19, 0.54, 0.02)
+mesh = SubResource("KneeBox")
 surface_material_override/0 = SubResource("MatR")
 
-[node name="StateLabel" type="Label3D" parent="."]
-position = Vector3(0, 2.05, 0)
+[node name="StateLabel" type="Label3D" parent="." unique_id=1438555132]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.05, 0)
 billboard = 1
 no_depth_test = true
-font_size = 32
-text = "AnimCreator"
+text = "AnimCreator: trace in Output (show_label to restore overlay)"

@@ -150,7 +150,7 @@ var _handles := {}
 ## Code version printed at ready — stale-cache insurance (25/09: rapid
 ## edit/run cycles served mixed bytecode; if the printed REV isn't the
 ## latest, the run is void — reload).
-const SCRIPT_REV := 17
+const SCRIPT_REV := 19
 ## Auto-pole nodes (internal, invisible, created at build — never scene nodes,
 ## never user-touched; re-created on every _build, old ones freed).
 var _poles := {}
@@ -173,6 +173,17 @@ var _head_rest_pos := Vector3.ZERO
 var _torso_rest_rot := Quaternion()
 var _head_rest_rot := Quaternion()
 var _spine_rest := {}
+## Follow offsets (le cube reste sur l'os quand le corps bouge : handle_rest
+## − os_rest au build ; rotation authored intacte, position réécrite).
+var _head_follow_off := Vector3.ZERO
+var _torso_follow_off := Vector3.ZERO
+var _spine_solved_pos := {}
+## Dernières positions écrites par le follow (25/09 : si le handle est
+## ailleurs, c'est l'humain qui l'a bougé dans l'éditeur — on adopte son
+## placement comme nouvel offset au lieu de l'écraser).
+var _head_last_follow := Vector3.ZERO
+var _torso_last_follow := Vector3.ZERO
+var _follow_init := false
 ## Knee steering handles (rotation ignorée, position = offset du pôle auto).
 var _knee := {}
 var _knee_rest_pos := {}
@@ -269,6 +280,9 @@ func _build() -> void:
 	_head_rest_pos = _head.global_position
 	_torso_rest_rot = _torso.global_transform.basis.get_rotation_quaternion()
 	_head_rest_rot = _head.global_transform.basis.get_rotation_quaternion()
+	# Follow offsets (positions monde au build — rig au repos ici).
+	_torso_follow_off = _torso_rest_pos - _skeleton.to_global(_skeleton.get_bone_global_pose(_skeleton.find_bone(&"UpperChest")).origin)
+	_head_follow_off = _head_rest_pos - _skeleton.to_global(_skeleton.get_bone_global_pose(_skeleton.find_bone(&"Head")).origin)
 	for leg in LEG_BONES:
 		var kh := get_node_or_null("LeftKneeHandle" if leg == &"LeftLeg" else "RightKneeHandle") as Node3D
 		if kh == null:
@@ -785,6 +799,7 @@ func _apply_spine() -> void:
 		var p: Vector3 = parent_p + parent_q * (ref["poff"] as Vector3)
 		parent_q = q
 		parent_p = p
+		_spine_solved_pos[entry[0]] = p
 		if not torso_copy:
 			continue
 		var idx := _skeleton.find_bone(entry[0])
@@ -798,6 +813,7 @@ func _apply_spine() -> void:
 		var p: Vector3 = parent_p + parent_q * (ref["poff"] as Vector3)
 		parent_q = q
 		parent_p = p
+		_spine_solved_pos[entry[0]] = p
 		if not head_copy:
 			continue
 		var idx := _skeleton.find_bone(entry[0])
@@ -907,6 +923,23 @@ func _process(delta: float) -> void:
 	_apply_stored_ankle()
 	# Torso/head writes (same frame — static refs + live Hips, no snapshot needed).
 	_apply_spine()
+	# Follow (25/09 : les cubes restent sur les os quand le corps bouge —
+	# rotation authored intacte, seule la position est réécrite). Si l'humain
+	# a déplacé le cube (éditeur live), on adopte son placement : nouvel
+	# offset = pos − os, au lieu de l'écraser.
+	if _spine_solved_pos.has(&"UpperChest"):
+		var uw: Vector3 = _spine_solved_pos[&"UpperChest"]
+		if not _follow_init or _torso.global_position.distance_to(_torso_last_follow) > 0.001:
+			_torso_follow_off = _torso.global_position - uw
+		_torso.global_position = uw + _torso_follow_off
+		_torso_last_follow = _torso.global_position
+	if _spine_solved_pos.has(&"Head"):
+		var hw: Vector3 = _spine_solved_pos[&"Head"]
+		if not _follow_init or _head.global_position.distance_to(_head_last_follow) > 0.001:
+			_head_follow_off = _head.global_position - hw
+		_head.global_position = hw + _head_follow_off
+		_head_last_follow = _head.global_position
+	_follow_init = true
 	var event_limb := &""
 	for limb in LIMB_ORDER:
 		var f := _limb_flag(limb)
