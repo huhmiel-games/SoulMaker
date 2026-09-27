@@ -113,3 +113,6 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.05, 0)
 billboard = 1
 no_depth_test = true
 text = "AnimCreator: trace in Output (show_label to restore overlay)"
+
+[node name="PreviewPlayer" type="AnimationPlayer" parent="."]
+root_node = NodePath("../RigRoot/Armature")
