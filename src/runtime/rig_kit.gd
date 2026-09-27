@@ -62,6 +62,10 @@ static func _armature_player(rig_root: Node3D) -> Array:
 	if skeleton == null:
 		push_error("RigKit: GeneralSkeleton not found under %s" % rig_root.name)
 		return []
+	# Unit space (quirk sondé creator B2.1) : l'import GLTF pose
+	# motion_scale=0.9491 et le mixer scale alors TOUTES les translations
+	# évaluées (rotations intactes). Données = mètres (bakées ≈ rest) → 1.0.
+	skeleton.motion_scale = 1.0
 	var armature: Node3D = rig_root.get_node("Armature")
 	var player := AnimationPlayer.new()
 	player.name = "AnimationPlayer"

@@ -166,6 +166,29 @@ const FLEX_WARN := 150.0
 @export_tool_button("Set as base") var base_action: Callable = set_as_base
 @export_tool_button("T-pose base") var tpose_action: Callable = set_tpose_base
 @export_tool_button("Unload preview") var unload_action: Callable = _unload_take
+## Keyframing authored (Phase B, 27/09) : la pose VISIBLE (writers ou take
+## figée) est cléée en local (parent-1 × global, skeleton space) + position
+## RigRoot (B2.1 : la translation du bassin vit dans le rig) dans un clip de
+## la lib "authored" (chemins GeneralSkeleton:Os, comme les takes) — 2 tracks
+## par os (pos+rot) + 1 track rig "..:position" (strippée à l'export B3).
+## Découpage dock/inspecteur (décision humain) : le DOCK transporte (choisir,
+## créer, play/loop/scrub, longueur) ; l'INSPECTEUR ponte (Set-as-base, Key
+## pose = pose solvée→tracks, Edit = gel→base, New = placement lib,
+## authored_time = temps de clé, jamais miroir).
+## États (possédés par le tool, mutuellement exclusifs) : WRITERS = aucun
+## preview (solveurs+writers drivent) ; TAKE = takes/X adopté (player drive,
+## writers effacés) ; AUTHORED = authored/Y adopté (player drive, writers
+## effacés). authored_time = le temps de travail : temps de clé en WRITERS,
+## position de scrub (écrire = seek si authored chargé + pausé) en AUTHORED.
+@export var authored_clip := "pose_01"
+@export var authored_time := 0.0:
+	set(v):
+		authored_time = maxf(v, 0.0)
+		_apply_authored_state()
+@export var authored_length := 2.0
+@export_tool_button("Key pose") var key_action: Callable = key_pose
+@export_tool_button("Edit authored") var edit_authored_action: Callable = edit_authored
+@export_tool_button("New clip") var new_clip_action: Callable = new_authored_clip
 ## Pose de défaut (T-pose rest ou take figée) : LA source unique — tous les
 ## writers lisent les refs dérivées de ce dict, jamais le bind ni le live.
 ## Session-only (pas sauvée) ; Reset handles ne la touche pas.
@@ -199,7 +222,7 @@ var _handles := {}
 ## Code version printed at ready — stale-cache insurance (25/09: rapid
 ## edit/run cycles served mixed bytecode; if the printed REV isn't the
 ## latest, the run is void — reload).
-const SCRIPT_REV := 23
+const SCRIPT_REV := 27
 ## Auto-pole nodes (internal, invisible, created at build — never scene nodes,
 ## never user-touched; re-created on every _build, old ones freed).
 var _poles := {}
@@ -348,6 +371,11 @@ func _build() -> void:
 		if _label != null:
 			_label.text = "AnimCreator: skeleton missing"
 		return
+	# Unit space (sondé B2) : l'import GLTF pose motion_scale=0.9491 et le
+	# mixer scale TOUTES les translations évaluées (rotations intactes) —
+	# play, advance comme seek. Notre pipeline est en mètres (bakées ≈ rest),
+	# donc 1.0, sinon preview/scales/clés divergent de 5% à chaque cycle.
+	_skeleton.motion_scale = 1.0
 	_clear_modifiers()
 	_clear_auto_poles()
 	_hips = get_node_or_null("HipsHandle") as Node3D
@@ -427,14 +455,23 @@ var _take_player: AnimationPlayer
 var _take_current := ""
 ## Intention explicite (un unload ne doit pas ressusciter via rebuild paresseux).
 var _take_want := false
+## État AUTHORED (B2) : clip de la lib "authored" adopté pour relecture
+## (player drive, writers effacés — même règle unique que les takes).
+var _authored_current := ""
+var _authored_want := false
+## Tenue de fin différée (callback animation_finished → _process suivant :
+## play+pause+seek(length) fige la dernière frame, le player 4.7 retombant
+## au repos en fin naturelle).
+var _hold_end := false
 ## Lib de travail (vide jusqu'à l'étape keyframing).
 const AUTHORED_LIB := &"authored"
 ## Garde de réentrance dock ↔ exports.
 var _syncing := false
-## Take explicitement relâchée (Unload / captures) : le dock garde assigned
+## Preview explicitement relâchée (Unload / captures) : le dock garde assigned
 ## (impossible à vider en 4.7) donc le sync doit IGNORER cette valeur jusqu'à
-## nouvel intent (autre take au dock, ou export retouché). Sans ça l'Unload
-## est ré-adopté la frame suivante.
+## nouvel intent (autre anim au dock, ou export retouché). Chaîne ASSIGNED
+## COMPLÈTE ("takes/x" ou "authored/y" — les deux previews partagent le même
+## player). Sans ça l'Unload est ré-adopté la frame suivante.
 var _last_release := StringName()
 
 
@@ -454,6 +491,7 @@ func _ensure_preview_player() -> void:
 			_take_player.name = "TakePlayer"
 			_take_player.root_node = ".."
 			arm0.add_child(_take_player)
+			_connect_preview_signals()
 			return
 	var rig := get_node_or_null("RigRoot")
 	var arm := rig.find_child("Armature", true, false) if rig != null else null
@@ -469,6 +507,24 @@ func _ensure_preview_player() -> void:
 			push_warning("[AnimCreator] take pack missing (fresh clone?) — take preview unavailable")
 	if not _take_player.has_animation_library(AUTHORED_LIB):
 		_take_player.add_animation_library(AUTHORED_LIB, AnimationLibrary.new())
+	_connect_preview_signals()
+
+
+## Fin naturelle d'un clip authored non-loop : le player 4.7 retombe au
+## repos (sondé B2 : fin == T-pose, pas de tenue). On fige la dernière frame
+## via le pattern éprouvé (play+pause+seek, applique sans tenir current) +
+## miroir playing retombé sans seek (garde _syncing).
+func _connect_preview_signals() -> void:
+	if _take_player != null and not _take_player.animation_finished.is_connected(_on_preview_finished):
+		_take_player.animation_finished.connect(_on_preview_finished)
+
+
+func _on_preview_finished(anim: StringName) -> void:
+	if _authored_current.is_empty() or anim != StringName("authored/" + _authored_current):
+		return
+	# Le seek intra-callback serait écrasé par la fin du traitement player :
+	# on diffère d'une frame (pattern _pending_base).
+	_hold_end = true
 
 
 func _take_lib() -> AnimationLibrary:
@@ -485,24 +541,55 @@ func _take_lib() -> AnimationLibrary:
 ## (persiste à travers pause/stop), sortie explicite uniquement (Unload /
 ## Set-as-base / T-pose). Miroirs play/frame seulement quand current tenu
 ## (jamais de query sans current : "has no current animation").
-## "authored/" ignoré ici (keyframing).
+## "authored/" adopté ici aussi (B2, relecture) : mutuellement exclusif avec
+## les takes (adopter l'un relâche l'autre, take_name export conservé pour
+## resélection). authored_clip suit la sélection dock (miroir, comme
+## take_name) ; authored_time n'est JAMAIS miroir (temps de travail possédé
+## par l'humain — le dock reste un visualiseur).
 func _sync_preview_selection() -> void:
 	if _take_player == null or _syncing:
 		return
 	var a: StringName = _take_player.assigned_animation
+	if a != &"" and a == _last_release:
+		# Re-play explicite du même clip après release (le dock garde
+		# assigned, impossible à vider en 4.7 — le re-play garde le même
+		# assigned). Notre code ne laisse jamais playing sans état possédé
+		# (establish/hold finissent pausés, les setters clearent le release
+		# d'abord) : playing ici = appui play humain → on adopte. Sinon
+		# (pausé) c'est le dormant post-release → on ignore.
+		if not _take_player.is_playing():
+			return
+		_last_release = &""
 	var sel := StringName("")
 	if String(a).begins_with("takes/"):
 		sel = StringName(String(a).trim_prefix("takes/"))
 	elif String(a).begins_with("authored/"):
+		var clip := StringName(String(a).trim_prefix("authored/"))
+		var alib := _authored_lib()
+		if alib == null or not alib.has_animation(clip):
+			return
+		if String(clip) != _authored_current:
+			_last_release = &""
+			_syncing = true
+			_take_current = ""
+			_take_want = false
+			_authored_current = String(clip)
+			authored_clip = String(clip)
+			_authored_want = true
+			_apply_override_clear()
+			_syncing = false
+			_apply_authored_state()
 		return
 	if sel == &"":
 		return
 	var lib := _take_lib()
 	if lib == null or not lib.has_animation(sel):
 		return
-	if String(sel) != _take_current and sel != _last_release:
+	if String(sel) != _take_current and StringName("takes/" + String(sel)) != _last_release:
 		_last_release = &""
 		_syncing = true
+		_authored_current = ""
+		_authored_want = false
 		_take_current = String(sel)
 		take_name = String(sel)
 		_take_want = true
@@ -553,7 +640,10 @@ func _apply_take_state() -> void:
 		var want: float = float(maxi(take_frame, 0)) / 60.0
 		if _take_player.current_animation == &"":
 			# Figé sans current (post-pause) : play+pause+seek ré-établit la
-			# pose gelée (même frame : applique sans tenir current).
+			# pose gelée (applique sans tenir current). Le seek est OBLIGATOIRE
+			# ici : play+pause synchrones n'évaluent jamais (aucune frame
+			# entre les deux) — sans lui, rien n'est écrit (live = rest,
+			# sondé B2.1). Exact avec motion_scale=1.0 normalisé au build.
 			_take_player.play(target)
 			_take_player.pause()
 			_take_player.seek(want, true)
@@ -561,18 +651,104 @@ func _apply_take_state() -> void:
 			_take_player.seek(want, true)
 
 
+## Exports → player (sélection dock + authored_time) : assigne + fige +
+## seek exact si pausé (en lecture, la position avance seule — jamais de seek
+## qui se battrait ; authored_time écrit = seek si pausé, ignoré en lecture).
+## Le TRANSPORT (play/stop/loop) vit au dock Animation.
+func _apply_authored_state() -> void:
+	if _take_player == null or _syncing or not is_node_ready():
+		return
+	var clip := String(authored_clip).strip_edges()
+	if clip.is_empty() or not _authored_want:
+		return
+	var lib := _authored_lib()
+	if lib == null or not lib.has_animation(StringName(clip)):
+		push_error("[AnimCreator] authored clip missing: %s" % clip)
+		return
+	var target := StringName("authored/" + clip)
+	if _authored_current != clip:
+		_authored_current = clip
+		# Clear : les overrides des writers pollueraient le clip affiché.
+		_apply_override_clear()
+	var cur: StringName = _take_player.current_animation
+	if cur != target:
+		_take_player.play(target)
+		_take_player.pause()
+	if not _take_player.is_playing():
+		var a: Animation = lib.get_animation(StringName(clip))
+		var want: float = clampf(maxf(authored_time, 0.0), 0.0, a.length if a != null else 0.0)
+		if _take_player.current_animation == &"":
+			# Même pattern que les takes : le seek force l'évaluation
+			# (play+pause synchrones n'écrivent rien) ; exact avec
+			# motion_scale=1.0 normalisé au build.
+			_take_player.play(target)
+			_take_player.pause()
+			_take_player.seek(want, true)
+		elif absf(_take_player.get_current_animation_position() - want) > 0.0005:
+			_take_player.seek(want, true)
+
+
+## Bouton Edit authored : fige le clip lu (pause) et bascule sa pose gelée
+## en base de travail (même capture différée que Set-as-base : handles
+## re-snappés, deltas zérovisés, pôles take-aware) — retoucher + Key pose
+## pour corriger. L'ancienne base est remplacée (T-pose base la restaure).
+func edit_authored() -> void:
+	if _skeleton == null:
+		push_warning("[AnimCreator] edit-authored: rig not built")
+		return
+	if _authored_current.is_empty():
+		push_warning("[AnimCreator] edit-authored: nothing adopted — select an authored clip at the dock first")
+		return
+	var t := -1.0
+	if _take_player != null and _take_player.current_animation != &"":
+		t = _take_player.get_current_animation_position()
+	if _take_player != null and _take_player.is_playing():
+		_take_player.pause()
+	_base_name = "authored:%s@%.3fs" % [_authored_current, t] if t >= 0.0 else "authored:%s" % _authored_current
+	_pending_base = true
+	print("[AnimCreator] editing authored next frame…")
+
+
+## Bouton New clip : cible fraîche pose_NN (premier libre), temps à 0,
+## preview authored relâchée (retour WRITERS), clip vide assuré.
+func new_authored_clip() -> void:
+	var lib := _authored_lib()
+	if lib == null:
+		push_warning("[AnimCreator] new-clip: rig not built")
+		return
+	var n := 1
+	while lib.has_animation(StringName("pose_%02d" % n)):
+		n += 1
+	_release_preview()
+	authored_clip = "pose_%02d" % n
+	authored_time = 0.0
+	_ensure_authored_anim()
+	print("[AnimCreator] new clip %s" % String(authored_clip))
+
+
 ## Relâche la preview vers les writers (désélection dock, Unload, captures).
-## take_name export conservé pour resélection.
+## take_name export conservé pour resélection. Couvre TAKE + AUTHORED (B2) :
+## _last_release garde l'assigned COMPLET (le dock le conserve après stop).
 func _release_preview() -> void:
 	_take_want = false
 	_take_current = ""
+	_authored_want = false
+	_authored_current = ""
 	var a: StringName = _take_player.assigned_animation if _take_player != null else StringName("")
-	_last_release = StringName(String(a).trim_prefix("takes/")) if String(a).begins_with("takes/") else StringName("")
+	_last_release = a
+	# Le stop() restaure les propriétés NŒUD animées (la track rig authored
+	# remet RigRoot à sa valeur pré-play — sondé B2.1 : fin à 0, retour à
+	# −0.20) : on sauve/restitue autour, sinon le ré-ancrage ci-dessous
+	# cimente un off faux et le slew tient le rig au mauvais endroit.
+	var _rr := get_node_or_null("RigRoot") as Node3D
+	var _rigpos := (_rr as Node3D).position if _rr != null else Vector3.ZERO
 	if _take_player != null:
 		# stop() vide le current (assigned restant = dormant, ignoré par le
 		# sync qui ne lit que current). assigned = "" est invalide en 4.7
 		# (erreur "Animation not found", no-op).
 		_take_player.stop()
+	if _rr != null:
+		_rr.position = _rigpos
 	if _skeleton == null:
 		return
 	_apply_override_clear()
@@ -583,6 +759,10 @@ func _release_preview() -> void:
 	_solve_middle.clear()
 	_spine_solved_pos.clear()
 	_spine_solved_quat.clear()
+	# Goal rig-follow ré-ancré sur le rig courant (un clip authored a pu le
+	# déplacer via sa track) : retour writers en glide slew, sans pop.
+	if _hips != null and _rr != null:
+		_hips_goal_off = _hips.global_position - _rr.global_position
 
 
 ## Décharge la take (take_name conservé pour resélection).
@@ -593,10 +773,10 @@ func _unload_take() -> void:
 	_release_preview()
 
 
-## Take chargée = les writers + solveurs s'effacent (règle unique — vaut
-## aussi pour l'authored en lecture, phase B).
+## Preview chargée (TAKE ou AUTHORED, B2) = les writers + solveurs
+## s'effacent (règle unique : rien ne touche la pose affichée).
 func _take_driving() -> bool:
-	return not _take_current.is_empty()
+	return not _take_current.is_empty() or not _authored_current.is_empty()
 
 
 ## Playhead de la take (secondes) — seam pour le futur bake.
@@ -611,6 +791,150 @@ func take_length() -> float:
 		return 0.0
 	var a: Animation = _take_player.get_animation(StringName("takes/" + _take_current))
 	return a.length if a != null else 0.0
+
+
+## Lib authored de travail (vide jusqu'au keyframing, session-only en B1).
+func _authored_lib() -> AnimationLibrary:
+	if _take_player == null or not _take_player.has_animation_library(AUTHORED_LIB):
+		return null
+	return _take_player.get_animation_library(AUTHORED_LIB)
+
+
+## Retourne le clip authored (créé si absent : longueur authored_length,
+## step 1/60, loop NONE, 2 tracks par os pos+rot chemins GeneralSkeleton:Os
+## + track RigRoot "..:position" (B2.1 : la translation du bassin vit dans
+## le rig, pas dans l'os — REV 20).
+func _ensure_authored_anim() -> Animation:
+	var lib := _authored_lib()
+	if lib == null or _skeleton == null:
+		return null
+	var clip := String(authored_clip).strip_edges()
+	if clip.is_empty():
+		push_error("[AnimCreator] key-pose: authored_clip empty")
+		return null
+	var a: Animation
+	if lib.has_animation(clip):
+		a = lib.get_animation(clip)
+	else:
+		a = Animation.new()
+		a.length = maxf(authored_length, 0.1)
+		a.step = 1.0 / 60.0
+		a.loop_mode = Animation.LOOP_NONE
+		for i in _skeleton.get_bone_count():
+			var path := NodePath("GeneralSkeleton:" + String(_skeleton.get_bone_name(i)))
+			var pt := a.add_track(Animation.TYPE_POSITION_3D)
+			a.track_set_path(pt, path)
+			var rt := a.add_track(Animation.TYPE_ROTATION_3D)
+			a.track_set_path(rt, path)
+		lib.add_animation(clip, a)
+	_ensure_rig_track(a)
+	return a
+
+
+## Track RigRoot (B2.1) : chemin "..:position" depuis la racine Armature
+## (local, ref stable du creator). Créée si absente (compat clips B1).
+## STRIPPÉE à l'export B3 (résoudrait sinon le rig du jeu).
+const RIG_TRACK_PATH := NodePath("..:position")
+
+func _ensure_rig_track(a: Animation) -> void:
+	for ti in a.get_track_count():
+		if a.track_get_path(ti) == RIG_TRACK_PATH:
+			return
+	var rt := a.add_track(Animation.TYPE_VALUE)
+	a.track_set_path(rt, RIG_TRACK_PATH)
+
+
+## Bouton Key pose : clé la pose visible (global live → local parent-1 ×
+## global, os ; + position RigRoot, B2.1) à authored_time dans authored_clip
+## (créé si absent). La longueur s'étend si authored_time dépasse. Re-clé au
+## même temps = valeur remplacée (find exact + set, jamais de doublon). En
+## AUTHORED (B2), le visible = la pose du clip lu (re-clé identique = no-op ;
+## pour corriger : Edit authored puis re-clé depuis les writers).
+func key_pose() -> void:
+	if _skeleton == null:
+		push_warning("[AnimCreator] key-pose: rig not built")
+		return
+	var a := _ensure_authored_anim()
+	if a == null:
+		return
+	var t := maxf(authored_time, 0.0)
+	if t > a.length:
+		a.length = t
+	var idx_of := {}
+	for ti in a.get_track_count():
+		idx_of[String(a.track_get_path(ti)) + ":" + str(a.track_get_type(ti))] = ti
+	var keyed := 0
+	for i in _skeleton.get_bone_count():
+		var bn := String(_skeleton.get_bone_name(i))
+		var g: Transform3D = _skeleton.get_bone_global_pose(i)
+		var p := _skeleton.get_bone_parent(i)
+		var pg := Transform3D.IDENTITY
+		if p != -1:
+			pg = _skeleton.get_bone_global_pose(p)
+		var local: Transform3D = pg.affine_inverse() * g
+		var pk := "GeneralSkeleton:" + bn + ":" + str(Animation.TYPE_POSITION_3D)
+		var rk := "GeneralSkeleton:" + bn + ":" + str(Animation.TYPE_ROTATION_3D)
+		if idx_of.has(pk):
+			var ti: int = idx_of[pk]
+			var ki: int = a.track_find_key(ti, t, Animation.FIND_MODE_EXACT)
+			if ki != -1:
+				a.track_set_key_value(ti, ki, local.origin)
+			else:
+				a.position_track_insert_key(ti, t, local.origin)
+			keyed += 1
+		if idx_of.has(rk):
+			var ri: int = idx_of[rk]
+			var rj: int = a.track_find_key(ri, t, Animation.FIND_MODE_EXACT)
+			var rq: Quaternion = local.basis.get_rotation_quaternion()
+			if rj != -1:
+				a.track_set_key_value(ri, rj, rq)
+			else:
+				a.rotation_track_insert_key(ri, t, rq)
+			keyed += 1
+	# RigRoot (B2.1) : la translation du bassin (REV 20 : le rig suit le
+	# handle, l'os tourne sur place) — sans elle, crouch/step rejoué =
+	# bassin figé. Local creator (ref stable).
+	var rig := get_node_or_null("RigRoot") as Node3D
+	var qk_path := str(RIG_TRACK_PATH) + ":" + str(Animation.TYPE_VALUE)
+	if rig != null and idx_of.has(qk_path):
+		var qi: int = idx_of[qk_path]
+		var qk: int = a.track_find_key(qi, t, Animation.FIND_MODE_EXACT)
+		if qk != -1:
+			a.track_set_key_value(qi, qk, rig.position)
+		else:
+			a.track_insert_key(qi, t, rig.position)
+		keyed += 1
+	# Tenue explicite (B2) : le player 4.7 ne tient pas la pose dans le vide
+	# au-delà des clés (sondé : fin == T-pose). On matérialise le hold : la
+	# valeur de la DERNIÈRE vraie clé est copiée à a.length (réécrite à
+	# chaque key — find exact + set, jamais de doublon). Le keying rétroactif
+	# (t avant la dernière clé) ne touche pas la tenue. Une ancienne tenue
+	# dépassée par l'extension (t > length) devient une vraie clé de
+	# transition (hold-then-move, correct).
+	var held := 0
+	for ti in a.get_track_count():
+		var n: int = a.track_get_key_count(ti)
+		if n == 0:
+			continue
+		var last_real := t
+		for k in n:
+			var kt: float = a.track_get_key_time(ti, k)
+			if kt < a.length - 0.0005 and kt > last_real:
+				last_real = kt
+		if t < last_real - 0.0005:
+			continue
+		var kv = a.track_get_key_value(ti, a.track_find_key(ti, t, Animation.FIND_MODE_EXACT))
+		var kh: int = a.track_find_key(ti, a.length, Animation.FIND_MODE_EXACT)
+		if kh != -1:
+			a.track_set_key_value(ti, kh, kv)
+		elif a.track_get_type(ti) == Animation.TYPE_POSITION_3D:
+			a.position_track_insert_key(ti, a.length, kv)
+		elif a.track_get_type(ti) == Animation.TYPE_ROTATION_3D:
+			a.rotation_track_insert_key(ti, a.length, kv)
+		else:
+			a.track_insert_key(ti, a.length, kv)
+		held += 1
+	print("[AnimCreator] keyed %s @ %.3fs (%d keys, %d held)" % [String(authored_clip), t, keyed, held])
 
 
 ## Base dict (skeleton-space globals) depuis le bind (pur, synchrone).
@@ -1398,6 +1722,19 @@ func _process(delta: float) -> void:
 	# Miroir dock → exports (sélection/scrub/play du PreviewPlayer adopté
 	# avant tout — y compris avant la capture différée ci-dessous).
 	_sync_preview_selection()
+	# Tenue de fin authored (fin naturelle → le player retombe au repos :
+	# re-fige la dernière frame, même pattern que l'établissement take).
+	if _hold_end:
+		_hold_end = false
+		if not _authored_current.is_empty() and _take_player != null:
+			var _lib := _authored_lib()
+			var _end: Animation = _lib.get_animation(StringName(_authored_current)) if _lib != null else null
+			if _end != null:
+				var _tgt := StringName("authored/" + _authored_current)
+				_take_player.play(_tgt)
+				_take_player.pause()
+				_take_player.seek(_end.length, true)
+				print("[AnimCreator] authored %s held @ end %.3fs" % [_authored_current, _end.length])
 	# Capture base différée (bouton Set-as-base : la take est pausée, pose
 	# gelée exacte — sinon le travail courant). Handles recalés sur la take
 	# (mains/pieds/hanches/genoux → articulations take) pour une capture
@@ -1405,10 +1742,9 @@ func _process(delta: float) -> void:
 	# cubes repartent de zéro visuel avec leurs deltas intacts.
 	if _pending_base:
 		_pending_base = false
-		# Depuis une take : clear d'abord (ancienne base en statics polluerait),
-		# puis live = take pure. Depuis le travail : pas de clear (le live
-		# inclut déjà solves + overrides = visual truth).
-		if not _take_current.is_empty():
+		# Depuis un preview (take ou authored, B2) : clear d'abord (ancienne
+		# base en statics polluerait), puis live = pose pure du player.
+		if _take_driving():
 			_apply_override_clear()
 		_snap_handles_to_live()
 		# Goal rig-follow ré-ancré sur la pose capturée (handle sur l'os,
@@ -1439,8 +1775,8 @@ func _process(delta: float) -> void:
 		_head_rest_rot = Quaternion()
 		_hips_rest_rot = Quaternion()
 		_unload_take()
-		# Miroir playing retombé APRÈS capture+décharge : le setter
-		# _apply_take_state early-return (_take_want=false) — aucun seek.
+		# Miroir take retombé APRÈS capture+décharge : le setter early-return
+		# (_take_want=false) — aucun seek.
 		take_playing = false
 		print("[AnimCreator] base = %s" % _base_name)
 	# Règle unique (25/09 : workflow keyframe) — une take chargée = solveurs
