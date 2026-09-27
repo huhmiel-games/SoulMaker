@@ -140,14 +140,9 @@ func _ready() -> void:
 	if player == null:
 		print("[AnimLab] LabTools ready — LabPlayer NOT resolved (reopen the scene / check the RigRoot instance)")
 		return
-	# Unit space (quirk sondé creator B2.1) : l'import GLTF pose
-	# motion_scale=0.9491 et le mixer scale alors TOUTES les translations
-	# évaluées. Données = mètres → 1.0 (previews exactes).
-	var _arm: Node = player.get_parent()
-	if _arm != null:
-		var _sk := _arm.get_node_or_null("GeneralSkeleton") as Skeleton3D
-		if _sk != null:
-			_sk.motion_scale = 1.0
+	# Unit space : NE PAS forcer motion_scale (leçon creator 27/09 — forcer
+	# 1.0 décollait les takes du sol de ~5% : la valeur d'import fait foi,
+	# partagée par creator/labo/jeu).
 	var lib: AnimationLibrary = player.get_animation_library(&"rig")
 	var count := lib.get_animation_list().size() if lib != null else 0
 	print("[AnimLab] LabTools ready — player OK, %d takes" % count)

@@ -167,10 +167,10 @@ const FLEX_WARN := 150.0
 @export_tool_button("T-pose base") var tpose_action: Callable = set_tpose_base
 @export_tool_button("Unload preview") var unload_action: Callable = _unload_take
 ## Keyframing authored (Phase B, 27/09) : la pose VISIBLE (writers ou take
-## figée) est cléée en local (parent-1 × global, skeleton space) + position
-## RigRoot (B2.1 : la translation du bassin vit dans le rig) dans un clip de
-## la lib "authored" (chemins GeneralSkeleton:Os, comme les takes) — 2 tracks
-## par os (pos+rot) + 1 track rig "..:position" (strippée à l'export B3).
+## figée) est cléée en local (parent-1 × global, skeleton space, delta rig
+## baké — régime takes-style) dans un clip de la lib "authored" (chemins
+## GeneralSkeleton:Os, comme les takes) — 2 tracks par os (pos+rot), STANDARD :
+## rejouable jeu/Blender sans le creator, capsule-safe.
 ## Découpage dock/inspecteur (décision humain) : le DOCK transporte (choisir,
 ## créer, play/loop/scrub, longueur) ; l'INSPECTEUR ponte (Set-as-base, Key
 ## pose = pose solvée→tracks, Edit = gel→base, New = placement lib,
@@ -189,6 +189,7 @@ const FLEX_WARN := 150.0
 @export_tool_button("Key pose") var key_action: Callable = key_pose
 @export_tool_button("Edit authored") var edit_authored_action: Callable = edit_authored
 @export_tool_button("New clip") var new_clip_action: Callable = new_authored_clip
+@export_tool_button("Save authored") var save_authored_action: Callable = save_authored
 ## Pose de défaut (T-pose rest ou take figée) : LA source unique — tous les
 ## writers lisent les refs dérivées de ce dict, jamais le bind ni le live.
 ## Session-only (pas sauvée) ; Reset handles ne la touche pas.
@@ -222,7 +223,7 @@ var _handles := {}
 ## Code version printed at ready — stale-cache insurance (25/09: rapid
 ## edit/run cycles served mixed bytecode; if the printed REV isn't the
 ## latest, the run is void — reload).
-const SCRIPT_REV := 27
+const SCRIPT_REV := 31
 ## Auto-pole nodes (internal, invisible, created at build — never scene nodes,
 ## never user-touched; re-created on every _build, old ones freed).
 var _poles := {}
@@ -240,6 +241,11 @@ var _hips_rest := Vector3.ZERO
 ## sur les hanches take faisait chasser le rig d'un delta post-capture, les
 ## membres re-solvant autour d'un frame translaté (flex/bow dérivés).
 var _hips_goal_off := Vector3.ZERO
+## RigRoot au repos (capturé au build) : frame de référence des clips
+## authored (27/09 : régime takes-style — la translation du bassin est bakée
+## dans l'os Hips au key, le rig reste ici en lecture ; workflow Reset-first :
+## la scène se rouvre au repos, comme les handles).
+var _rig_rest := Vector3.ZERO
 var _hips_rest_rot := Quaternion()
 var _hips_rest_w := Quaternion()
 ## Bassin résolu (monde, ce frame) : orientation = repos × delta handle
@@ -371,11 +377,11 @@ func _build() -> void:
 		if _label != null:
 			_label.text = "AnimCreator: skeleton missing"
 		return
-	# Unit space (sondé B2) : l'import GLTF pose motion_scale=0.9491 et le
-	# mixer scale TOUTES les translations évaluées (rotations intactes) —
-	# play, advance comme seek. Notre pipeline est en mètres (bakées ≈ rest),
-	# donc 1.0, sinon preview/scales/clés divergent de 5% à chaque cycle.
-	_skeleton.motion_scale = 1.0
+	# Unit space : NE PAS forcer motion_scale ici (ni labo ni jeu — leçon
+	# 27/09 : l'import GLTF règle 0.9491 et le mixer scale les translations
+	# évaluées ; forcer 1.0 décollait les takes du sol de ~5%. La valeur
+	# importée fait foi tant que creator/labo/jeu la partagent — le round-trip
+	# key/play est exact à valeur constante, quelle qu'elle soit).
 	_clear_modifiers()
 	_clear_auto_poles()
 	_hips = get_node_or_null("HipsHandle") as Node3D
@@ -387,6 +393,7 @@ func _build() -> void:
 	var _rig0 := get_node_or_null("RigRoot") as Node3D
 	if _rig0 != null:
 		_hips_goal_off = _hips.global_position - _rig0.global_position
+		_rig_rest = _rig0.global_position
 	# Base = repos (bind) + refs dérivées — source unique des writers.
 	_capture_rest_base()
 	_derive_base_refs()
@@ -506,7 +513,18 @@ func _ensure_preview_player() -> void:
 		else:
 			push_warning("[AnimCreator] take pack missing (fresh clone?) — take preview unavailable")
 	if not _take_player.has_animation_library(AUTHORED_LIB):
-		_take_player.add_animation_library(AUTHORED_LIB, AnimationLibrary.new())
+		# Fichier absent au 1er run = normal (silencieux, pas d'ERROR moteur).
+		# Bypass du cache loader (sinon une réouverture dans le même process
+		# éditeur resservirait la version pré-save — sondé B3).
+		var loaded: AnimationLibrary
+		if FileAccess.file_exists(AUTHORED_PACK):
+			loaded = ResourceLoader.load(AUTHORED_PACK, "AnimationLibrary", ResourceLoader.CACHE_MODE_IGNORE) as AnimationLibrary
+		if loaded != null:
+			# Dupliquée : le travail session ne doit jamais aliaser le fichier.
+			_take_player.add_animation_library(AUTHORED_LIB, loaded.duplicate() as AnimationLibrary)
+			print("[AnimCreator] authored pack loaded (%d clips)" % loaded.get_animation_list().size())
+		else:
+			_take_player.add_animation_library(AUTHORED_LIB, AnimationLibrary.new())
 	_connect_preview_signals()
 
 
@@ -577,6 +595,7 @@ func _sync_preview_selection() -> void:
 			authored_clip = String(clip)
 			_authored_want = true
 			_apply_override_clear()
+			_snap_rig_to_rest()
 			_syncing = false
 			_apply_authored_state()
 		return
@@ -643,7 +662,7 @@ func _apply_take_state() -> void:
 			# pose gelée (applique sans tenir current). Le seek est OBLIGATOIRE
 			# ici : play+pause synchrones n'évaluent jamais (aucune frame
 			# entre les deux) — sans lui, rien n'est écrit (live = rest,
-			# sondé B2.1). Exact avec motion_scale=1.0 normalisé au build.
+			# sondé B2.1). Exact à motion_scale constant (import partagé).
 			_take_player.play(target)
 			_take_player.pause()
 			_take_player.seek(want, true)
@@ -670,6 +689,9 @@ func _apply_authored_state() -> void:
 		_authored_current = clip
 		# Clear : les overrides des writers pollueraient le clip affiché.
 		_apply_override_clear()
+		# Clips standard (D dans les os) : le rig doit être au repos en
+		# lecture, sinon double descente (os + rig déplacé de session).
+		_snap_rig_to_rest()
 	var cur: StringName = _take_player.current_animation
 	if cur != target:
 		_take_player.play(target)
@@ -679,8 +701,8 @@ func _apply_authored_state() -> void:
 		var want: float = clampf(maxf(authored_time, 0.0), 0.0, a.length if a != null else 0.0)
 		if _take_player.current_animation == &"":
 			# Même pattern que les takes : le seek force l'évaluation
-			# (play+pause synchrones n'écrivent rien) ; exact avec
-			# motion_scale=1.0 normalisé au build.
+			# (play+pause synchrones n'écrivent rien) ; exact à motion_scale
+			# constant (import partagé).
 			_take_player.play(target)
 			_take_player.pause()
 			_take_player.seek(want, true)
@@ -726,6 +748,18 @@ func new_authored_clip() -> void:
 	print("[AnimCreator] new clip %s" % String(authored_clip))
 
 
+## Ramène le RigRoot à son repos (lectures AUTHORED : clips standard, D
+## dans les os — tout écart session fausserait la pose d'une double
+## descente). Le goal suit (glide slew au retour writers, sans pop).
+func _snap_rig_to_rest() -> void:
+	var rr := get_node_or_null("RigRoot") as Node3D
+	if rr == null:
+		return
+	rr.global_position = _rig_rest
+	if _hips != null:
+		_hips_goal_off = _hips.global_position - rr.global_position
+
+
 ## Relâche la preview vers les writers (désélection dock, Unload, captures).
 ## take_name export conservé pour resélection. Couvre TAKE + AUTHORED (B2) :
 ## _last_release garde l'assigned COMPLET (le dock le conserve après stop).
@@ -736,9 +770,8 @@ func _release_preview() -> void:
 	_authored_current = ""
 	var a: StringName = _take_player.assigned_animation if _take_player != null else StringName("")
 	_last_release = a
-	# Le stop() restaure les propriétés NŒUD animées (la track rig authored
-	# remet RigRoot à sa valeur pré-play — sondé B2.1 : fin à 0, retour à
-	# −0.20) : on sauve/restitue autour, sinon le ré-ancrage ci-dessous
+	# Le stop() restaure les propriétés NŒUD animées par les clips qui en
+	# ont (legacy) : on sauve/restitue autour, sinon le ré-ancrage ci-dessous
 	# cimente un off faux et le slew tient le rig au mauvais endroit.
 	var _rr := get_node_or_null("RigRoot") as Node3D
 	var _rigpos := (_rr as Node3D).position if _rr != null else Vector3.ZERO
@@ -759,8 +792,8 @@ func _release_preview() -> void:
 	_solve_middle.clear()
 	_spine_solved_pos.clear()
 	_spine_solved_quat.clear()
-	# Goal rig-follow ré-ancré sur le rig courant (un clip authored a pu le
-	# déplacer via sa track) : retour writers en glide slew, sans pop.
+	# Goal rig-follow ré-ancré sur le rig courant : retour writers en glide
+	# slew, sans pop.
 	if _hips != null and _rr != null:
 		_hips_goal_off = _hips.global_position - _rr.global_position
 
@@ -793,17 +826,43 @@ func take_length() -> float:
 	return a.length if a != null else 0.0
 
 
-## Lib authored de travail (vide jusqu'au keyframing, session-only en B1).
+## Lib authored de travail : chargée depuis authored_pack.res si présent
+## (B3), sinon vide. Le keyframing la remplit (session, clips standard),
+## Save la persiste TELLE QUELLE.
 func _authored_lib() -> AnimationLibrary:
 	if _take_player == null or not _take_player.has_animation_library(AUTHORED_LIB):
 		return null
 	return _take_player.get_animation_library(AUTHORED_LIB)
 
 
+## Persistance authored (B3) : le pack vit à côté de la scène (contenu
+## projet, versionné) ; le jeu le lira plus tard (promo slots — hors scope).
+const AUTHORED_PACK := "res://scenes/anim_creator/authored_pack.res"
+
+## Bouton Save authored : persiste la lib "authored" TELLE QUELLE (clips
+## standard : os seuls, comme les takes — exportable, capsule-safe).
+## length/step/loop conservés. Zéro clip = pack vide valide.
+func save_authored() -> void:
+	var lib := _authored_lib()
+	if lib == null:
+		push_warning("[AnimCreator] save-authored: rig not built")
+		return
+	var out := AnimationLibrary.new()
+	var nclip := 0
+	for clip in lib.get_animation_list():
+		var cp: Animation = (lib.get_animation(clip) as Animation).duplicate()
+		out.add_animation(clip, cp)
+		nclip += 1
+	var err := ResourceSaver.save(out, AUTHORED_PACK)
+	if err != OK:
+		push_error("[AnimCreator] save-authored FAILED: %s" % error_string(err))
+		return
+	print("[AnimCreator] saved %d clips → %s" % [nclip, AUTHORED_PACK])
+
+
 ## Retourne le clip authored (créé si absent : longueur authored_length,
-## step 1/60, loop NONE, 2 tracks par os pos+rot chemins GeneralSkeleton:Os
-## + track RigRoot "..:position" (B2.1 : la translation du bassin vit dans
-## le rig, pas dans l'os — REV 20).
+## step 1/60, loop NONE, 2 tracks par os pos+rot chemins GeneralSkeleton:Os —
+## STANDARD, comme les takes : aucune track de nœud, exportable tel quel).
 func _ensure_authored_anim() -> Animation:
 	var lib := _authored_lib()
 	if lib == null or _skeleton == null:
@@ -827,26 +886,12 @@ func _ensure_authored_anim() -> Animation:
 			var rt := a.add_track(Animation.TYPE_ROTATION_3D)
 			a.track_set_path(rt, path)
 		lib.add_animation(clip, a)
-	_ensure_rig_track(a)
 	return a
 
 
-## Track RigRoot (B2.1) : chemin "..:position" depuis la racine Armature
-## (local, ref stable du creator). Créée si absente (compat clips B1).
-## STRIPPÉE à l'export B3 (résoudrait sinon le rig du jeu).
-const RIG_TRACK_PATH := NodePath("..:position")
-
-func _ensure_rig_track(a: Animation) -> void:
-	for ti in a.get_track_count():
-		if a.track_get_path(ti) == RIG_TRACK_PATH:
-			return
-	var rt := a.add_track(Animation.TYPE_VALUE)
-	a.track_set_path(rt, RIG_TRACK_PATH)
-
-
 ## Bouton Key pose : clé la pose visible (global live → local parent-1 ×
-## global, os ; + position RigRoot, B2.1) à authored_time dans authored_clip
-## (créé si absent). La longueur s'étend si authored_time dépasse. Re-clé au
+## global, os, delta rig baké — régime takes-style) à authored_time dans
+## authored_clip (créé si absent). La longueur s'étend si authored_time dépasse. Re-clé au
 ## même temps = valeur remplacée (find exact + set, jamais de doublon). En
 ## AUTHORED (B2), le visible = la pose du clip lu (re-clé identique = no-op ;
 ## pour corriger : Edit authored puis re-clé depuis les writers).
@@ -864,6 +909,20 @@ func key_pose() -> void:
 	for ti in a.get_track_count():
 		idx_of[String(a.track_get_path(ti)) + ":" + str(a.track_get_type(ti))] = ti
 	var keyed := 0
+	# Régime takes-style (27/09) : la translation du bassin vit dans le rig
+	# en session (REV 20, pieds plantés) mais les clips sont STANDARD — le
+	# delta rig est baké dans les positions d'os (référence = rig au repos) :
+	# Convention Mixamo : Root fixe à l'origine, Hips descend (os Hips porte
+	# le shift), pieds plantés, rig fixe. Rotations intactes.
+	# Exportable tel quel (Blender/autre), capsule-safe côté jeu.
+	var rig_now := (get_node_or_null("RigRoot") as Node3D).global_position if get_node_or_null("RigRoot") != null else _rig_rest
+	var off_sk := _skeleton.global_transform.basis.inverse() * (rig_now - _rig_rest)
+	# Clips en MÈTRES vrais (standard Blender) : le mixer multiplie les
+	# translations évaluées par motion_scale (sondé : live == raw × ms), donc
+	# le local lu (déjà scalé) est déscalé avant écriture — sinon 5% d'erreur.
+	var ms: float = _skeleton.motion_scale
+	if absf(ms) < 0.001:
+		ms = 1.0
 	for i in _skeleton.get_bone_count():
 		var bn := String(_skeleton.get_bone_name(i))
 		var g: Transform3D = _skeleton.get_bone_global_pose(i)
@@ -872,6 +931,15 @@ func key_pose() -> void:
 		if p != -1:
 			pg = _skeleton.get_bone_global_pose(p)
 		var local: Transform3D = pg.affine_inverse() * g
+		# Convention Mixamo : Root reste à l'origine (0,0,0), le Hips descend
+		# vers lui — le shift ne s'applique QU'au Hips (os nommé "Hips"),
+		# JAMAIS au Root ni aux autres racines. Les locaux enfants sont
+		# parents-relatifs (indépendants du frame rig) — le shifter le Hips
+		# suffit car il est le parent de toute la hiérarchie corps.
+		var shift := Vector3.ZERO
+		if bn == "Hips":
+			shift = off_sk
+		local.origin = local.origin / ms + pg.basis.inverse() * shift
 		var pk := "GeneralSkeleton:" + bn + ":" + str(Animation.TYPE_POSITION_3D)
 		var rk := "GeneralSkeleton:" + bn + ":" + str(Animation.TYPE_ROTATION_3D)
 		if idx_of.has(pk):
@@ -891,19 +959,6 @@ func key_pose() -> void:
 			else:
 				a.rotation_track_insert_key(ri, t, rq)
 			keyed += 1
-	# RigRoot (B2.1) : la translation du bassin (REV 20 : le rig suit le
-	# handle, l'os tourne sur place) — sans elle, crouch/step rejoué =
-	# bassin figé. Local creator (ref stable).
-	var rig := get_node_or_null("RigRoot") as Node3D
-	var qk_path := str(RIG_TRACK_PATH) + ":" + str(Animation.TYPE_VALUE)
-	if rig != null and idx_of.has(qk_path):
-		var qi: int = idx_of[qk_path]
-		var qk: int = a.track_find_key(qi, t, Animation.FIND_MODE_EXACT)
-		if qk != -1:
-			a.track_set_key_value(qi, qk, rig.position)
-		else:
-			a.track_insert_key(qi, t, rig.position)
-		keyed += 1
 	# Tenue explicite (B2) : le player 4.7 ne tient pas la pose dans le vide
 	# au-delà des clés (sondé : fin == T-pose). On matérialise le hold : la
 	# valeur de la DERNIÈRE vraie clé est copiée à a.length (réécrite à
