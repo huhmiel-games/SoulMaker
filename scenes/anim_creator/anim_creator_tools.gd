@@ -190,6 +190,7 @@ const FLEX_WARN := 150.0
 @export_tool_button("Edit authored") var edit_authored_action: Callable = edit_authored
 @export_tool_button("New clip") var new_clip_action: Callable = new_authored_clip
 @export_tool_button("Save authored") var save_authored_action: Callable = save_authored
+@export_tool_button("Bake All (30fps)") var bake_all_action: Callable = bake_transition_all
 ## Pose de défaut (T-pose rest ou take figée) : LA source unique — tous les
 ## writers lisent les refs dérivées de ce dict, jamais le bind ni le live.
 ## Session-only (pas sauvée) ; Reset handles ne la touche pas.
@@ -223,7 +224,7 @@ var _handles := {}
 ## Code version printed at ready — stale-cache insurance (25/09: rapid
 ## edit/run cycles served mixed bytecode; if the printed REV isn't the
 ## latest, the run is void — reload).
-const SCRIPT_REV := 31
+const SCRIPT_REV := 41
 ## Auto-pole nodes (internal, invisible, created at build — never scene nodes,
 ## never user-touched; re-created on every _build, old ones freed).
 var _poles := {}
@@ -760,6 +761,16 @@ func _snap_rig_to_rest() -> void:
 		_hips_goal_off = _hips.global_position - rr.global_position
 
 
+## Shift bassin en skeleton-space (convention Mixamo : Root fixe à
+## l'origine, Hips porte le delta rig). SOURCE UNIQUE pour key_pose
+## (session) et _write_dense_keys_at (bake) — les deux writers écrivent le
+## même shift, les clips sont standard dans les deux cas.
+func _authored_shift_sk() -> Vector3:
+	var rr := get_node_or_null("RigRoot") as Node3D
+	var rig_now: Vector3 = rr.global_position if rr != null else _rig_rest
+	return _skeleton.global_transform.basis.inverse() * (rig_now - _rig_rest)
+
+
 ## Relâche la preview vers les writers (désélection dock, Unload, captures).
 ## take_name export conservé pour resélection. Couvre TAKE + AUTHORED (B2) :
 ## _last_release garde l'assigned COMPLET (le dock le conserve après stop).
@@ -860,6 +871,676 @@ func save_authored() -> void:
 	print("[AnimCreator] saved %d clips → %s" % [nclip, AUTHORED_PACK])
 
 
+## Bake Transition (minimal) : rebake tout le clip authored à 30 FPS
+## en ré-échantillonnant l'IK complet — overwrite le clip courant.
+## Un seul bouton, 30 FPS, tout inclus (hips, pieds, mains, colonne, pôles).
+const BAKE_FPS := 30
+## Pin statique inter-ancres (REV 39) : sous ce seuil de mouvement entre deux
+## ancres, ce n'est pas une intention mais de la variance de solve (ex. pied
+## +24 mm entre T-pose et crouch, handles jamais touchés) → figé à la moyenne.
+## Un vrai mouvement (pas, geste main) fait >> seuil et passe intact.
+const BAKE_PIN_DIST := 0.03
+const BAKE_PIN_ANGLE := 0.05
+
+## FK forward reconstruction: read bone local transforms from Animation at time,
+## then parent -> child to get world poses. Pure data, zero player.
+func _reconstruct_global_poses_at(anim: Animation, time: float) -> Dictionary:
+	var skb: Basis = _skeleton.global_transform.basis
+	var bone_count: int = _skeleton.get_bone_count()
+
+	# Build track index map: "GeneralSkeleton:BoneName:TYPE" -> track_idx
+	var track_map: Dictionary = {}
+	for ti in anim.get_track_count():
+		var path: NodePath = anim.track_get_path(ti)
+		var ttype: int = anim.track_get_type(ti)
+		track_map[String(path) + ":" + str(ttype)] = ti
+
+	# Read local transforms (skeleton space) at time. Les positions cléées
+	# sont DÉSCALÉES (/ motion_scale, cf. key_pose REV 30 : live == raw × ms)
+	# → on re-multiplie ici pour retrouver les vrais locaux (REV 39 : sans
+	# ça les cibles du bake sont ~5 % exagérées). Rotations intactes.
+	var ms: float = _skeleton.motion_scale
+	if absf(ms) < 0.001:
+		ms = 1.0
+	var local_poses: Dictionary = {}
+	for i in bone_count:
+		var bn: StringName = _skeleton.get_bone_name(i)
+		var pk: String = "GeneralSkeleton:" + String(bn) + ":" + str(Animation.TYPE_POSITION_3D)
+		var rk: String = "GeneralSkeleton:" + String(bn) + ":" + str(Animation.TYPE_ROTATION_3D)
+
+		var pos: Vector3 = Vector3.ZERO
+		var rot: Quaternion = Quaternion.IDENTITY
+
+		if track_map.has(pk):
+			var tpi: int = track_map[pk]
+			var ki: int = anim.track_find_key(tpi, time, Animation.FIND_MODE_EXACT)
+			if ki != -1:
+				pos = anim.track_get_key_value(tpi, ki) as Vector3
+			else:
+				# No exact key — interpolate (linear for pos)
+				ki = anim.track_find_key(tpi, time, Animation.FIND_MODE_NEAREST)
+				if ki != -1:
+					pos = anim.track_get_key_value(tpi, ki) as Vector3
+
+		if track_map.has(rk):
+			var tri: int = track_map[rk]
+			var ki: int = anim.track_find_key(tri, time, Animation.FIND_MODE_EXACT)
+			if ki != -1:
+				rot = anim.track_get_key_value(tri, ki) as Quaternion
+			else:
+				ki = anim.track_find_key(tri, time, Animation.FIND_MODE_NEAREST)
+				if ki != -1:
+					rot = anim.track_get_key_value(tri, ki) as Quaternion
+
+		local_poses[bn] = Transform3D(Basis(rot), pos * ms)
+
+	# FK forward: parent -> child using pre-computed hierarchy order
+	var order: Array[int] = _get_bone_hierarchy_order()
+	var global_poses: Dictionary = {}
+	for i in order:
+		var bn: StringName = _skeleton.get_bone_name(i)
+		var local: Transform3D = local_poses[bn]
+		var p: int = _skeleton.get_bone_parent(i)
+		if p != -1:
+			var parent_bn: StringName = _skeleton.get_bone_name(p)
+			var parent_global: Transform3D = global_poses[parent_bn]
+			global_poses[bn] = parent_global * local
+		else:
+			global_poses[bn] = local
+
+	return global_poses
+
+## Returns bone indices in parent-first order (roots first, then children).
+func _get_bone_hierarchy_order() -> Array[int]:
+	var bone_count: int = _skeleton.get_bone_count()
+	var order: Array[int] = []
+	var visited: Array[bool] = []
+	visited.resize(bone_count)
+	for i in bone_count:
+		visited[i] = false
+	# DFS from roots
+	for i in bone_count:
+		if _skeleton.get_bone_parent(i) == -1:
+			_dfs_collect_order(i, order, visited)
+	# Any remaining (disconnected) bones
+	for i in bone_count:
+		if not visited[i]:
+			_dfs_collect_order(i, order, visited)
+	return order
+
+func _dfs_collect_order(idx: int, order: Array[int], visited: Array[bool]) -> void:
+	if visited[idx]:
+		return
+	visited[idx] = true
+	order.append(idx)
+	# Add children
+	for i in _skeleton.get_bone_count():
+		if _skeleton.get_bone_parent(i) == idx:
+			_dfs_collect_order(i, order, visited)
+
+
+## Locales os squelette complet à une ancre (REV 41 — canal orientations du
+## bake) : FK globals reconstruites (exactes aux ancres : key_pose écrit tous
+## les os à chaque clé) → locales parent-relatives. Seules les rotations sont
+## consommées (les positions viennent de l'IK résolu) ; le /ms des positions
+## est déjà résorbé dans la reconstruction.
+func _capture_anchor_locals(anim: Animation, time: float) -> Dictionary:
+	var globals: Dictionary = _reconstruct_global_poses_at(anim, time)
+	var order: Array[int] = _get_bone_hierarchy_order()
+	var locals: Dictionary = {}
+	for i in order:
+		var bn: StringName = _skeleton.get_bone_name(i)
+		if not globals.has(bn):
+			continue
+		var g: Transform3D = globals[bn]
+		var p: int = _skeleton.get_bone_parent(i)
+		if p != -1:
+			var parent_bn: StringName = _skeleton.get_bone_name(p)
+			if not globals.has(parent_bn):
+				continue
+			var pg: Transform3D = globals[parent_bn]
+			var l: Transform3D = pg.affine_inverse() * g
+			locals[bn] = { &"rot": l.basis.get_rotation_quaternion() }
+		else:
+			locals[bn] = { &"rot": g.basis.get_rotation_quaternion() }
+	return locals
+
+func bake_transition_all() -> void:
+	if _skeleton == null:
+		push_warning("[AnimCreator] bake-all: rig not built")
+		return
+	var lib := _authored_lib()
+	if lib == null:
+		push_warning("[AnimCreator] bake-all: no authored lib")
+		return
+	var clip_name := String(authored_clip).strip_edges()
+	if clip_name.is_empty() or not lib.has_animation(clip_name):
+		push_warning("[AnimCreator] bake-all: clip '%s' not found" % clip_name)
+		return
+	var anim: Animation = lib.get_animation(clip_name)
+	if anim.length <= 0.0:
+		push_warning("[AnimCreator] bake-all: clip length zero")
+		return
+
+	# Preserve authored adoption state across bake (so clip stays adopted,
+	# avoiding re-adoption + forced pause when user presses play in dock)
+	var was_authored_current: String = _authored_current
+	var was_authored_want: bool = _authored_want
+
+	# 1) Collecter tous les temps d'ancrage (clés existantes sur n'importe quel track)
+	var anchors: Array[float] = _collect_anchor_times(anim)
+	if anchors.size() < 2:
+		push_warning("[AnimCreator] bake-all: need at least 2 anchor keys")
+		return
+
+	# 2) Sauvegarder l'état actuel des handles/proxies pour restauration
+	var saved_handles: Dictionary = _capture_handles_state()
+	var saved_proxies: Dictionary = _capture_proxies_state()
+
+	# 3) Relâcher toute preview active MAIS garde l'adoption authored
+	_take_want = false
+	_take_current = ""
+	# Ne PAS toucher à _authored_current / _authored_want ici
+	var a: StringName = _take_player.assigned_animation if _take_player != null else StringName("")
+	_last_release = a
+	var _rr := get_node_or_null("RigRoot") as Node3D
+	var _rigpos := (_rr as Node3D).position if _rr != null else Vector3.ZERO
+	if _take_player != null:
+		_take_player.stop()
+	if _rr != null:
+		_rr.position = _rigpos
+	if _skeleton == null:
+		return
+	_apply_override_clear()
+	_solve_pos.clear()
+	_solve_fore.clear()
+	_solve_end.clear()
+	_solve_upper.clear()
+	_solve_middle.clear()
+	_spine_solved_pos.clear()
+	_spine_solved_quat.clear()
+	if _hips != null and _rr != null:
+		_hips_goal_off = _hips.global_position - _rr.global_position
+
+	# 3b) Le rig SUIT le handle pendant le bake (comme en session
+	# interactive, REV 38) : l'IK voit le même monde que key_pose, et le
+	# shift rig→Hips écrit ensuite est réel. Position pré-bake sauvée pour
+	# restauration de l'état éditeur après boucle.
+	var saved_rig_pos := Vector3.ZERO
+	var _rr_bake := get_node_or_null("RigRoot") as Node3D
+	if _rr_bake != null:
+		saved_rig_pos = _rr_bake.global_position
+
+	# 4) Pour chaque segment [ti, ti+1], échantillonner et re-baker
+	var step: float = 1.0 / BAKE_FPS
+	var total_written: int = 0
+
+	for seg in range(anchors.size() - 1):
+		var t0: float = anchors[seg]
+		var t1: float = anchors[seg + 1]
+		if t1 <= t0:
+			continue
+
+		# Capturer les poses handles aux deux bornes (+ locales os squelette
+		# complet pour le canal orientations, REV 41)
+		var pose_a: Dictionary = _capture_handle_poses_at(t0, anim)
+		var pose_b: Dictionary = _capture_handle_poses_at(t1, anim)
+		var rots_a: Dictionary = _capture_anchor_locals(anim, t0)
+		var rots_b: Dictionary = _capture_anchor_locals(anim, t1)
+
+		# Pin statique (REV 39) : un handle quasi-immobile entre deux ancres
+		# est figé à la moyenne — pieds plantés, zéro jitter.
+		_pin_static_handles(pose_a, pose_b)
+
+		# Échantillonner le segment (exclure t1 pour éviter doublon, sauf dernier segment)
+		var t: float = t0
+		var is_last_segment: bool = (seg == anchors.size() - 2)
+		while t < t1 - 0.0001 or (is_last_segment and abs(t - t1) < 0.0001):
+			# Interpoler handles
+			var alpha: float = (t - t0) / (t1 - t0) if t1 > t0 else 0.0
+			var interp_handles: Dictionary = _interpolate_handles(pose_a, pose_b, alpha)
+
+			# Appliquer handles (POSITIONS seules, cubes au repos) + résoudre
+			# IK complet, rig-follow ACTIF. Les orientations sont reprises par
+			# slerp d'ancres à l'écriture (REV 41) : aucun double-framing des
+			# writers relatifs (poignet/cheville/dos/bassin).
+			_apply_handles_and_solve(interp_handles, false, true)
+
+			# Écrire clés denses pour tous les os à ce temps (positions =
+			# IK résolu, orientations = slerp des locales d'ancre).
+			_write_dense_keys_at(anim, t, rots_a, rots_b, alpha)
+			total_written += 1
+
+			t += step
+			# Clamp final pour le dernier point exact
+			if is_last_segment and t > t1 - 0.0001 and t < t1 + 0.0001:
+				t = t1
+
+	# 5) Restaurer handles/proxies + rig pré-bake (l'état éditeur est
+	# inchangé ; le clip reste standard : shift dans Hips, rig fixe en
+	# lecture).
+	_restore_handles_state(saved_handles)
+	_restore_proxies_state(saved_proxies)
+	if _rr_bake != null:
+		_rr_bake.global_position = saved_rig_pos
+		if _hips != null:
+			_hips_goal_off = _hips.global_position - _rr_bake.global_position
+
+	# 6) Re-capturer la base (writers reprennent la main)
+	_capture_rest_base()
+	_derive_base_refs()
+
+	# 7) Restaurer l'état d'adoption authored (le clip reste adopté)
+	_authored_current = was_authored_current
+	_authored_want = was_authored_want
+
+	# 8) Reset player position to 0 for authored clip so Play starts from beginning
+	# (player was left at end after previous playback; bake doesn't move it)
+	if _take_player != null and not was_authored_current.is_empty():
+		var target := StringName("authored/" + was_authored_current)
+		if _take_player.current_animation == target or _take_player.assigned_animation == target:
+			_take_player.seek(0.0, true)
+			print("[AnimCreator DBG] bake-all: reset player to 0.0 for %s" % target)
+
+	# Debug: verify baked animation
+	var track0_keys := anim.track_get_key_count(0)
+	var track1_keys := anim.track_get_key_count(1)
+	print("[AnimCreator DBG] bake-all verify: clip=%s, length=%.3f, track0_keys=%d, track1_keys=%d, total_written=%d" % [clip_name, anim.length, track0_keys, track1_keys, total_written])
+	# Check first and last key times on track 0
+	if track0_keys > 0:
+		var first_t := anim.track_get_key_time(0, 0)
+		var last_t := anim.track_get_key_time(0, track0_keys - 1)
+		print("[AnimCreator DBG] bake-all: first key at %.3f, last key at %.3f" % [first_t, last_t])
+	# Contrôle REV 38 : la track Hips doit porter la descente (pas une ligne plate)
+	for ti in anim.get_track_count():
+		if String(anim.track_get_path(ti)) == "GeneralSkeleton:Hips" and anim.track_get_type(ti) == Animation.TYPE_POSITION_3D:
+			var y0 := -999.0
+			var ymid := -999.0
+			for k in anim.track_get_key_count(ti):
+				var kt: float = anim.track_get_key_time(ti, k)
+				var kv: Vector3 = anim.track_get_key_value(ti, k)
+				if absf(kt - anchors[0]) < 0.0005:
+					y0 = kv.y
+				if anchors.size() > 1 and absf(kt - anchors[1]) < 0.0005:
+					ymid = kv.y
+			print("[AnimCreator DBG] bake-all: Hips pos.y @ t=%.3f → %.4f, @ t=%.3f → %.4f (drop=%.3f)" % [anchors[0], y0, anchors[1] if anchors.size() > 1 else -1.0, ymid, y0 - ymid])
+			break
+
+	print("[AnimCreator] bake-all: %s — %d keys written @ %d FPS (%d segments)" % [clip_name, total_written, BAKE_FPS, anchors.size() - 1])
+
+
+## Collecte tous les temps uniques où il y a au moins une clé (tous tracks)
+func _collect_anchor_times(anim: Animation) -> Array[float]:
+	var times_set: Dictionary = {}
+	for ti in anim.get_track_count():
+		var n: int = anim.track_get_key_count(ti)
+		for k in n:
+			var kt: float = anim.track_get_key_time(ti, k)
+			if kt >= 0.0 and kt <= anim.length:
+				times_set[kt] = true
+	var anchors: Array[float] = []
+	for k in times_set:
+		anchors.append(k)
+	anchors.sort()
+	# S'assurer que 0.0 et length sont présents
+	if not anchors.has(0.0):
+		anchors.insert(0, 0.0)
+	if not anchors.has(anim.length):
+		anchors.append(anim.length)
+	return anchors
+
+
+## Capture l'état complet des handles (position + rotation) à un temps donné
+## en lisant les clés du clip (Animation object) + FK forward → poses globales.
+## Zéro player, zéro instanciation, déterministe.
+func _capture_handle_poses_at(time: float, anim: Animation) -> Dictionary:
+	var pose: Dictionary = {}
+
+	# Reconstruire poses globales depuis les clés de l'anim (FK forward)
+	var global_poses: Dictionary = _reconstruct_global_poses_at(anim, time)
+
+	# Map handle_name -> bone_name
+	var handle_bones: Dictionary = {
+		&"Hips": &"Hips",
+		&"LeftFoot": &"LeftFoot",
+		&"RightFoot": &"RightFoot",
+		&"LeftHand": &"LeftHand",
+		&"RightHand": &"RightHand",
+		&"Torso": &"UpperChest",
+		&"Head": &"Head",
+	}
+	for h_name in handle_bones:
+		var bn: StringName = handle_bones[h_name]
+		if global_poses.has(bn):
+			var g: Transform3D = global_poses[bn]
+			pose[h_name] = {
+				&"pos": g.origin,
+				&"rot": g.basis.get_rotation_quaternion()
+			}
+
+	# DEBUG: afficher poses capturées
+	var hips_y: float = global_poses[&"Hips"].origin.y if global_poses.has(&"Hips") else 0.0
+	print("[BAKE DEBUG] capture at t=%.3f: Hips bone global pos=%.3f, anim len=%.3f" % [time, hips_y, anim.length])
+	for h_name in handle_bones:
+		if pose.has(h_name):
+			print("[BAKE DEBUG]   handle %s pos=%.3f" % [h_name, pose[h_name][&"pos"].y])
+
+	# Pôles auto : calculer depuis les poses os reconstruites (même logique que _update_auto_poles)
+	var skb: Basis = _skeleton.global_transform.basis
+	for limb in LIMB_ORDER:
+		if not LEG_BONES.has(limb):
+			continue
+		if not _poles.has(limb) or not _joint_rest.has(limb) or not _upper_rest.has(limb):
+			continue
+		var bones: Dictionary = _bones_of(limb)
+		# Root = upper bone global pos (cuisse) — threadé par bassin comme en runtime
+		var root_w: Vector3
+		if global_poses.has(bones["upper"]):
+			root_w = global_poses[bones["upper"]].origin
+		else:
+			root_w = _skeleton.to_global(_upper_rest[limb] as Vector3)
+		# Target = handle pied (si capturé) sinon end bone
+		var handle_name: StringName = &"LeftFoot" if String(limb).begins_with("Left") else &"RightFoot"
+		var target_w: Vector3
+		if pose.has(handle_name):
+			target_w = pose[handle_name][&"pos"]
+		elif global_poses.has(bones["end"]):
+			target_w = global_poses[bones["end"]].origin
+		else:
+			target_w = _skeleton.to_global(_rest[limb] as Vector3)
+		var line: Vector3 = target_w - root_w
+		if line.length() < 0.05:
+			continue
+		var along: Vector3 = line.normalized()
+		# Direction anatomique (même que _update_auto_poles)
+		var fwd := ARM_POLE_DIR
+		if _pole_dir_cap.has(limb):
+			fwd = (skb * (_pole_dir_cap[limb] as Vector3)).normalized()
+		elif LEG_BONES.has(limb):
+			var side_sign := 1.0 if String(limb).begins_with("Left") else -1.0
+			fwd = Vector3(side_sign * LEG_POLE_LAT, 0.0, 1.0).normalized()
+		var perp: Vector3 = fwd - along * fwd.dot(along)
+		if perp.length() < 0.05:
+			continue
+		var dir: Vector3 = perp.normalized()
+		var pole_pos: Vector3 = _skeleton.to_global(_joint_rest[limb] as Vector3) + dir * POLE_DIST
+		# Knee offset (si knee_copy actif)
+		if knee_copy and _knee.has(limb):
+			var knee_handle: Node3D = _knee[limb]
+			var knee_rest: Vector3 = _knee_rest_pos.get(limb, knee_handle.global_position)
+			var off: Vector3 = knee_handle.global_position - knee_rest
+			if off.length() > KNEE_OFF_MAX:
+				off = off.normalized() * KNEE_OFF_MAX
+			pole_pos += off
+		pose[&"pole_" + String(limb)] = { &"pos": pole_pos }
+
+	# Genoux handles : position = joint (middle bone) depuis poses reconstruites
+	for limb in LIMB_ORDER:
+		if not LEG_BONES.has(limb):
+			continue
+		var bones: Dictionary = _bones_of(limb)
+		if global_poses.has(bones["middle"]):
+			var knee_pos: Vector3 = global_poses[bones["middle"]].origin
+			var h_name: StringName = &"LeftKnee" if String(limb).begins_with("Left") else &"RightKnee"
+			pose[h_name] = {
+				&"pos": knee_pos,
+				&"rot": Quaternion()
+			}
+
+	return pose
+
+
+## Pin statique inter-ancres (REV 39) : si un handle bouge moins que
+## BAKE_PIN_DIST / BAKE_PIN_ANGLE entre deux ancres, ce n'est pas une
+## intention mais de la variance de solve (ex. pied +24 mm entre T-pose et
+## crouch, handles jamais touchés) — on fige les deux bornes à leur moyenne
+## (lerp positions, slerp rotations). Les mouvements voulus (>> seuil)
+## passent intacts. On mute les captures (pas le clip) : aux ancres partagées
+## chaque segment écrit une valeur unique, continuité garantie, aucun pop.
+func _pin_static_handles(pose_a: Dictionary, pose_b: Dictionary) -> void:
+	for key in pose_a:
+		if not pose_b.has(key):
+			continue
+		var a: Dictionary = pose_a[key]
+		var b: Dictionary = pose_b[key]
+		if not (a.has(&"pos") and b.has(&"pos")):
+			continue
+		var pa: Vector3 = a[&"pos"]
+		var pb: Vector3 = b[&"pos"]
+		if pa.distance_to(pb) < BAKE_PIN_DIST:
+			var mid: Vector3 = pa.lerp(pb, 0.5)
+			a[&"pos"] = mid
+			b[&"pos"] = mid
+		if a.has(&"rot") and b.has(&"rot"):
+			var qa: Quaternion = a[&"rot"]
+			var qb: Quaternion = b[&"rot"]
+			if qa.angle_to(qb) < BAKE_PIN_ANGLE:
+				var qm: Quaternion = qa.slerp(qb, 0.5)
+				a[&"rot"] = qm
+				b[&"rot"] = qm
+
+
+## Interpole deux poses de handles (alpha 0..1)
+func _interpolate_handles(pose_a: Dictionary, pose_b: Dictionary, alpha: float) -> Dictionary:
+	var out: Dictionary = {}
+	for key in pose_a:
+		if not pose_b.has(key):
+			continue
+		var a: Dictionary = pose_a[key]
+		var b: Dictionary = pose_b[key]
+		if a.has(&"pos") and b.has(&"pos"):
+			var interp: Dictionary = { &"pos": a[&"pos"].lerp(b[&"pos"], alpha) }
+			# Rotation seulement si les deux l'ont (pôles = pos seulement)
+			if a.has(&"rot") and b.has(&"rot"):
+				interp[&"rot"] = a[&"rot"].slerp(b[&"rot"], alpha)
+			out[key] = interp
+		else:
+			out[key] = a.duplicate()
+	return out
+
+
+## Applique handles interpolés aux nodes réels + lance solveurs complets
+## [param skip_rig_follow] si true, ne bouge pas RigRoot (session live : le
+## _process gère le follow lui-même avec slew).
+## [param keep_rest_rot] si true (bake REV 41), seules les POSITIONS sont
+## posées — les cubes gardent leur orientation repos : les writers relatifs
+## sortent leur base (déterministe, pas de double-framing), les orientations
+## finales viennent du slerp d'ancres à l'écriture.
+func _apply_handles_and_solve(handles: Dictionary, skip_rig_follow: bool = false, keep_rest_rot: bool = false) -> void:
+	# Appliquer positions handles visibles (mapping REV 40 : les
+	# noms logiques de capture — LeftHand, LeftFoot... — ne sont PAS les clés
+	# de _handles, cléé par membre Left/Right/LeftLeg/RightLeg).
+	for key in handles:
+		var data: Dictionary = handles[key]
+		if not data.has(&"pos"):
+			continue
+
+		# Pôles auto
+		if String(key).begins_with("pole_") and _poles.has(String(key).replace("pole_", "")):
+			var limb := String(key).replace("pole_", "")
+			(_poles[limb] as Node3D).global_position = data[&"pos"]
+			continue
+
+		# Handles nommés (Hips, pieds, mains, genoux, torse, tête)
+		var n := _handle_node(StringName(String(key)))
+		if n != null:
+			n.global_position = data[&"pos"]
+			if not keep_rest_rot and data.has(&"rot"):
+				n.global_transform.basis = Basis(data[&"rot"])
+
+	# Mettre à jour proxies (slew targets) pour correspondre aux handles
+	# Copie directe sans slew pour le bake (instantané)
+	for limb in _proxy:
+		if _handles.has(limb):
+			var h: Node3D = _handles[limb]
+			var px: Node3D = _proxy[limb]
+			px.global_position = h.global_position
+			px.global_transform.basis = h.global_transform.basis
+
+	# Résoudre dans l'ordre exact du _process : hips -> spine -> auto-poles -> limbs
+	_solve_hips()
+	_apply_spine()
+	_update_auto_poles()
+
+	# RigRoot suit Hips (comme dans _process) — skip pendant bake (rig fixe convention Mixamo)
+	if not skip_rig_follow and _hips != null:
+		var rig := get_node_or_null("RigRoot") as Node3D
+		if rig != null:
+			var goal: Vector3 = _hips.global_position - _hips_goal_off
+			rig.global_position = goal
+
+	# Solveurs membres
+	for limb in LIMB_ORDER:
+		if LEG_BONES.has(limb):
+			_solve_leg(limb)
+		else:
+			_solve_arm(limb)
+
+	# Writers poignet/cheville (même frame)
+	_apply_stored_wrist()
+	_apply_stored_ankle()
+
+
+## Écrit clés denses (position + rotation locale) pour TOUS les os à ce temps.
+## Canaux séparés (REV 41) : positions = IK résolu (+ shift Hips + /ms, même
+## logique que key_pose) ; orientations = slerp des locales d'ancre (exact
+## aux ancres, smooth entre — jamais de re-solve relatif qui appliquerait
+## deux fois les repos poignet/cheville/dos/bassin).
+## Pas de tenue auto : le bake échantillonne explicitement t=length.
+func _write_dense_keys_at(anim: Animation, time: float, rot_a: Dictionary, rot_b: Dictionary, alpha: float) -> void:
+	var idx_of := {}
+	for ti in anim.get_track_count():
+		idx_of[String(anim.track_get_path(ti)) + ":" + str(anim.track_get_type(ti))] = ti
+
+	var ms: float = _skeleton.motion_scale
+	if absf(ms) < 0.001:
+		ms = 1.0
+
+	for i in _skeleton.get_bone_count():
+		var bn := String(_skeleton.get_bone_name(i))
+		var g: Transform3D = _skeleton.get_bone_global_pose(i)
+		var p := _skeleton.get_bone_parent(i)
+		var pg := Transform3D.IDENTITY
+		if p != -1:
+			pg = _skeleton.get_bone_global_pose(p)
+		var local: Transform3D = pg.affine_inverse() * g
+
+		# Convention Mixamo (REV 38) : Root fixe, Hips porte le delta rig —
+		# MÊME source que key_pose (_authored_shift_sk). Pendant le bake le
+		# rig SUIT le handle (comme en session), donc le shift est réel.
+		var shift := Vector3.ZERO
+		if bn == &"Hips":
+			shift = _authored_shift_sk()
+
+		local.origin = local.origin / ms + pg.basis.inverse() * shift
+
+		var pk := "GeneralSkeleton:" + bn + ":" + str(Animation.TYPE_POSITION_3D)
+		var rk := "GeneralSkeleton:" + bn + ":" + str(Animation.TYPE_ROTATION_3D)
+
+		if idx_of.has(pk):
+			var ti: int = idx_of[pk]
+			var ki: int = anim.track_find_key(ti, time, Animation.FIND_MODE_EXACT)
+			if ki != -1:
+				anim.track_set_key_value(ti, ki, local.origin)
+			else:
+				anim.position_track_insert_key(ti, time, local.origin)
+
+		if idx_of.has(rk):
+			var ri: int = idx_of[rk]
+			var rj: int = anim.track_find_key(ri, time, Animation.FIND_MODE_EXACT)
+			var rq: Quaternion = local.basis.get_rotation_quaternion()
+			var bns := StringName(bn)
+			if rot_a.has(bns) and rot_b.has(bns):
+				rq = (rot_a[bns][&"rot"] as Quaternion).slerp(rot_b[bns][&"rot"] as Quaternion, alpha)
+			if rj != -1:
+				anim.track_set_key_value(ri, rj, rq)
+			else:
+				anim.rotation_track_insert_key(ri, time, rq)
+
+
+## Nœud réel pour chaque nom logique de handle (REV 40 — source unique).
+## _handles est cléé par membre (Left/Right/LeftLeg/RightLeg), _torso/_head/
+## _knee/_hips vivent à part : sans ce mapping, les écritures par noms de
+## capture (LeftHand, LeftFoot...) tombent dans le vide — les nœuds ne
+## bougent jamais et les proxies restent au repos (bras bakés en T-pose).
+func _handle_node(logical: StringName) -> Node3D:
+	match logical:
+		&"Hips":
+			return _hips
+		&"LeftHand":
+			return _handles.get(&"Left") as Node3D
+		&"RightHand":
+			return _handles.get(&"Right") as Node3D
+		&"LeftFoot":
+			return _handles.get(&"LeftLeg") as Node3D
+		&"RightFoot":
+			return _handles.get(&"RightLeg") as Node3D
+		&"LeftKnee":
+			return _knee.get(&"LeftLeg") as Node3D
+		&"RightKnee":
+			return _knee.get(&"RightLeg") as Node3D
+		&"Torso":
+			return _torso
+		&"Head":
+			return _head
+	return null
+
+
+## Sauvegarde l'état des handles visibles (cléé par noms logiques, via
+## _handle_node — usage bake-only : _capture/_restore vont ensemble).
+func _capture_handles_state() -> Dictionary:
+	var state: Dictionary = {}
+	var logicals := [&"Hips", &"LeftFoot", &"RightFoot",
+		&"LeftHand", &"RightHand",
+		&"LeftKnee", &"RightKnee",
+		&"Torso", &"Head"]
+	for logi in logicals:
+		var h := _handle_node(logi)
+		if h != null:
+			state[logi] = { &"pos": h.global_position, &"rot": h.global_transform.basis.get_rotation_quaternion() }
+	# Pôles
+	for limb in _poles:
+		var p: Node3D = _poles[limb]
+		if p != null:
+			state["pole_" + String(limb)] = { &"pos": p.global_position }
+	return state
+
+
+## Sauvegarde l'état des proxies
+func _capture_proxies_state() -> Dictionary:
+	var state: Dictionary = {}
+	for limb in _proxy:
+		var px: Node3D = _proxy[limb]
+		if px != null:
+			state[limb] = { &"pos": px.global_position, &"rot": px.global_transform.basis.get_rotation_quaternion() }
+	return state
+
+
+## Restaure l'état des handles (noms logiques via _handle_node, REV 40).
+func _restore_handles_state(state: Dictionary) -> void:
+	for key in state:
+		var data: Dictionary = state[key]
+		var key_str: String = String(key)
+		if key_str.begins_with("pole_") and _poles.has(key_str.replace("pole_", "")):
+			var limb: StringName = StringName(key_str.replace("pole_", ""))
+			(_poles[limb] as Node3D).global_position = data[&"pos"]
+			continue
+		var h := _handle_node(StringName(key_str))
+		if h != null:
+			h.global_position = data[&"pos"]
+			if data.has(&"rot"):
+				h.global_transform.basis = Basis(data[&"rot"])
+
+
+## Restaure l'état des proxies
+func _restore_proxies_state(state: Dictionary) -> void:
+	for limb in state:
+		if _proxy.has(limb):
+			var px: Node3D = _proxy[limb]
+			px.global_position = state[limb][&"pos"]
+			px.global_transform.basis = Basis(state[limb][&"rot"])
+
+
 ## Retourne le clip authored (créé si absent : longueur authored_length,
 ## step 1/60, loop NONE, 2 tracks par os pos+rot chemins GeneralSkeleton:Os —
 ## STANDARD, comme les takes : aucune track de nœud, exportable tel quel).
@@ -915,8 +1596,7 @@ func key_pose() -> void:
 	# Convention Mixamo : Root fixe à l'origine, Hips descend (os Hips porte
 	# le shift), pieds plantés, rig fixe. Rotations intactes.
 	# Exportable tel quel (Blender/autre), capsule-safe côté jeu.
-	var rig_now := (get_node_or_null("RigRoot") as Node3D).global_position if get_node_or_null("RigRoot") != null else _rig_rest
-	var off_sk := _skeleton.global_transform.basis.inverse() * (rig_now - _rig_rest)
+	var off_sk := _authored_shift_sk()
 	# Clips en MÈTRES vrais (standard Blender) : le mixer multiplie les
 	# translations évaluées par motion_scale (sondé : live == raw × ms), donc
 	# le local lu (déjà scalé) est déscalé avant écriture — sinon 5% d'erreur.
