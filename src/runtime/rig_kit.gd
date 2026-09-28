@@ -62,10 +62,8 @@ static func _armature_player(rig_root: Node3D) -> Array:
 	if skeleton == null:
 		push_error("RigKit: GeneralSkeleton not found under %s" % rig_root.name)
 		return []
-	# Unit space : NE PAS forcer motion_scale (leçon creator 27/09 — forcer
-	# 1.0 décollait les takes du sol de ~5% : la valeur d'import fait foi,
-	# partagée par creator/labo/jeu).
-	skeleton.motion_scale = 1.0
+	# Unit space : NEVER touch motion_scale (REV 29 — the 1.0 force-in was a
+	# regression: import value rules, shared by game/creator/lab).
 	var armature: Node3D = rig_root.get_node("Armature")
 	var player := AnimationPlayer.new()
 	player.name = "AnimationPlayer"
