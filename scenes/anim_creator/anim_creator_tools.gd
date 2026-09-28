@@ -224,7 +224,7 @@ var _handles := {}
 ## Code version printed at ready — stale-cache insurance (25/09: rapid
 ## edit/run cycles served mixed bytecode; if the printed REV isn't the
 ## latest, the run is void — reload).
-const SCRIPT_REV := 41
+const SCRIPT_REV := 42
 ## Auto-pole nodes (internal, invisible, created at build — never scene nodes,
 ## never user-touched; re-created on every _build, old ones freed).
 var _poles := {}
@@ -346,6 +346,8 @@ var _chain_rest_w := {}
 var _chain_len_local := {}
 var _chain_bend_ref := {}
 var _chain_side := {}
+## Per-bone hinge reference axis, local unsigned (BUG-001) — voir _derive.
+var _chain_axis := {}
 ## Arm root chain hops (per arm, base-derived — see _derive_base_refs).
 var _arm_hop := {}
 ## Solved spine orientations (world, same frame — _apply_spine runs before
@@ -1739,11 +1741,29 @@ func _derive_base_refs() -> void:
 			bref = Vector3(1, 0, 0)
 		_chain_bend_ref[limb] = bref.normalized()
 		var side := {}
+		var axis := {}
 		for key in [&"upper", &"middle"]:
 			var q0: Quaternion = (_chain_rest_w[limb] as Dictionary)[key]
-			var s: float = signf(((q0 * Vector3(1, 0, 0)).normalized()).dot(_chain_bend_ref[limb]))
+			# Axe de charnière local (BUG-001, 28/09) : le X n'est PAS la
+			# charnière sur tous les os (hauts-bras : X ⊥ hinge, Z ∥ mesuré
+			# bend 1.00/bone 0.00 ; jambes + avant-bras : X ∥). On choisit
+			# l'axe local le plus aligné avec bref et ⊥ à l'os — sinon le
+			# solver roule de 90° au repos pour y plaquer X (skin tordu).
+			var best := Vector3(1, 0, 0)
+			var best_score := -1.0
+			for c in [Vector3(1, 0, 0), Vector3(0, 1, 0), Vector3(0, 0, 1)]:
+				var wc: Vector3 = (q0 * c).normalized()
+				if absf(wc.dot(t10)) > 0.5:
+					continue
+				var score: float = absf(wc.dot(_chain_bend_ref[limb]))
+				if score > best_score:
+					best_score = score
+					best = c
+			axis[key] = best
+			var s: float = signf(((q0 * best).normalized()).dot(_chain_bend_ref[limb]))
 			side[key] = s if s != 0.0 else 1.0
 		_chain_side[limb] = side
+		_chain_axis[limb] = axis
 	# Dos/cou : q monde + origine sk + offsets vs parent (base).
 	for entry in TORSO_SPLIT + HEAD_SPLIT:
 		var t: Transform3D = _base_pose[entry[0]]
@@ -2021,10 +2041,12 @@ func _solve_leg(limb: StringName) -> void:
 	var rw: Dictionary = _chain_rest_w[limb]
 	var ll: Dictionary = _chain_len_local[limb]
 	# Thigh + shin orientations: shortest-arc length map × roll correction.
-	# Per-bone side (bind parity): each bone's X returns to its own rest side.
+	# Per-bone side (bind parity) + per-bone hinge axis (BUG-001) : each bone's
+	# hinge axis returns to its own rest side.
 	var side: Dictionary = _chain_side[limb]
-	var q_thigh: Quaternion = _aim_bone(rw[&"upper"], ll[&"upper"], t1, bend * float(side.get(&"upper", 1.0)))
-	var q_shin: Quaternion = _aim_bone(rw[&"middle"], ll[&"middle"], t2, bend * float(side.get(&"middle", 1.0)))
+	var ax: Dictionary = _chain_axis.get(limb, {})
+	var q_thigh: Quaternion = _aim_bone(rw[&"upper"], ll[&"upper"], t1, bend * float(side.get(&"upper", 1.0)), ax.get(&"upper", Vector3(1, 0, 0)))
+	var q_shin: Quaternion = _aim_bone(rw[&"middle"], ll[&"middle"], t2, bend * float(side.get(&"middle", 1.0)), ax.get(&"middle", Vector3(1, 0, 0)))
 	# Skeleton-space override targets (same space as the wrist writer).
 	# Le haut-cuisse part du bassin résolu (origine monde → skeleton space).
 	var thigh_pos_sk: Vector3 = _skeleton.global_transform.affine_inverse() * h_w
@@ -2158,8 +2180,8 @@ func _solve_arm(limb: StringName) -> void:
 	var rw: Dictionary = _chain_rest_w[limb]
 	var ll: Dictionary = _chain_len_local[limb]
 	var side: Dictionary = _chain_side[limb]
-	var q_upper: Quaternion = _aim_bone(rw[&"upper"], ll[&"upper"], t1, bend * float(side.get(&"upper", 1.0)))
-	var q_fore: Quaternion = _aim_bone(rw[&"middle"], ll[&"middle"], t2, bend * float(side.get(&"middle", 1.0)))
+	var q_upper: Quaternion = _aim_bone(rw[&"upper"], ll[&"upper"], t1, bend * float(side.get(&"upper", 1.0)), (_chain_axis.get(limb, {}) as Dictionary).get(&"upper", Vector3(1, 0, 0)))
+	var q_fore: Quaternion = _aim_bone(rw[&"middle"], ll[&"middle"], t2, bend * float(side.get(&"middle", 1.0)), (_chain_axis.get(limb, {}) as Dictionary).get(&"middle", Vector3(1, 0, 0)))
 	var upper_pos_sk: Vector3 = _skeleton.global_transform.affine_inverse() * h_w
 	var upper_sk := Transform3D(Basis(sk_inv * Basis(q_upper)), upper_pos_sk)
 	var fore_pos_sk: Vector3 = (upper_sk * _skeleton.get_bone_rest(j_idx)).origin
@@ -2187,12 +2209,13 @@ func _solve_arm(limb: StringName) -> void:
 
 
 ## Bone aiming helper: rest orientation carried by shortest-arc length map,
-## then roll-corrected so local X lands on the enforced bend axis.
+## then roll-corrected so the per-bone hinge axis (X sauf hauts-bras en Z,
+## cf. _derive — BUG-001) lands on the enforced bend axis.
 ## Deterministic, continuous, minimal roll — the anti-bistability core.
-func _aim_bone(q_rest0: Quaternion, l_local: Vector3, t_world: Vector3, bend_world: Vector3) -> Quaternion:
+func _aim_bone(q_rest0: Quaternion, l_local: Vector3, t_world: Vector3, bend_world: Vector3, axis_ref: Vector3 = Vector3(1, 0, 0)) -> Quaternion:
 	var l_w0: Vector3 = (q_rest0 * l_local).normalized()
 	var q1 := Quaternion(l_w0, t_world)
-	var x1: Vector3 = (q1 * q_rest0) * Vector3(1, 0, 0)
+	var x1: Vector3 = (q1 * q_rest0) * axis_ref
 	var ang: float = atan2(x1.cross(bend_world).dot(t_world), x1.dot(bend_world))
 	var q_roll := Quaternion(t_world, ang)
 	return (q_roll * q1 * q_rest0).normalized()
