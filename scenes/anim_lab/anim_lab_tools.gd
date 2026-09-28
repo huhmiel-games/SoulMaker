@@ -109,28 +109,52 @@ func bake_player_pack() -> void:
 		push_warning("[AnimLab] player pack bake failed")
 
 
-## Clears the dock preview residue: neither the player nor the dock resets
-## bones a take does not animate (e.g. UAL takes carry no Spine track — it
-## is stripped at import as immutable — so Spine keeps the previous take's
-## pose when hopping takes in the dock). Stop + reset all bone poses to
-## rest for a clean baseline before judging a take. Editor only, touches
-## nothing on disk.
+## Clears the dock preview residue: a take that drives no bone lets it keep
+## the previous take's pose (LEAN-001 — since the 28/09 bake the pack itself
+## carries full coverage via RigKit normalization, so this is a safety net
+## for partial takes only). Stop + reset for a clean baseline before judging
+## a take. Editor only, touches nothing on disk.
+## Reset pose via the inspector button (manual safety net, e.g. after
+## scrubbing a bent take mid-play then pausing).
 func reset_pose() -> void:
 	var player := _find_lab_player()
 	if player == null:
 		push_warning("[AnimLab] reset pose: LabPlayer not resolved")
 		return
 	player.stop()
+	_reset_undriven_bones(player)
+	print("[AnimLab] pose reset to rest — preview any take from a clean baseline")
+
+
+## Shared baseline: rest pose for every bone the newly assigned take does
+## NOT drive (targeted reset — a reset-all here would wipe the frame 0 the
+## dock just evaluated and stick the preview in T-pose until manual play).
+## No stop: the dock keeps previewing, driven bones re-evaluate next frame.
+## With a normalized pack this is a no-op (full coverage, nothing missing).
+func _reset_undriven_bones(player: AnimationPlayer) -> void:
 	var armature: Node = player.get_parent()
 	if armature == null:
-		push_warning("[AnimLab] reset pose: LabPlayer has no parent")
 		return
 	var skeleton := armature.get_node_or_null("GeneralSkeleton") as Skeleton3D
 	if skeleton == null:
-		push_warning("[AnimLab] reset pose: GeneralSkeleton not found under LabPlayer parent")
 		return
-	skeleton.reset_bone_poses()
-	print("[AnimLab] pose reset to rest — preview any take from a clean baseline")
+	var want: StringName = player.assigned_animation
+	if want == "" or not player.has_animation(want):
+		skeleton.reset_bone_poses()
+		return
+	var anim: Animation = player.get_animation(want)
+	var driven := {}
+	for i in anim.get_track_count():
+		var t := anim.track_get_type(i)
+		if t != Animation.TYPE_POSITION_3D and t != Animation.TYPE_ROTATION_3D and t != Animation.TYPE_SCALE_3D:
+			continue
+		var p: NodePath = anim.track_get_path(i)
+		if p.get_subname_count() == 0:
+			continue
+		driven[str(p.get_subname(0))] = true
+	for b in skeleton.get_bone_count():
+		if not driven.has(skeleton.get_bone_name(b)):
+			skeleton.reset_bone_pose(b)
 
 
 func _ready() -> void:
@@ -174,6 +198,10 @@ func _process(_delta: float) -> void:
 	var short := _previewed_short(player)
 	if short != "" and short != _last_take:
 		_last_take = short
+		# LEAN-001 safety net (28/09): rest the bones the new take does not
+		# drive so no residue leaks from the previous preview. Targeted
+		# (never a reset-all): the dock's evaluated frame 0 stays intact.
+		_reset_undriven_bones(player)
 		if rename_to != short:
 			rename_to = short
 		_prefill_assign(short)

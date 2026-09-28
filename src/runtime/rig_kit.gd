@@ -28,6 +28,7 @@ static func build_player(rig_root: Node3D, packs: Dictionary) -> AnimationPlayer
 			var copy := _retarget(lib.get_animation(anim_name), skeleton_path)
 			libs.add_animation("%s__%s" % [lib_id, anim_name], copy)
 			ok += 1
+	_normalize_coverage(libs, skeleton, skeleton_path)
 	player.add_animation_library("rig", libs)
 	print("[RigKit] %d animations on %s" % [ok, rig_root.name])
 	_diagnose(player, skeleton)
@@ -123,3 +124,60 @@ static func _retarget(source: Animation, skeleton_path: String) -> Animation:
 			continue
 		copy.track_set_path(i, NodePath(skeleton_path + ":" + String(path.get_subname(0))))
 	return copy
+
+
+## Coverage normalization (LEAN-001 root-cause fix, 28/09/2026): the .glb
+## import drops rest-equal tracks (proven: raw UAL spine_01 is
+## REST-constant in 86/86 takes, baked pack lacks Spine rot in 76 takes)
+## and compresses other constants to 1 key. A take that drives no Spine
+## therefore inherits the previous take's column = lean residue. Fill
+## every missing bone rotation with a rest-valued key (solo playback is
+## unchanged: from rest the bone already shows rest) and guard Hips
+## position the same way. Root is excluded on purpose (REV 31: Root stays
+## fixed, zero Root tracks by design). Read-only on motion_scale (REV 29).
+static func _normalize_coverage(libs: AnimationLibrary, skeleton: Skeleton3D, skeleton_path: String) -> void:
+	var injected := 0
+	var takes_touched := 0
+	for full in libs.get_animation_list():
+		var anim: Animation = libs.get_animation(full)
+		var rot := {}
+		var hips_pos := false
+		for i in anim.get_track_count():
+			var t := anim.track_get_type(i)
+			var p: NodePath = anim.track_get_path(i)
+			if p.get_subname_count() == 0:
+				continue
+			var b := str(p.get_subname(0))
+			if t == Animation.TYPE_ROTATION_3D:
+				rot[b] = true
+			elif t == Animation.TYPE_POSITION_3D and b == "Hips":
+				hips_pos = true
+		var added := 0
+		for b in skeleton.get_bone_count():
+			var bn := skeleton.get_bone_name(b)
+			if bn == "Root":
+				continue
+			if rot.has(bn):
+				continue
+			var rest: Transform3D = skeleton.get_bone_rest(b)
+			var ti := anim.add_track(Animation.TYPE_ROTATION_3D)
+			anim.track_set_path(ti, NodePath(skeleton_path + ":" + bn))
+			anim.track_insert_key(ti, 0.0, rest.basis.get_rotation_quaternion().normalized())
+			added += 1
+		if not hips_pos:
+			var hb := skeleton.find_bone("Hips")
+			if hb != -1:
+				var rest: Transform3D = skeleton.get_bone_rest(hb)
+				var ti := anim.add_track(Animation.TYPE_POSITION_3D)
+				anim.track_set_path(ti, NodePath(skeleton_path + ":Hips"))
+				anim.track_insert_key(ti, 0.0, rest.origin)
+				added += 1
+			else:
+				push_error("RigKit: coverage: take '%s' lacks Hips position and the skeleton has no Hips" % full)
+		if not rot.has("Hips"):
+			push_error("RigKit: coverage: take '%s' arrived without Hips rotation (suspicious pack)" % full)
+		if added > 0:
+			injected += added
+			takes_touched += 1
+	if injected > 0:
+		print("[RigKit] coverage: +%d rest tracks on %d takes (stripped-at-import bones reset-proofed)" % [injected, takes_touched])

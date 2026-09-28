@@ -1,11 +1,12 @@
 {
 	"format_version": "0.1",
 	"packs": {
-		"adventure": "res://assets/animations/adventure.glb",
 		"aerial": "res://assets/animations/aerial.glb",
 		"female": "res://assets/animations/female.glb",
 		"greatsword": "res://assets/animations/great_sword_anim.glb",
-		"melee": "res://assets/animations/sword_and_shield_anims.glb"
+		"melee": "res://assets/animations/sword_and_shield_anims.glb",
+		"ual1": "res://assets/animations/UAL1_Standard.glb",
+		"ual2": "res://assets/animations/UAL2_Standard.glb"
 	},
 	"slots": {
 		"guard_idle": {
@@ -86,14 +87,14 @@
 		"fall": {
 			"active": 0.0,
 			"clips": [
-				"adventure__falling idle"
+				"ual1__Jump"
 			],
 			"loop": true
 		},
 		"idle": {
 			"active": 0.0,
 			"clips": [
-				"adventure__idle"
+				"ual1__Idle"
 			],
 			"loop": true,
 			"variants": [
@@ -112,7 +113,7 @@
 		"land_hard": {
 			"active": 0.0,
 			"clips": [
-				"adventure__hard landing"
+				"ual1__Jump_Land"
 			],
 			"loop": false,
 			"phases": {
@@ -136,7 +137,7 @@
 		"run": {
 			"active": 0.0,
 			"clips": [
-				"adventure__running"
+				"ual1__Jog_Fwd"
 			],
 			"loop": true,
 			"variants": [
@@ -252,7 +253,7 @@
 		"walk": {
 			"active": 0.0,
 			"clips": [
-				"adventure__walking"
+				"ual1__Walk"
 			],
 			"loop": true,
 			"variants": [

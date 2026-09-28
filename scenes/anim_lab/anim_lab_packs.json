@@ -2,8 +2,6 @@
 	"_note": "Extra animation packs visible in the anim lab ONLY (merged with the moveset packs at bake time). The game never reads this file — promoting a take to gameplay means adding its pack + slot to data/characters/player_moveset.json instead (and removing it here to avoid the moveset-wins collision warning).",
 	"packs": {
 		"torch": "res://assets/animations/idle_torch.glb",
-		"ual1": "res://assets/animations/UAL1_Standard.glb",
-		"ual2": "res://assets/animations/UAL2_Standard.glb",
 		"various": "res://assets/animations/various.glb",
 		"various2": "res://assets/animations/various2.glb"
 	}

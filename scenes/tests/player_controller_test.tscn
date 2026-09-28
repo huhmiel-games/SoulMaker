@@ -200,7 +200,6 @@ mesh = SubResource("marker_mesh")
 
 [node name="Player" parent="." unique_id=1970426363 instance=ExtResource("5")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 6)
-two_handed = true
 equip_load_ratio = 0.2
 
 [node name="ImpactHost" type="Node3D" parent="." unique_id=-2094967295]
