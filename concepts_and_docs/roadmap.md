@@ -119,6 +119,8 @@ A game that is not a game: a base that lets anyone create their own souls-like w
 
 **Done** : a character created via config, replayable, exported to a light file, used as NPC without rework.
 
+> **Boundary** : animation authoring is out of scope — the dev-side anim_creator rig (built in advance during P2/P3) feeds the shared animation library; P4 consumes it, it does not build it.
+
 ---
 
 ## P5 — Narrative layer (~4 weeks)

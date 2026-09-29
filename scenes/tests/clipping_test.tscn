@@ -1,0 +1,15 @@
+[gd_scene format=3 uid="uid://4c532f5yltl7"]
+
+[ext_resource type="PackedScene" uid="uid://lclejgeynsgo" path="res://assets/meshes/outfits/universal_outfit_free/Exports/glTF (Godot-Unreal)/Modular Parts/Female_Peasant_Body.gltf" id="1_lfj3g"]
+[ext_resource type="PackedScene" uid="uid://cxpobxowjjwox" path="res://assets/meshes/characters/Superhero_Female_FullBody.gltf" id="2_v8l3v"]
+[ext_resource type="PackedScene" uid="uid://di1rk55fhibf1" path="res://assets/meshes/outfits/universal_outfit_free/Exports/glTF (Godot-Unreal)/Modular Parts/Female_Ranger_Body.gltf" id="3_2io4q"]
+
+[node name="Node3D" type="Node3D" unique_id=1327902577]
+
+[node name="Female_Peasant_Body2" parent="." unique_id=1467834386 instance=ExtResource("1_lfj3g")]
+
+[node name="Superhero_Female_FullBody" parent="." unique_id=1071056631 instance=ExtResource("2_v8l3v")]
+visible = false
+
+[node name="Female_Ranger_Body2" parent="." unique_id=1894529149 instance=ExtResource("3_2io4q")]
+visible = false

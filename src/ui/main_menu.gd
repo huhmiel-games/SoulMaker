@@ -7,6 +7,7 @@ extends GenericMenu
 
 const HUB_ENTRIES: Array = [
 	{"label": "Map editor", "open": "res://scenes/ingame_editors/map_editor_menu.tscn"},
+	{"label": "Character", "open": "res://scenes/ingame_editors/character_editor.tscn"},
 	{"label": "EXIT", "quit": true},
 ]
 

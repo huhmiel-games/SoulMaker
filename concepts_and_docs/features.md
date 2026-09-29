@@ -157,7 +157,7 @@ Legend per column: *Phase* refers to the roadmap phase (P0-P13); *Ref* points to
 | Editor error surfacing + validation banner (jump-to) | 🔒 | P1 | features/09 | Inline errors at save/export/preview |
 | Ladders (climbable level objects) | 🔒 | P3 | features/07 | Uses §1 climb locomotion |
 | Illusory walls (disappear on trigger/roll) | 🔒 | P5 | features/07 | World object + flag |
-| Animation creator (in-Godot authoring rig: hand/feet handles → authored clips) | 🟡 | P4 | WORKLOG anim_creator | Adaptation-first takes + specials deferred; fabrik-twist stack |
+| Animation creator (dev-side authoring rig in-Godot: hand/feet handles → authored clips) | 🟡 | P2–P3 (avance) | features/02, WORKLOG anim_creator | Dev-side tool feeding the shared animation library (§ skeleton + shared library) and the starter-catalog pipeline (P10) — NOT the ingame character editor (that stays 🔒 P4 below); adaptation-first takes + specials deferred; fabrik-twist stack |
 
 ## 8. Character system (P4)
 
