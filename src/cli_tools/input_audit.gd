@@ -8,8 +8,9 @@ extends SceneTree
 ##    Sticks may repeat (analog sharing is intended). Known benign overlaps
 ##    live in OVERLAP_ALLOW with their justification.
 ## 2. Every game-profile action is reachable from both devices (a pad-side
-##    source: btn/trigger/stick, and a key-side source: key/mouse), unless
-##    flagged "mirror_only" (Q re-exposes the d-pad capability, P8).
+##    source: btn/trigger/stick/triggers-feed, and a key-side source:
+##    key/mouse/wheel-feed), unless flagged "mirror_only" (Q re-exposes the
+##    d-pad capability, P8).
 ## 3. Every action name consumed in src/ — is_pressed / is_just_pressed /
 ##    is_just_released / time_held / analog / wheel_ticks args and
 ##    `action == &"x"` comparisons — names a real action of some profile
@@ -108,9 +109,9 @@ func _check_coverage(profiles: Dictionary, errors: Array[String]) -> void:
 				pad = true
 			if s.has("key") or s.has("mouse"):
 				pc = true
-		for feed in ["stick", "mouse_x", "mouse_y", "wheel"]:
+		for feed in ["stick", "mouse_x", "mouse_y", "wheel", "triggers"]:
 			if bool(e.get(feed, false)) or int(e.get(feed, -1)) >= 0:
-				if feed == "stick":
+				if feed == "stick" or feed == "triggers":
 					pad = true
 				else:
 					pc = true

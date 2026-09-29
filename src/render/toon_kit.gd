@@ -27,27 +27,55 @@ static func apply_to(root: Node) -> void:
 				original = mesh.surface_get_material(s)
 			var tex: Texture2D = null
 			var tint := Color.WHITE
+			var normal_tex: Texture2D = null
+			var normal_scale := 1.0
+			var orm_tex: Texture2D = null
+			var orm_metallic := 1.0
 			if original is StandardMaterial3D:
 				tex = (original as StandardMaterial3D).albedo_texture
 				tint = (original as StandardMaterial3D).albedo_color
-			mi.set_surface_override_material(s, material_for(tex, tint))
+				normal_tex = (original as StandardMaterial3D).normal_texture
+				normal_scale = (original as StandardMaterial3D).normal_scale
+				orm_tex = (original as StandardMaterial3D).metallic_texture
+				orm_metallic = (original as StandardMaterial3D).metallic
+			mi.set_surface_override_material(s, material_for(tex, tint, normal_tex, normal_scale, orm_tex, orm_metallic))
 
 
-## One cached material per (texture, tint). Null texture = flat tint (relief).
-static func material_for(tex: Texture2D, tint: Color) -> ShaderMaterial:
+## One cached material per (texture, tint, normal, normal scale, ORM, metal
+## factor). Null texture = flat tint (relief). Null normal = vertex normals
+## (use_normal_map off). Null ORM = matte (use_specular off: specular is
+## reserved for metal pixels, gated per-pixel by factor x ORM blue).
+static func material_for(tex: Texture2D, tint: Color, normal_tex: Texture2D = null, normal_scale: float = 1.0, orm_tex: Texture2D = null, orm_metallic: float = 1.0) -> ShaderMaterial:
 	if tex == null:
-		tex = _white_tex()
-	var key := "%d@%s" % [tex.get_instance_id(), tint.to_html()]
+		tex = white_tex()
+	var normal_id := 0
+	if normal_tex != null:
+		normal_id = normal_tex.get_instance_id()
+	var orm_id := 0
+	if orm_tex != null:
+		orm_id = orm_tex.get_instance_id()
+	var key := "%d@%s@n%d@%.3f@o%d@m%.3f" % [tex.get_instance_id(), tint.to_html(), normal_id, normal_scale, orm_id, orm_metallic]
 	if not _cache.has(key):
 		var mat := ShaderMaterial.new()
 		mat.shader = BASE_TOON
 		mat.set_shader_parameter("albedo_texture", tex)
 		mat.set_shader_parameter("albedo", Color(tint.r, tint.g, tint.b, 1.0))
+		mat.set_shader_parameter("use_normal_map", normal_tex != null)
+		if normal_tex != null:
+			mat.set_shader_parameter("texture_normal", normal_tex)
+			mat.set_shader_parameter("normal_scale", normal_scale)
+		mat.set_shader_parameter("use_specular", orm_tex != null)
+		mat.set_shader_parameter("use_orm_mask", orm_tex != null)
+		if orm_tex != null:
+			mat.set_shader_parameter("orm_texture", orm_tex)
+			mat.set_shader_parameter("orm_metallic", orm_metallic)
 		_cache[key] = mat
 	return _cache[key]
 
 
-static func _white_tex() -> Texture2D:
+## Shared 1x1 white (flat-tint backs albedo-less surfaces; reused by the
+## color editor so albedo-less targets dress identically to ToonKit's).
+static func white_tex() -> Texture2D:
 	if _white == null:
 		var img := Image.create(1, 1, false, Image.FORMAT_RGBA8)
 		img.fill(Color.WHITE)

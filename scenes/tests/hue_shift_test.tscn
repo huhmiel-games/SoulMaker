@@ -1,0 +1,68 @@
+[gd_scene format=3 uid="uid://p4m0djumle2w"]
+
+[ext_resource type="Environment" path="res://scenes/ingame_editors/env_default.tres" id="1"]
+[ext_resource type="Script" uid="uid://ewprrv0gn5qa" path="res://scenes/tests/hue_shift_test.gd" id="2"]
+[ext_resource type="PackedScene" uid="uid://d2pgaw3pit0e5" path="res://assets/meshes/outfits/universal_outfit_free/Exports/glTF (Godot-Unreal)/Modular Parts/Male_Peasant_Body.gltf" id="3"]
+[ext_resource type="PackedScene" uid="uid://dvo1af3mj66cm" path="res://assets/meshes/outfits/universal_outfit_free/Exports/glTF (Godot-Unreal)/Modular Parts/Male_Peasant_Arms.gltf" id="4"]
+[ext_resource type="PackedScene" uid="uid://6l3t06cl03q7" path="res://assets/meshes/outfits/universal_outfit_free/Exports/glTF (Godot-Unreal)/Modular Parts/Male_Peasant_Legs.gltf" id="5"]
+[ext_resource type="PackedScene" uid="uid://dmn2s0o44irrl" path="res://assets/meshes/outfits/universal_outfit_free/Exports/glTF (Godot-Unreal)/Modular Parts/Male_Peasant_Feet.gltf" id="6"]
+[ext_resource type="Script" uid="uid://c44cymw7pjxvg" path="res://src/runtime/orbit_camera_with_zoom.gd" id="7"]
+[ext_resource type="PackedScene" path="res://scenes/ui/color_editor.tscn" id="8"]
+
+[sub_resource type="PlaneMesh" id="ground_mesh"]
+size = Vector2(8, 8)
+
+[node name="HueShiftTest" type="Node3D" unique_id=781973817]
+script = ExtResource("2")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=2062334222]
+environment = ExtResource("1")
+
+[node name="Sun" type="DirectionalLight3D" parent="." unique_id=1090729982]
+transform = Transform3D(0.81915206, -0.3686878, 0.43938506, 0, 0.76604444, 0.6427876, -0.57357645, -0.52654076, 0.62750685, 0, 0, 0)
+light_energy = 1.1
+shadow_enabled = true
+
+[node name="CamPivot" type="Node3D" parent="." unique_id=594267019]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+script = ExtResource("7")
+
+[node name="SpringArm3D" type="SpringArm3D" parent="CamPivot" unique_id=1359827671]
+spring_length = 3.2
+margin = 0.3
+
+[node name="Camera3D" type="Camera3D" parent="CamPivot/SpringArm3D" unique_id=1545015513]
+current = true
+fov = 50.0
+
+[node name="Ground" type="StaticBody3D" parent="." unique_id=388235353]
+
+[node name="GroundMesh" type="MeshInstance3D" parent="Ground" unique_id=1487223244]
+mesh = SubResource("ground_mesh")
+
+[node name="Body" parent="." unique_id=260020847 instance=ExtResource("3")]
+
+[node name="Arms" parent="." unique_id=1696570018 instance=ExtResource("4")]
+
+[node name="Legs" parent="." unique_id=316716050 instance=ExtResource("5")]
+
+[node name="Feet" parent="." unique_id=999559295 instance=ExtResource("6")]
+
+[node name="HUD" type="CanvasLayer" parent="." unique_id=1290242448]
+
+[node name="State" type="Label" parent="HUD" unique_id=1307594645]
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 700.0
+offset_bottom = 200.0
+theme_override_font_sizes/font_size = 18
+text = "boot"
+
+[node name="ColorEditor" parent="HUD" unique_id=353039349 instance=ExtResource("8")]
+layout_mode = 3
+anchors_preset = 1
+offset_left = -336.0
+offset_top = 0.0
+offset_right = 0.0
+offset_bottom = 202.0
+grow_horizontal = 0

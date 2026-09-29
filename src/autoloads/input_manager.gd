@@ -124,6 +124,13 @@ const PROFILES := {
 		# capability, consumed with the quickbar at P8.
 		"quickbar_cycle": {"sources": [{"key": KEY_Q}], "mirror_only": true},
 		"lock_on": {"sources": [{"mouse": MOUSE_BUTTON_MIDDLE}, {"btn": JOY_BUTTON_RIGHT_STICK}]},
+		# Zoom (test cameras): wheel notches on mouse, L2/R2 continuous on pad
+		# — the wheel/triggers parity pair (see wheel_ticks/analog). No discrete
+		# sources: both triggers are taken (heavy/skill), overlap by design.
+		"cam_zoom": {"sources": [], "wheel": true, "triggers": true},
+		# TEMP debug (hue_shift_test NMAP on/off, removed once the normal map
+		# is validated): N on keyboard, L3 on pad — same toggle capability.
+		"nmap_toggle": {"sources": [{"key": KEY_N}, {"btn": JOY_BUTTON_LEFT_STICK}]},
 		"menu": {"sources": [{"key": KEY_ESCAPE}, {"btn": JOY_BUTTON_START}, {"btn": JOY_BUTTON_GUIDE}]},
 		"gestures": {"sources": [{"key": KEY_G}, {"btn": JOY_BUTTON_BACK}]},
 	},
