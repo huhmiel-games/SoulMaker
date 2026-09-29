@@ -13,9 +13,13 @@ extends Node3D
 ## Run: Godot --path . scenes/ingame_editors/character_editor.tscn
 
 const PART_DIR := "res://assets/meshes/outfits/universal_outfit_free/Exports/glTF (Godot-Unreal)/Modular Parts/"
+const NUDE_DIR := "res://assets/meshes/characters/"
 const GENDERS: Array[String] = ["Male", "Female"]
 const OUTFITS: Array[String] = ["Peasant", "Ranger"]
 const SLOTS: Array[StringName] = [&"Body", &"Arms", &"Legs", &"Feet", &"Head", &"Accessories"]
+## Face meshes (push must stay OFF: eyes sit millimeters above the face and
+## a pushed face would swallow them). Node names, identical in both fullbodies.
+const FACE_NODES: Array[StringName] = [&"Eyebrows", &"Eyes"]
 
 var _gender := 0
 var _outfit := {} # StringName slot -> int index into OUTFITS
@@ -32,10 +36,13 @@ func _ready() -> void:
 	for slot in SLOTS:
 		_outfit[slot] = 0
 		_apply_slot(slot)
+	_apply_nude()
 	print("[Character] ready (gender %s, all slots %s)" % [GENDERS[_gender], OUTFITS[0]])
 	_menu.enter_root(self)
 	if "--chartest" in OS.get_cmdline_user_args() or "--chartest" in OS.get_cmdline_args():
 		_run_headless_test()
+	if "--capturetest" in OS.get_cmdline_user_args() or "--capturetest" in OS.get_cmdline_args():
+		_run_capture_test()
 
 
 ## glTF file for a (gender, outfit, slot) combo, "" when the combo ships no
@@ -89,6 +96,48 @@ func _apply_all() -> void:
 		_apply_slot(slot)
 
 
+## Nude base body (Superhero fullbody: skin everywhere but underwear, head
+## included) under every outfit — the depth-push skin side. Garments cover
+## it; bare parts (head, hands, gaps) show through. Reloaded on gender swap.
+func nude_file(gender: String) -> String:
+	return "%sSuperhero_%s_FullBody.gltf" % [NUDE_DIR, gender]
+
+
+func _apply_nude() -> void:
+	var holder := get_node_or_null("Nude") as Node3D
+	if holder == null:
+		push_error("[Character] missing Nude slot node")
+		return
+	for c in holder.get_children():
+		holder.remove_child(c)
+		c.queue_free()
+	var packed := load(nude_file(GENDERS[_gender])) as PackedScene
+	if packed == null:
+		push_error("[Character] cannot load %s" % nude_file(GENDERS[_gender]))
+		return
+	holder.add_child(packed.instantiate())
+	_dresser.reset_target(holder)
+	# The nude never casts shadows: buried cloth would otherwise sit in the
+	# torso's shadow and render near-black (dark pack textures + filmic).
+	# Ground/body shadows still come from the garments; bare head/hands
+	# lose their cast shadow (editor-preview tradeoff, documented).
+	for mi in ColorEditor._meshes_under(holder):
+		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# Face meshes keep the push OFF (see FACE_NODES): the hood covers them
+	# by plain depth test, no bias needed.
+	for mi in ColorEditor._meshes_under(holder):
+		var mmi := mi as MeshInstance3D
+		if mmi == null or mmi.mesh == null:
+			continue
+		if not (StringName(mmi.name) in FACE_NODES):
+			continue
+		for s in mmi.mesh.get_surface_count():
+			var mat := mmi.get_surface_override_material(s) as ShaderMaterial
+			if mat != null:
+				ToonKit.set_skin_push(mat, 1.0, 0.0)
+	print("[Character] Nude -> %s" % nude_file(GENDERS[_gender]).get_file())
+
+
 ## Menu verbs (GenericMenu value rows: get = display, adjust(L/R) = cycle,
 ## reset(A/E) = default). Adjust ignores its return; the row re-renders.
 func gender_display() -> String:
@@ -98,12 +147,14 @@ func gender_display() -> String:
 func adjust_gender(dir: int) -> void:
 	_gender = posmod(_gender + dir, GENDERS.size())
 	_apply_all()
+	_apply_nude()
 	print("[Character] gender %s" % GENDERS[_gender])
 
 
 func reset_gender() -> void:
 	_gender = 0
 	_apply_all()
+	_apply_nude()
 
 
 func slot_display(slot: StringName) -> String:
@@ -145,9 +196,13 @@ func _run_headless_test() -> void:
 	fails += _expect("gender female", gender_display() == "Female")
 	fails += _expect("body outfit kept", slot_display(&"Body") == "Ranger")
 	fails += _expect("female body dressed", _dressed_count(&"Body") > 0)
+	fails += _expect("female nude dressed", _dressed_count(&"Nude") > 0)
 	reset_gender()
 	reset_slot(&"Body")
 	fails += _expect("back to male peasant", gender_display() == "Male" and slot_display(&"Body") == "Peasant")
+	fails += _expect("male nude dressed", _dressed_count(&"Nude") > 0)
+	fails += _expect("nude body push on", _nude_push(&"SuperHero_Male") > 0.01)
+	fails += _expect("nude eyes push off", _nude_push(&"Eyes") < 0.001)
 	# 4. Real menu Callable path (L/R = adjust.call(dir), A/E = reset.call()):
 	# the bound slot must survive the int arg (regression: bind order crash).
 	_menu._push()
@@ -185,3 +240,82 @@ func _dressed_count(slot: StringName) -> int:
 func _expect(test_name: String, cond: bool) -> int:
 	print("[CharTest] %s %s" % ["PASS" if cond else "FAIL", test_name])
 	return 0 if cond else 1
+
+
+## Render capture for headless pixel analysis (--capturetest <path>
+## [--nopush] [--nogarments]): lets the AI measure brightness/coverage
+## without image input (screenshots are unreadable to it). Needs a real
+## renderer: xvfb-run ... --rendering-driver opengl3 <scene> -- <flags>.
+func _run_capture_test() -> void:
+	var args := OS.get_cmdline_user_args()
+	var path := "/tmp/opencode/capture.png"
+	var i := args.find("--capturetest")
+	if i >= 0 and i + 1 < args.size() and not str(args[i + 1]).begins_with("--"):
+		path = str(args[i + 1])
+	if "--nopush" in args:
+		_set_push_all(0.0)
+	if "--nogarments" in args:
+		for slot in SLOTS:
+			var holder := get_node_or_null(String(slot))
+			if holder != null:
+				(holder as Node3D).visible = false
+	if "--noshadownude" in args:
+		var nude_holder := get_node_or_null("Nude")
+		if nude_holder != null:
+			for mi in ColorEditor._meshes_under(nude_holder):
+				(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	if "--nonormalmap" in args:
+		_dresser.no_normal_map = true
+		_apply_all()
+		_apply_nude()
+	if "--sunflip" in args:
+		var sun := get_node_or_null("Sun") as DirectionalLight3D
+		if sun != null:
+			sun.rotation.y += PI
+	if "--noground" in args:
+		var ground := get_node_or_null("Ground")
+		if ground != null:
+			(ground as Node3D).visible = false
+	for f in 90:
+		await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	var img := get_viewport().get_texture().get_image()
+	var err := img.save_png(path)
+	print("[CaptureTest] saved %s (%dx%d err=%s)" % [path, img.get_width(), img.get_height(), str(err)])
+	get_tree().quit()
+
+
+## Override depth_push on every dressed surface (nude + slots).
+func _set_push_all(v: float) -> void:
+	var holders: Array[String] = ["Nude"]
+	for slot in SLOTS:
+		holders.append(String(slot))
+	for h in holders:
+		var holder := get_node_or_null(h)
+		if holder == null:
+			continue
+		for mi in ColorEditor._meshes_under(holder):
+			var mmi := mi as MeshInstance3D
+			if mmi == null or mmi.mesh == null:
+				continue
+			for s in mmi.mesh.get_surface_count():
+				var mat := mmi.get_surface_override_material(s) as ShaderMaterial
+				if mat != null:
+					mat.set_shader_parameter("depth_push", v)
+
+
+## depth_push value on the first override material of a nude mesh node
+## (-1 when the node/material is missing, which fails the caller).
+func _nude_push(node_name: StringName) -> float:
+	var holder := get_node_or_null("Nude")
+	if holder == null:
+		return -1.0
+	for mi in ColorEditor._meshes_under(holder):
+		var mmi := mi as MeshInstance3D
+		if mmi == null or StringName(mmi.name) != node_name or mmi.mesh == null:
+			continue
+		for s in mmi.mesh.get_surface_count():
+			var mat := mmi.get_surface_override_material(s) as ShaderMaterial
+			if mat != null:
+				return float(mat.get_shader_parameter("depth_push"))
+	return -1.0

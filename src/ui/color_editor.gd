@@ -32,6 +32,9 @@ var _row := 0
 var _rows: Array[SliderRow] = []
 var _armed := false
 var _title: Label = null
+## Test-only (--nonormalmap capture flag): dress with vertex normals to
+## isolate normal-map path issues. Never set by the game.
+var no_normal_map := false
 
 
 func _ready() -> void:
@@ -216,8 +219,8 @@ func _dress_surface(mi: MeshInstance3D, s: int) -> ShaderMaterial:
 	mat.set_shader_parameter("hue_shift_deg", float(_params["hue"]))
 	mat.set_shader_parameter("sat_mult", float(_params["sat"]))
 	mat.set_shader_parameter("val_mult", float(_params["val"]))
-	mat.set_shader_parameter("use_normal_map", normal_tex != null)
-	if normal_tex != null:
+	mat.set_shader_parameter("use_normal_map", normal_tex != null and not no_normal_map)
+	if normal_tex != null and not no_normal_map:
 		mat.set_shader_parameter("texture_normal", normal_tex)
 		mat.set_shader_parameter("normal_scale", normal_scale)
 		print("[ColorEditor] %s surface %d: normal %s (scale %.2f)" % [mi.name, s, (normal_tex as Texture2D).resource_path, normal_scale])
@@ -230,6 +233,9 @@ func _dress_surface(mi: MeshInstance3D, s: int) -> ShaderMaterial:
 		mat.set_shader_parameter("orm_texture", orm_tex)
 		mat.set_shader_parameter("orm_metallic", orm_metallic)
 		print("[ColorEditor] %s surface %d: orm %s (metallic %.2f, spec masked)" % [mi.name, s, (orm_tex as Texture2D).resource_path, orm_metallic])
+	# Depth-push: skin (non-metal) writes depth 12mm back so buried cloth
+	# wins; garments keep true depth. Same rule as ToonKit.
+	ToonKit.set_skin_push(mat, orm_metallic)
 	mi.set_surface_override_material(s, mat)
 	return mat
 

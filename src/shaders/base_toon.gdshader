@@ -65,6 +65,18 @@ uniform bool use_normal_map = false;
 uniform sampler2D texture_normal : hint_normal,filter_linear_mipmap,repeat_enable;
 uniform float normal_scale : hint_range(-16,16) = 1.0;
 
+// Depth-push (anti garment poke-through, 29/09 — replaces the depth-kill
+// discard, which Forward+'s depth prepass defeats: by color-pass time the
+// depth buffer already holds the nearest surface, so sampling it can never
+// see a buried garment). Skin writes its depth pushed back by depth_push
+// meters (poke 8mm measured 29/09, push 12mm + margin): the garment's true
+// depth wins wherever cloth sits within the band, in prepass AND color
+// pass, regardless of draw order. Geometry untouched (no thinner bare
+// skin): only depth values move. Bare skin vs background unaffected;
+// skin-vs-skin keeps relative order (same push everywhere).
+uniform float depth_push = 0.0;
+uniform bool use_depth_push = true;
+
 varying vec3 vertex_pos;
 varying vec3 normal;
 
@@ -93,6 +105,27 @@ void vertex() {
 }
 
 void fragment() {
+
+// Depth-push (see uniforms). Godot 4.7 spatial-reference rules:
+// (1) DEPTH must be written on EVERY branch — unwritten = uninitialized
+// garbage on strict drivers; (2) clip space differs per renderer
+// (CLIP_SPACE_FAR 0.0 Forward+/Mobile = [0,1], -1.0 Compatibility =
+// [-1,1]), so the Godot-3 *0.5+0.5 mapping only fits Compatibility;
+// (3) no push in the shadow pass — the push is a camera-view trick,
+// light-space depths stay true. Nested ifs (no && short-circuit).
+	if (IN_SHADOW_PASS) {
+    	DEPTH = FRAGCOORD.z;
+	} else if (use_depth_push == true) {
+	    if (depth_push > 0.0) {
+	        vec4 clip = PROJECTION_MATRIX * vec4(0.0, 0.0, VERTEX.z - depth_push, 1.0);
+	        float ndc = clip.z / clip.w;
+	        DEPTH = (CLIP_SPACE_FAR < -0.5) ? ndc * 0.5 + 0.5 : ndc;
+	    } else {
+        	DEPTH = FRAGCOORD.z;
+    	}
+	} else {
+	    DEPTH = FRAGCOORD.z;
+	}
 
 	vec4 albedo_tex = texture(albedo_texture,UV);
 	vec3 hsv = rgb2hsv(albedo_tex.rgb);

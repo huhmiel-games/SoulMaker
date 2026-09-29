@@ -96,6 +96,9 @@ const PROFILES := {
 		"pause_menu": {"sources": [{"btn": JOY_BUTTON_START}]},
 		"rename": {"sources": [{"key": KEY_F2}, {"btn": JOY_BUTTON_START, "shifted": true}]},
 		"menu": {"sources": [{"key": KEY_ESCAPE}, {"btn": JOY_BUTTON_GUIDE}]},
+		# Zoom mirror (test/character cameras): same wheel+L2/R2 capability
+		# as the game table, no discrete sources (nothing taken in editor).
+		"cam_zoom": {"sources": [], "wheel": true, "triggers": true},
 	},
 	# Frozen game table (features/11 + DS3 gaps). Defined but NOT consumed
 	# until the P2 player controller — input_audit.gd still validates it.
