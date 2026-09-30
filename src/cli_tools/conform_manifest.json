@@ -1,0 +1,115 @@
+{
+  "_note": "Garment-fit bake (route A, 30/09). REBUILD ONLY — outputs are derived from the vendor pack (see .../Modular Parts/License_Standard.txt, redistribution forbidden): _Fitted.glb files live in <outdir> under assets/ (gitignored, ADR-017) and are NEVER versioned. This manifest + conform_garments.py ARE the versioned source of truth. Fresh clone flow: drop the vendor pack in place, run: python3 src/cli_tools/conform_garments.py --manifest src/cli_tools/conform_manifest.json --root .",
+  "outdir": "assets/meshes/outfits/fitted",
+  "defaults": {
+	"margin": 0.008,
+	"max_push": 0.06,
+	"smooth_iters": 3,
+	"ride_radius": 0.015,
+	"interior_dot": -0.2,
+	"skip_material_substr": "Regular"
+  },
+  "order": [
+	{
+	  "name": "Male_Body_over_Legs",
+	  "outer": "Male_Peasant_Body",
+	  "inner": "Male_Peasant_Legs",
+	  "nude": "assets/meshes/characters/Superhero_Male_FullBody.gltf",
+	  "band": "0.85,1.10",
+	  "gap": 0.003
+	},
+	{
+	  "name": "Male_Body_over_Arms",
+	  "outer": "Male_Peasant_Body",
+	  "inner": "Male_Peasant_Arms",
+	  "nude": "assets/meshes/characters/Superhero_Male_FullBody.gltf",
+	  "band": "1.30,1.62",
+	  "gap": 0.003
+	},
+	{
+	  "name": "Female_Body_over_Legs",
+	  "outer": "Female_Peasant_Body",
+	  "inner": "Female_Peasant_Legs",
+	  "nude": "assets/meshes/characters/Superhero_Female_FullBody.gltf",
+	  "band": "0.85,1.10",
+	  "gap": 0.003
+	},
+	{
+	  "name": "Female_Body_over_Arms",
+	  "outer": "Female_Peasant_Body",
+	  "inner": "Female_Peasant_Arms",
+	  "nude": "assets/meshes/characters/Superhero_Female_FullBody.gltf",
+	  "band": "1.30,1.62",
+	  "gap": 0.003
+	}
+  ],
+  "parts": [
+	{
+	  "name": "Male_Peasant_Body",
+	  "nude": "assets/meshes/characters/Superhero_Male_FullBody.gltf",
+	  "part": "assets/meshes/outfits/universal_outfit_free/Exports/glTF (Godot-Unreal)/Modular Parts/Male_Peasant_Body.gltf",
+	  "window": "0.85,1.62,any",
+	  "hug_window": "1.02,1.62,any",
+	  "axes": "0.0,0.01,0.0,0.01",
+	  "axes_limb": "0.20,0.32,-0.07,-0.32,-0.07",
+	  "margin": 0.008
+	},
+	{
+	  "name": "Male_Peasant_Arms",
+	  "nude": "assets/meshes/characters/Superhero_Male_FullBody.gltf",
+	  "part": "assets/meshes/outfits/universal_outfit_free/Exports/glTF (Godot-Unreal)/Modular Parts/Male_Peasant_Arms.gltf",
+	  "window": "1.30,1.60,sign",
+	  "exclude_x": 0.15,
+	  "axes": "0.32,-0.07,-0.32,-0.07",
+	  "margin": 0.006
+	},
+	{
+	  "name": "Male_Peasant_Legs",
+	  "nude": "assets/meshes/characters/Superhero_Male_FullBody.gltf",
+	  "part": "assets/meshes/outfits/universal_outfit_free/Exports/glTF (Godot-Unreal)/Modular Parts/Male_Peasant_Legs.gltf",
+	  "window": "0.30,1.15,sign",
+	  "axes": "0.09,-0.03,-0.09,-0.03",
+	  "margin": 0.006
+	},
+	{
+	  "name": "Male_Peasant_Feet",
+	  "nude": "assets/meshes/characters/Superhero_Male_FullBody.gltf",
+	  "part": "assets/meshes/outfits/universal_outfit_free/Exports/glTF (Godot-Unreal)/Modular Parts/Male_Peasant_Feet.gltf",
+	  "window": "-0.05,0.50,sign",
+	  "axes": "0.11,-0.06,-0.11,-0.06"
+	},
+	{
+	  "name": "Female_Peasant_Body",
+	  "nude": "assets/meshes/characters/Superhero_Female_FullBody.gltf",
+	  "part": "assets/meshes/outfits/universal_outfit_free/Exports/glTF (Godot-Unreal)/Modular Parts/Female_Peasant_Body.gltf",
+	  "window": "0.85,1.62,any",
+	  "hug_window": "1.02,1.62,any",
+	  "axes": "0.0,0.01,0.0,0.01",
+	  "axes_limb": "0.20,0.30,-0.07,-0.30,-0.07"
+	},
+	{
+	  "name": "Female_Peasant_Arms",
+	  "nude": "assets/meshes/characters/Superhero_Female_FullBody.gltf",
+	  "part": "assets/meshes/outfits/universal_outfit_free/Exports/glTF (Godot-Unreal)/Modular Parts/Female_Peasant_Arms.gltf",
+	  "window": "1.30,1.60,sign",
+	  "exclude_x": 0.15,
+	  "axes": "0.30,-0.07,-0.30,-0.07",
+	  "margin": 0.006
+	},
+	{
+	  "name": "Female_Peasant_Legs",
+	  "nude": "assets/meshes/characters/Superhero_Female_FullBody.gltf",
+	  "part": "assets/meshes/outfits/universal_outfit_free/Exports/glTF (Godot-Unreal)/Modular Parts/Female_Peasant_Legs.gltf",
+	  "window": "0.30,1.15,sign",
+	  "axes": "0.09,-0.03,-0.09,-0.03",
+	  "margin": 0.006
+	},
+	{
+	  "name": "Female_Peasant_Feet",
+	  "nude": "assets/meshes/characters/Superhero_Female_FullBody.gltf",
+	  "part": "assets/meshes/outfits/universal_outfit_free/Exports/glTF (Godot-Unreal)/Modular Parts/Female_Peasant_Feet.gltf",
+	  "window": "-0.05,0.50,sign",
+	  "axes": "0.10,-0.06,-0.10,-0.06"
+	}
+  ]
+}

@@ -13,6 +13,7 @@ extends Node3D
 ## Run: Godot --path . scenes/ingame_editors/character_editor.tscn
 
 const PART_DIR := "res://assets/meshes/outfits/universal_outfit_free/Exports/glTF (Godot-Unreal)/Modular Parts/"
+const FITTED_DIR := "res://assets/meshes/outfits/fitted/"
 const NUDE_DIR := "res://assets/meshes/characters/"
 const GENDERS: Array[String] = ["Male", "Female"]
 const OUTFITS: Array[String] = ["Peasant", "Ranger"]
@@ -20,6 +21,14 @@ const SLOTS: Array[StringName] = [&"Body", &"Arms", &"Legs", &"Feet", &"Head", &
 ## Face meshes (push must stay OFF: eyes sit millimeters above the face and
 ## a pushed face would swallow them). Node names, identical in both fullbodies.
 const FACE_NODES: Array[StringName] = [&"Eyebrows", &"Eyes"]
+## Fitted parts (route A, 30/09 — replaces shader inflate passes 1+2,
+## REVERTED: uniform size-up ballooned rigid pieces and cracked hard folds
+## open; per-vertex conforming preserves the authored style instead).
+## _fitted_or_raw() loads the `_Fitted.glb` conformed variant from FITTED_DIR
+## (garment pushed to nude + margin, scripted bake in
+## src/cli_tools/conform_garments.py + conform_manifest.json)
+## when present, else the raw vendor part. Skin embedded in garment parts
+## (bare forearms in Arms) is cleaned asset-side by the human.
 
 var _gender := 0
 var _outfit := {} # StringName slot -> int index into OUTFITS
@@ -69,6 +78,23 @@ func part_file(gender: String, outfit: String, slot: StringName) -> String:
 	return ""
 
 
+## Conformed variant of a vendor part path: `fitted/` bake dir first, then
+## the legacy alongside-vendor location (transition), else the raw path
+## unchanged (empty in = empty out). Keeps the editor working before/during
+## baking and on clones without the local bake (vendor pack is
+## redistribution-forbidden: fitted files are local rebuilds, never versioned).
+func _fitted_or_raw(path: String) -> String:
+	if path.is_empty():
+		return ""
+	var fitted := FITTED_DIR + path.get_file().get_basename() + "_Fitted.glb"
+	if FileAccess.file_exists(fitted):
+		return fitted
+	var legacy := path.get_basename() + "_Fitted.glb"
+	if FileAccess.file_exists(legacy):
+		return legacy
+	return path
+
+
 ## Swap one slot to its current (gender, outfit) combo, dressed toon.
 func _apply_slot(slot: StringName) -> void:
 	var holder := get_node_or_null(String(slot)) as Node3D
@@ -78,7 +104,7 @@ func _apply_slot(slot: StringName) -> void:
 	for c in holder.get_children():
 		holder.remove_child(c)
 		c.queue_free()
-	var path := part_file(GENDERS[_gender], OUTFITS[int(_outfit[slot])], slot)
+	var path := _fitted_or_raw(part_file(GENDERS[_gender], OUTFITS[int(_outfit[slot])], slot))
 	if path.is_empty():
 		print("[Character] %s: no part (%s %s)" % [String(slot), GENDERS[_gender], OUTFITS[int(_outfit[slot])]])
 		return
@@ -203,6 +229,16 @@ func _run_headless_test() -> void:
 	fails += _expect("male nude dressed", _dressed_count(&"Nude") > 0)
 	fails += _expect("nude body push on", _nude_push(&"SuperHero_Male") > 0.01)
 	fails += _expect("nude eyes push off", _nude_push(&"Eyes") < 0.001)
+	fails += _expect("fitted fallback empty", _fitted_or_raw("") == "")
+	fails += _expect("fitted fallback raw", _fitted_or_raw(PART_DIR + "Nope.gltf") == PART_DIR + "Nope.gltf")
+	var _legs_path := _fitted_or_raw(part_file("Male", "Peasant", &"Legs"))
+	fails += _expect("legs fitted or raw fallback", _legs_path.ends_with("_Fitted.glb") or _legs_path.ends_with("Male_Peasant_Legs.gltf"))
+	if not _legs_path.ends_with("_Fitted.glb"):
+		print("[CharTest] NOTICE raw fallback (no local fitted bake — rebuild: conform_manifest.json)")
+	fails += _expect("body albedo wired", _slot_tex(&"Body") != null)
+	adjust_slot(&"Head", 1)
+	fails += _expect("hood shown", slot_display(&"Head") == "Ranger")
+	reset_slot(&"Head")
 	# 4. Real menu Callable path (L/R = adjust.call(dir), A/E = reset.call()):
 	# the bound slot must survive the int arg (regression: bind order crash).
 	_menu._push()
@@ -285,7 +321,7 @@ func _run_capture_test() -> void:
 	get_tree().quit()
 
 
-## Override depth_push on every dressed surface (nude + slots).
+## Override depth-push on every dressed surface (nude + slots).
 func _set_push_all(v: float) -> void:
 	var holders: Array[String] = ["Nude"]
 	for slot in SLOTS:
@@ -302,6 +338,33 @@ func _set_push_all(v: float) -> void:
 				var mat := mmi.get_surface_override_material(s) as ShaderMaterial
 				if mat != null:
 					mat.set_shader_parameter("depth_push", v)
+
+
+## First dressed override material under a slot holder (null when the
+## holder is missing/empty/undressed).
+func _first_mat(slot: StringName) -> ShaderMaterial:
+	var holder := get_node_or_null(String(slot))
+	if holder == null:
+		return null
+	for mi in ColorEditor._meshes_under(holder):
+		var mmi := mi as MeshInstance3D
+		if mmi == null or mmi.mesh == null:
+			continue
+		for s in mmi.mesh.get_surface_count():
+			var mat := mmi.get_surface_override_material(s) as ShaderMaterial
+			if mat != null:
+				return mat
+	return null
+
+
+## albedo_texture on the first override material under a slot holder (null
+## when missing/unwired — the white-material regression, 30/09: fitted .glb
+## moved folders without its texture URIs).
+func _slot_tex(slot: StringName) -> Texture2D:
+	var mat := _first_mat(slot)
+	if mat == null:
+		return null
+	return mat.get_shader_parameter("albedo_texture") as Texture2D
 
 
 ## depth_push value on the first override material of a nude mesh node
