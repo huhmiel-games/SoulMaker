@@ -38,6 +38,12 @@ static func bake_to(tree_root: Node, out_path: String, tag: String) -> Error:
 		push_error("[%s] FAIL: empty library" % tag)
 		holder.free()
 		return ERR_CANT_CREATE
+	var rig_skel := rig.get_node_or_null("Armature/GeneralSkeleton") as Skeleton3D
+	if rig_skel == null:
+		push_error("[%s] FAIL: no skeleton on bake rig" % tag)
+		holder.free()
+		return ERR_CANT_CREATE
+	_strip_unknown_bones(libs, rig_skel, tag)
 	var hidden := hidden_takes()
 	var skipped := 0
 	var renames := renames_map()
@@ -77,6 +83,39 @@ static func bake_to(tree_root: Node, out_path: String, tag: String) -> Error:
 		return err
 	print("[%s] OK: %s (%d anims)" % [tag, out_path, libs.get_animation_list().size()])
 	return OK
+
+
+## Drops bone tracks the bake rig does not own (01/10: the 12 fingertip /
+## toe-tip leafs have no bonemap entry, so reimports rename them out from
+## under the pack — hundreds of AnimationMixer warnings in the lab).
+## The pack may only address the rig: anything else is import-generation
+## noise. Runs after coverage (injected rest tracks always survive).
+static func _strip_unknown_bones(libs: AnimationLibrary, skeleton: Skeleton3D, tag: String) -> void:
+	var known := {}
+	for b in skeleton.get_bone_count():
+		known[skeleton.get_bone_name(b)] = true
+	var takes := 0
+	var tracks := 0
+	for full in libs.get_animation_list():
+		var anim: Animation = libs.get_animation(full)
+		var cut := 0
+		for i in range(anim.get_track_count() - 1, -1, -1):
+			var t := anim.track_get_type(i)
+			if t != Animation.TYPE_POSITION_3D and t != Animation.TYPE_ROTATION_3D and t != Animation.TYPE_SCALE_3D:
+				continue
+			var p: NodePath = anim.track_get_path(i)
+			if p.get_subname_count() == 0:
+				continue
+			if not known.has(str(p.get_subname(0))):
+				anim.remove_track(i)
+				cut += 1
+		if cut > 0:
+			takes += 1
+			tracks += cut
+	if tracks > 0:
+		print("[%s] stripped %d unknown-bone tracks on %d takes" % [tag, tracks, takes])
+	else:
+		print("[%s] stripped 0 (pack already rig-clean)" % tag)
 
 
 ## Moveset packs + lab-only extra packs (lab ids never override moveset ids).

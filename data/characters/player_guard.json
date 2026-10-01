@@ -2,9 +2,9 @@
   "schema": "guard_v0.1",
   "comment": "P3 S1 graybox guard (features/17 block/guard): shield classes + equipped shield. P8 inventory owns items — this file migrates into the shield item payload then (guard_absorb/stability_mult/block_arc already the shared stat block shape).",
   "shield_classes": {
-    "light": {"guard_absorb": 0.75, "stability_mult": 1.5, "block_arc": 60.0},
-    "medium": {"guard_absorb": 0.9, "stability_mult": 1.0, "block_arc": 75.0},
-    "great": {"guard_absorb": 1.0, "stability_mult": 0.6, "block_arc": 90.0}
+	"light": {"guard_absorb": 0.75, "stability_mult": 1.5, "block_arc": 60.0},
+	"medium": {"guard_absorb": 0.9, "stability_mult": 1.0, "block_arc": 75.0},
+	"great": {"guard_absorb": 1.0, "stability_mult": 0.6, "block_arc": 90.0}
   },
   "equipped_shield": "medium"
 }

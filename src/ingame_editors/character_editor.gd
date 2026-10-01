@@ -21,6 +21,10 @@ const SLOTS: Array[StringName] = [&"Body", &"Arms", &"Legs", &"Feet", &"Head", &
 ## Face meshes (push must stay OFF: eyes sit millimeters above the face and
 ## a pushed face would swallow them). Node names, identical in both fullbodies.
 const FACE_NODES: Array[StringName] = [&"Eyebrows", &"Eyes"]
+## Anim-fit probe pack (take names inside are already "lib__clip", e.g.
+## "ual1__Walk"; the "rig/" prefix is the player library name, same as game).
+const ANIM_PACK := "res://scenes/anim_lab/player_pack.res"
+const ANIM_DEFAULT_TAKE := "rig/ual1__Walk"
 ## Fitted parts (route A, 30/09 — replaces shader inflate passes 1+2,
 ## REVERTED: uniform size-up ballooned rigid pieces and cracked hard folds
 ## open; per-vertex conforming preserves the authored style instead).
@@ -34,6 +38,12 @@ var _gender := 0
 var _outfit := {} # StringName slot -> int index into OUTFITS
 var _dresser: ColorEditor = null
 var _menu: CharacterMenu = null
+var _anim_active := false
+var _anim_player: AnimationPlayer = null
+var _anim_master: Skeleton3D = null
+var _anim_targets: Array[Skeleton3D] = []
+var _anim_pairs: Array = [] # per target: Array of [master_idx, target_idx]
+var _anim_frame := 0
 
 
 func _ready() -> void:
@@ -52,6 +62,8 @@ func _ready() -> void:
 		_run_headless_test()
 	if "--capturetest" in OS.get_cmdline_user_args() or "--capturetest" in OS.get_cmdline_args():
 		_run_capture_test()
+	if _animtest_wanted():
+		_animtest_setup()
 
 
 ## glTF file for a (gender, outfit, slot) combo, "" when the combo ships no
@@ -175,12 +187,16 @@ func adjust_gender(dir: int) -> void:
 	_apply_all()
 	_apply_nude()
 	print("[Character] gender %s" % GENDERS[_gender])
+	if _anim_active:
+		_animtest_setup()
 
 
 func reset_gender() -> void:
 	_gender = 0
 	_apply_all()
 	_apply_nude()
+	if _anim_active:
+		_animtest_setup()
 
 
 func slot_display(slot: StringName) -> String:
@@ -192,11 +208,15 @@ func slot_display(slot: StringName) -> String:
 func adjust_slot(slot: StringName, dir: int) -> void:
 	_outfit[slot] = posmod(int(_outfit[slot]) + dir, OUTFITS.size())
 	_apply_slot(slot)
+	if _anim_active:
+		_animtest_setup()
 
 
 func reset_slot(slot: StringName) -> void:
 	_outfit[slot] = 0
 	_apply_slot(slot)
+	if _anim_active:
+		_animtest_setup()
 
 
 ## Headless self-test (--chartest): table lookups, live swap dressing, gender
@@ -382,3 +402,151 @@ func _nude_push(node_name: StringName) -> float:
 			if mat != null:
 				return float(mat.get_shader_parameter("depth_push"))
 	return -1.0
+
+
+## Anim-fit probe (--animtest [--animtake=rig/...]): plays a game take on the
+## mannequin so the fit can be judged IN MOTION. No retarget: pack and parts
+## share the same Standard bones (imports aligned per rig vendor 01/10), so
+## one master player on the nude skeleton drives all — part skeletons receive
+## copied local poses per frame (manual advance first: zero lag,
+## deterministic, pausable).
+## Other anims: Remote debugger -> CharacterEditor -> anim_player() -> play().
+func anim_player() -> AnimationPlayer:
+	return _anim_player
+
+
+func _animtest_wanted() -> bool:
+	return "--animtest" in OS.get_cmdline_user_args() or "--animtest" in OS.get_cmdline_args()
+
+
+func _animtest_take() -> String:
+	for a in OS.get_cmdline_user_args() + OS.get_cmdline_args():
+		if str(a).begins_with("--animtake="):
+			return str(a).trim_prefix("--animtake=")
+	return ANIM_DEFAULT_TAKE
+
+
+func _slot_skeleton(slot: StringName) -> Skeleton3D:
+	var holder := get_node_or_null(String(slot))
+	if holder == null:
+		return null
+	var found := holder.find_children("*", "Skeleton3D", true, false)
+	if found.is_empty():
+		return null
+	return found[0] as Skeleton3D
+
+
+func _animtest_teardown() -> void:
+	_anim_active = false
+	_anim_master = null
+	_anim_targets.clear()
+	_anim_pairs.clear()
+	if _anim_player != null and is_instance_valid(_anim_player):
+		_anim_player.queue_free()
+	_anim_player = null
+
+
+func _animtest_setup() -> void:
+	_animtest_teardown()
+	_anim_frame = 0
+	var master := _slot_skeleton(&"Nude")
+	if master == null:
+		push_error("[AnimTest] no nude skeleton")
+		return
+	var pack := load(ANIM_PACK) as AnimationLibrary
+	if pack == null:
+		push_error("[AnimTest] cannot load %s" % ANIM_PACK)
+		return
+	_anim_player = AnimationPlayer.new()
+	_anim_player.name = "AnimTestPlayer"
+	add_child(_anim_player)
+	_anim_player.playback_process_mode = AnimationPlayer.ANIMATION_PROCESS_MANUAL
+	var libs := AnimationLibrary.new()
+	for anim_name in pack.get_animation_list():
+		libs.add_animation(anim_name, _animtest_remap(pack.get_animation(anim_name), master))
+	_anim_player.add_animation_library("rig", libs)
+	var take := _animtest_take()
+	if not _anim_player.has_animation(take):
+		take = RigKit.pick(_anim_player, "ual1", ["Walk"])
+		print("[AnimTest] take missing, fallback %s" % take)
+	if take == &"" or not _anim_player.has_animation(take):
+		push_error("[AnimTest] no playable take")
+		return
+	_anim_master = master
+	var holders: Array[String] = ["Nude"]
+	for slot in SLOTS:
+		holders.append(String(slot))
+	var mcount := master.get_bone_count()
+	for h in holders:
+		var sk := _slot_skeleton(StringName(h))
+		if sk == null or sk == master:
+			continue
+		var pairs := []
+		for mi in range(mcount):
+			var ti := sk.find_bone(master.get_bone_name(mi))
+			if ti != -1:
+				pairs.append([mi, ti])
+		_anim_targets.append(sk)
+		_anim_pairs.append(pairs)
+	_anim_player.play(take)
+	_anim_active = true
+	print("[AnimTest] playing %s on %s (+%d part skeletons), player %s" % [take, master.get_path(), _anim_targets.size(), _anim_player.get_path()])
+	print("[AnimTest] Remote: CharacterEditor.anim_player().play(\"rig/<take>\")")
+
+
+## Copy of a pack take with every bone track rebound to the master skeleton.
+## Identity mapping (01/10 rebake): pack and skeletons both speak Standard
+## (imports re-aligned per rig vendor, leafs stripped at bake) — a take bone
+## the master does not own is dropped + reported, never silent.
+func _animtest_remap(anim: Animation, master: Skeleton3D) -> Animation:
+	var out := anim.duplicate()
+	out.set_loop_mode(Animation.LOOP_LINEAR)
+	# Paths resolve against the player's root_node (default ".." = this
+	# editor), NOT against the player itself: base is self->master.
+	var base := str(get_path_to(master))
+	var dropped := []
+	for i in range(anim.get_track_count() - 1, -1, -1):
+		var t := anim.track_get_type(i)
+		var p: NodePath = anim.track_get_path(i)
+		if (t == Animation.TYPE_POSITION_3D or t == Animation.TYPE_ROTATION_3D or t == Animation.TYPE_SCALE_3D) and p.get_subname_count() > 0:
+			var dst := str(p.get_subname(0))
+			if master.find_bone(dst) == -1:
+				if not dropped.has(dst):
+					dropped.append(dst)
+				out.remove_track(i)
+				continue
+			out.track_set_path(i, NodePath(base + ":" + dst))
+		else:
+			out.remove_track(i)
+	if not dropped.is_empty():
+		dropped.erase("Root") # by design: Root stays fixed (same call as RigKit REV 31)
+		if not dropped.is_empty():
+			print("[AnimTest] unmapped bones dropped: %s" % ",".join(dropped))
+	return out
+
+
+func _process(delta: float) -> void:
+	if not _anim_active or _anim_player == null or _anim_master == null:
+		return
+	if not is_instance_valid(_anim_master):
+		return
+	if _anim_player.is_playing():
+		_anim_player.advance(delta)
+	_anim_frame += 1
+	if _anim_frame == 60:
+		var moved := 0
+		for b in _anim_master.get_bone_count():
+			if not _anim_master.get_bone_pose(b).is_equal_approx(Transform3D.IDENTITY):
+				moved += 1
+		print("[AnimTest] motion check @f60: %d/%d master bones off rest" % [moved, _anim_master.get_bone_count()])
+	for t in range(_anim_targets.size()):
+		var tgt := _anim_targets[t]
+		if not is_instance_valid(tgt):
+			continue
+		var pairs: Array = _anim_pairs[t]
+		for p in pairs:
+			var mi: int = p[0]
+			var ti: int = p[1]
+			tgt.set_bone_pose_position(ti, _anim_master.get_bone_pose_position(mi))
+			tgt.set_bone_pose_rotation(ti, _anim_master.get_bone_pose_rotation(mi))
+			tgt.set_bone_pose_scale(ti, _anim_master.get_bone_pose_scale(mi))
