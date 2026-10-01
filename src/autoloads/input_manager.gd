@@ -99,6 +99,9 @@ const PROFILES := {
 		# Zoom mirror (test/character cameras): same wheel+L2/R2 capability
 		# as the game table, no discrete sources (nothing taken in editor).
 		"cam_zoom": {"sources": [], "wheel": true, "triggers": true},
+		# TEMP debug (character_editor X-ray skin/garments toggle, removed
+		# once the cut is validated): N on keyboard, L3 on pad.
+		"xray_toggle": {"sources": [{"key": KEY_N}, {"btn": JOY_BUTTON_LEFT_STICK}]},
 	},
 	# Frozen game table (features/11 + DS3 gaps). Defined but NOT consumed
 	# until the P2 player controller — input_audit.gd still validates it.

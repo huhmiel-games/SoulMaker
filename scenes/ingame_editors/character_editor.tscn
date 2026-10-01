@@ -53,6 +53,8 @@ mesh = SubResource("ground_mesh")
 
 [node name="Accessories" type="Node3D" parent="." unique_id=1963531604]
 
+[node name="Avatar" type="Node3D" parent="." unique_id=1717000002]
+
 [node name="MenuLayer" type="CanvasLayer" parent="." unique_id=485800586]
 
 [node name="MenuBack" type="ColorRect" parent="MenuLayer" unique_id=839810958]
