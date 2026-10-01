@@ -25,6 +25,11 @@ const FACE_NODES: Array[StringName] = [&"Eyebrows", &"Eyes"]
 ## "ual1__Walk"; the "rig/" prefix is the player library name, same as game).
 const ANIM_PACK := "res://scenes/anim_lab/player_pack.res"
 const ANIM_DEFAULT_TAKE := "rig/ual1__Walk"
+
+## Editor trigger for the anim-fit probe (inspector tick + F5): CLI flags do
+## not survive an editor launch, so the probe also starts on this export.
+## Local-only: do NOT commit the scene with this ticked.
+@export var animtest := false
 ## Fitted parts (route A, 30/09 — replaces shader inflate passes 1+2,
 ## REVERTED: uniform size-up ballooned rigid pieces and cracked hard folds
 ## open; per-vertex conforming preserves the authored style instead).
@@ -416,6 +421,8 @@ func anim_player() -> AnimationPlayer:
 
 
 func _animtest_wanted() -> bool:
+	if animtest:
+		return true
 	return "--animtest" in OS.get_cmdline_user_args() or "--animtest" in OS.get_cmdline_args()
 
 
