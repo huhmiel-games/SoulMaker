@@ -10,7 +10,9 @@ For each inner vert in band: nearest outer vert o (vectorized chunks); if the
 inner vert sits at/outside the outer surface (signed distance along the outer
 normal > -gap) and within 50mm, pull it to (o - n*gap). Pulls that would bury
 the vert in skin (< half margin) or inside the nude volume are reverted
-(skin wins over order; leftovers reported).
+(skin wins over order; leftovers reported). The pull field is feathered at
+band edges and spatially smoothed (01/10: raw per-vert yanks grow tent poles
+— waistband pair), big survivors reported as overruns (conform follow-up).
 
 Reads/writes the FITTED .glb files (they only exist post-bake); vendor files
 untouched. POSITION bytes rewritten in place; accessor min/max updated; image
@@ -34,7 +36,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from conform_garments import (load_gltf, collect_positions, collect_nude,
-                              collect_tris, ray_parity)
+                              collect_tris, ray_parity, ride_along)
 
 EPS = 1e-9
 
@@ -65,7 +67,8 @@ def nearest_nude(P, N, chunk=500):
 
 
 def order_one(ojs, obuf, ijs, ibuf, owners, nude_N, TRIS,
-              y0, y1, gap, margin, skip):
+               y0, y1, gap, margin, skip, smooth_radius=0.03, feather=0.025,
+               overrun=0.02):
     I, owners = collect_positions(ijs, ibuf, skip)
     in_band = (I[:, 1] >= y0) & (I[:, 1] <= y1)
     Ic = I[in_band]
@@ -91,15 +94,48 @@ def order_one(ojs, obuf, ijs, ibuf, owners, nude_N, TRIS,
     if viol.any():
         T = Oj[viol] - Nj[viol] * gap
         deltas[viol] = T - Ic[viol]
-        # skin floor: never bury in flesh, never closer than half margin
+        # feather at band edges (01/10: raw per-vert pulls cliff at the
+        # band boundary — waistband tent poles): ramp 0->1 over `feather`.
+        w = np.minimum((Ic[:, 1] - y0) / feather, (y1 - Ic[:, 1]) / feather)
+        w = np.clip(np.minimum(w, 1.0), 0.0, 1.0)
+        deltas = deltas * w[:, None]
+        # spatial smoothing (01/10: a yanked vert next to static neighbours
+        # is a pyramid — the patch slides under together). Same-x-sign rule
+        # inherited from ride_along: never bridges the crotch gap.
+        deltas, adj = ride_along(deltas, Ic, smooth_radius)
+        print(f"smooth R={smooth_radius * 1000:.0f}mm feather={feather * 1000:.0f}mm: "
+              f"max_adjust={adj * 1000:.1f}mm")
+        # skin floor AFTER smoothing (pulls moved): never bury in flesh,
+        # never closer than half margin. Skin wins over order.
         P = Ic + deltas
-        ni, nd = nearest_nude(P, nude_N)
-        bur = ray_parity(P, TRIS)
-        bad = bur | (nd < margin * 0.5)
-        nbad = int((bad & viol).sum())
-        deltas[viol & bad] = 0.0
+        nz = np.linalg.norm(deltas, axis=1) > 1e-6
+        ni, nd = nearest_nude(P[nz], nude_N)
+        bur = ray_parity(P[nz], TRIS)
+        bad_nz = bur | (nd < margin * 0.5)
+        bad = np.zeros(len(Ic), dtype=bool)
+        bad[np.flatnonzero(nz)[bad_nz]] = True
+        nbad = int(bad.sum())
+        deltas[bad] = 0.0
         if nbad:
             print(f"skin-blocked (kept overlap): {nbad}")
+        # overrun report: big surviving pulls are a CONFORM problem (ease
+        # mismatch), not solvable by yanking — flagged for a targeted fix.
+        pmag = np.linalg.norm(deltas, axis=1)
+        over = pmag > overrun
+        if over.any():
+            Q = (Ic + deltas)[over]
+            om = pmag[over]
+            oo = np.argsort(-om)[:10]
+            print(f"overrun pulls (>{overrun * 1000:.0f}mm, kept smooth): {int(over.sum())}")
+            _seen = set()
+            for k in oo:
+                _p = Q[k]
+                _key = (int(_p[0] * 1000), int(_p[1] * 1000), int(_p[2] * 1000))
+                if _key in _seen:
+                    continue
+                _seen.add(_key)
+                print(f"overrun@{_key[0]:+d},{_key[1]:+d},{_key[2]:+d}mm "
+                      f"pull={om[k] * 1000:.1f}mm")
     moved = int((np.linalg.norm(deltas, axis=1) > 1e-6).sum())
     mx = float(np.linalg.norm(deltas, axis=1).max()) if moved else 0.0
     print(f"pulled={moved} max_pull={mx * 1000:.1f}mm")
@@ -139,7 +175,8 @@ def write_back(ijs, ibuf, owners, in_band, deltas, path):
     print(f"wrote {path} ({len(glb)} bytes)")
 
 
-def run_pair(outer, inner, nude, band, gap, margin, skip, dry_run):
+def run_pair(outer, inner, nude, band, gap, margin, skip, dry_run,
+             smooth_radius=0.03, feather=0.025, overrun=0.02):
     ojs, obuf = load_gltf(outer)
     ijs, ibuf = load_gltf(inner)
     if len(ibuf) != 1:
@@ -152,7 +189,8 @@ def run_pair(outer, inner, nude, band, gap, margin, skip, dry_run):
           f"[{y0},{y1}] ===")
     I_check, owners = collect_positions(ijs, ibuf, skip)
     res = order_one(ojs, obuf, ijs, ibuf, owners, nude_N,
-                    TRIS, y0, y1, gap, margin, skip)
+                    TRIS, y0, y1, gap, margin, skip,
+                    smooth_radius, feather, overrun)
     if res is None:
         return
     deltas, in_band, owners = res
@@ -169,6 +207,14 @@ def main():
     ap.add_argument("--band", default=None)
     ap.add_argument("--gap", type=float, default=0.003)
     ap.add_argument("--margin", type=float, default=0.008)
+    ap.add_argument("--smooth-radius", type=float, default=0.03,
+                    help="spatial blend radius of the pull field (patch "
+                    "slides under together, no tent poles)")
+    ap.add_argument("--feather", type=float, default=0.025,
+                    help="pull ramp at band edges (no cliffs)")
+    ap.add_argument("--overrun", type=float, default=0.02,
+                    help="report surviving pulls above this (conform "
+                    "follow-up signal, kept smooth)")
     ap.add_argument("--skip-material-substr", default="Regular")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--manifest", default="")
@@ -192,12 +238,15 @@ def main():
                 print(f"SKIP {e['name']}: bake the parts first")
                 continue
             run_pair(of, inf, os.path.join(a.root, e["nude"]), e["band"],
-                     float(e.get("gap", a.gap)), a.margin, skip, a.dry_run)
+                     float(e.get("gap", a.gap)), a.margin, skip, a.dry_run,
+                     float(e.get("smooth_radius", a.smooth_radius)),
+                     float(e.get("feather", a.feather)),
+                     float(e.get("overrun", a.overrun)))
     else:
         if not (a.outer and a.inner and a.nude and a.band):
             sys.exit("need --outer --inner --nude --band (or --manifest)")
         run_pair(a.outer, a.inner, a.nude, a.band, a.gap, a.margin, skip,
-                 a.dry_run)
+                 a.dry_run, a.smooth_radius, a.feather, a.overrun)
 
 
 if __name__ == "__main__":

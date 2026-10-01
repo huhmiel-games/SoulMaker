@@ -74,7 +74,12 @@ python3 src/cli_tools/enforce_order.py --manifest src/cli_tools/conform_manifest
 Edit `conform_manifest.json` (per-part `window` / `hug_window` / `axes` /
 `axes_limb` / `margin`, `defaults` for `ride_radius` / `interior_dot` /
 `smooth_iters`, `order` pairs with `band` / `gap`), rebake (`--only <Name>` for one
-slot, then re-run the order tool — it reads the fitted files). The manifest +
+slot, then re-run the order tool — it reads the fitted files). Targeted knobs
+(01/10, Male Legs): `zone_margin` (`Y0,Y1,XMAX,MARGIN` — per-vert margin
+override, dynamics headroom where skinning slip eats the base margin, e.g.
+inner thighs mid-stride) and `spike_mm` (lone-peak revert threshold, lower on
+tight cloth to catch visible pyramids; reverted spikes print `spike@x,y,zmm`
+tip positions). The manifest +
 scripts are the versioned source of truth — never rely on terminal history.
 
 ### License / distribution

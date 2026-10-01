@@ -26,6 +26,7 @@ Usage (single part):
       --window Y0,Y1,SIDE --axes AX,AZ,BX,BZ [--hug-window Y0,Y1,SIDE]
       [--margin M] [--max-push P] [--smooth-iters N]
       [--skip-material-substr Regular] [--outdir DIR] [--dry-run]
+      [--zone-margin Y0,Y1,XMAX,M] [--spike-mm S]
 
 Usage (batch, the versioned path — see conform_manifest.json):
   conform_garments.py --manifest src/cli_tools/conform_manifest.json --root .
@@ -443,6 +444,15 @@ def _parse_cli():
                     help="ignore nude candidates with |x| below this (limb "
                     "slots: keeps torso skin out of sleeve searches)")
     ap.add_argument("--margin", type=float, default=0.008)
+    ap.add_argument("--zone-margin", default="",
+                    help="Y0,Y1,XMAX,MARGIN: verts with Y0<=y<=Y1 and |x|<=XMAX "
+                    "use MARGIN instead of --margin (dynamics headroom where "
+                    "skinning slip eats the base margin in motion — e.g. the "
+                    "inner-thigh gap that opens mid-stride).")
+    ap.add_argument("--spike-mm", type=float, default=0.015,
+                    help="lone-peak revert threshold in m (moves above this "
+                    "with <1/3 neighbour median go back to raw: needles, or "
+                    "pyramids on tight cloth when set low, e.g. 0.008).")
     ap.add_argument("--max-push", type=float, default=0.06)
     ap.add_argument("--smooth-iters", type=int, default=3)
     ap.add_argument("--ride-radius", type=float, default=0.015,
@@ -590,12 +600,23 @@ def _bake(a):
     rim = rim_band | interior
     elig = ~rim
     print(f"rim_frozen (fold rims + interiors, left raw): {int(rim.sum())}")
+    # per-vert margin: an optional zone (Y-band x |x|<=XMAX) overrides the
+    # base margin — statics converge identically, dynamics get headroom.
+    marg = np.full(len(Gc), a.margin)
+    _zm = getattr(a, "zone_margin", "")
+    if _zm:
+        _zv = [float(v) for v in _zm.split(",")]
+        _zy0, _zy1, _zx, _zmg = _zv
+        _zmask = (Gc[:, 1] >= _zy0) & (Gc[:, 1] <= _zy1) & (np.abs(Gc[:, 0]) <= _zx)
+        marg[_zmask] = _zmg
+        print(f"zone_margin: {int(_zmask.sum())} verts "
+              f"y[{_zy0:.2f},{_zy1:.2f}] |x|<={_zx:.2f} -> {_zmg * 1000:.0f}mm")
 
     deltas = np.zeros_like(Gc)
     # --- outsiders too close: push out to margin along skin->cloth, but ONLY
     # inside the hug window (authored ease — flared hems — is preserved).
     in_hug = (Gc[:, 1] >= hy0 - 0.05) & (Gc[:, 1] <= hy1 + 0.05)
-    need = valid & ~buried & elig & in_hug & (dist < a.margin)
+    need = valid & ~buried & elig & in_hug & (dist < marg)
     if need.any():
         tgt = N[idx[need]]
         diff = Gc[need] - tgt
@@ -603,9 +624,9 @@ def _bake(a):
         degen = c < 1e-6
         d = np.zeros_like(diff)
         ok = ~degen
-        d[ok] = (diff[ok] / c[ok][:, None]) * (a.margin - c[ok])[:, None]
+        d[ok] = (diff[ok] / c[ok][:, None]) * (marg[need][ok] - c[ok])[:, None]
         if degen.any():
-            d[degen] = radial_dirs(Gc[need][degen], ax, az, bx, bz) * a.margin
+            d[degen] = radial_dirs(Gc[need][degen], ax, az, bx, bz) * marg[need][degen][:, None]
         clamp_len(d, a.max_push)
         deltas[need] = d
         print(f"hugged={int(need.sum())}")
@@ -619,7 +640,7 @@ def _bake(a):
         c = dist[ext]
         dirs = extract_dirs_zoned(Gc[ext], Nn[idx[ext]], ax, az, bx, bz,
                                  (_lxmin, _lax, _laz, _lbx, _lbz) if _lxmin is not None else None)
-        d = dirs * (c + a.margin)[:, None]
+        d = dirs * (c + marg[ext])[:, None]
         clamp_len(d, a.max_push)
         deltas[ext] = d
         print(f"extracted={int(ext.sum())} max_depth={(c.max()) * 1000:.1f}mm")
@@ -673,7 +694,7 @@ def _bake(a):
         idx2, dist2 = nearest_in_window(moved, N, y0, y1, side, ex)
         v2 = idx2 >= 0
         bur2 = ray_parity(moved, TRIS) & v2 & (dist2 > 1e-4)
-        out2 = v2 & ~bur2 & hug2 & (dist2 < a.margin * 0.5)
+        out2 = v2 & ~bur2 & hug2 & (dist2 < marg * 0.5)
         bad = (bur2 | out2) & (strikes < 3) & elig & elig
         if not bad.any():
             break
@@ -688,7 +709,7 @@ def _bake(a):
             _c = np.linalg.norm(_mv - N[idx2[bad][mo]], axis=1)
             _ok = _c > 1e-6
             fo = np.zeros_like(_mv)
-            _amt = (a.margin * 0.75 - _c)
+            _amt = (marg[bad][mo] * 0.75 - _c)
             if _lxmin is not None:
                 _lm2 = np.abs(_mv[:, 0]) >= _lxmin
                 if _lm2.any():
@@ -707,7 +728,7 @@ def _bake(a):
             c = dist2[bi]
             dirs = extract_dirs_zoned(moved[bi], Nn[idx2[bi]], ax, az, bx, bz,
                                       (_lxmin, _lax, _laz, _lbx, _lbz) if _lxmin is not None else None)
-            fix[mb] = dirs * (c + a.margin * 0.75)[:, None]
+            fix[mb] = dirs * (c + marg[bi] * 0.75)[:, None]
         clamp_len(fix, a.max_push)
         deltas[bad] += fix
         moved = Gc + deltas
@@ -725,17 +746,20 @@ def _bake(a):
     idxF, distF = nearest_in_window(moved, N, y0, y1, side, ex)
     vF = idxF >= 0
     bad_now = ((ray_parity(moved, TRIS) & vF & (distF > 1e-4))
-               | (vF & hug2 & (distF < a.margin * 0.5))) & elig
+               | (vF & hug2 & (distF < marg * 0.5))) & elig
     trap = (strikes >= 3) & bad_now
     dmag = np.linalg.norm(deltas, axis=1)
     # lone-peak guard (30/09: symmetric U-bottom verts at armpits shooting
-    # off alone): incoherent moves above 15mm revert to raw. Median is taken
+    # off alone): incoherent moves above spike_mm revert to raw. Median is taken
     # over NON-frozen neighbours so fold lips next to frozen rims are not
     # misread; coherent patch relocations keep a high median and survive.
+    # (01/10: tight cloth shows lone pyramids well below 15mm — per-part
+    # spike_mm, e.g. 8mm on legs, reverts them to occluded raw.)
+    spike_mm = float(getattr(a, "spike_mm", 0.015))
     spike = np.zeros(len(Gc), dtype=bool)
     _frz = set(np.flatnonzero(rim).tolist())
     for i, nb_i in enumerate(nb):
-        if dmag[i] > 0.015 and len(nb_i):
+        if dmag[i] > spike_mm and len(nb_i):
             _live = np.array([j for j in nb_i if j != i and int(j) not in _frz],
                              dtype=np.int64)
             if len(_live):
@@ -743,6 +767,14 @@ def _bake(a):
                 if dmag[i] > 3.0 * max(med, 0.005):
                     spike[i] = True
     n_trap, n_spike = int(trap.sum()), int(spike.sum())
+    if n_spike:
+        _tip = moved[spike]
+        _mag = dmag[spike]
+        _ord = np.argsort(-_mag)[:10]
+        for k in _ord:
+            _p = _tip[k]
+            print(f"spike@{int(_p[0] * 1000):+d},{int(_p[1] * 1000):+d},{int(_p[2] * 1000):+d}mm "
+                  f"move={_mag[k] * 1000:.1f}mm")
     deltas[trap | spike] = 0.0
     if n_trap + n_spike:
         print(f"reverted: trap={n_trap} spike={n_spike}")
