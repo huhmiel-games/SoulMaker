@@ -19,6 +19,9 @@ const PART_DIR := "res://assets/meshes/outfits/universal_outfit_free/Exports/glT
 const NUDE_DIR := "res://assets/meshes/characters/"
 const GENDERS: Array[String] = ["Male", "Female"]
 const OUTFITS: Array[String] = ["Peasant", "Ranger"]
+## Extra test variants per slot (Blender-edited files): cycled after OUTFITS
+## for that slot only. part_file returns "" when the combo ships no file.
+const SLOT_EXTRA := {&"Body": ["PeasantB"], &"Accessories": ["RangerG"]}
 const SLOTS: Array[StringName] = [&"Body", &"Arms", &"Legs", &"Feet", &"Head", &"Accessories"]
 ## Face meshes (push must stay OFF: eyes sit millimeters above the face and
 ## a pushed face would swallow them). Node names, identical in both fullbodies.
@@ -64,6 +67,9 @@ func _ready() -> void:
 		return
 	if "--fitprobe" in OS.get_cmdline_user_args() or "--fitprobe" in OS.get_cmdline_args():
 		use_fitkit = true
+	# A/B measurement only: skip FitKit conform, suppress raw vendor parts.
+	if "--nofit" in OS.get_cmdline_user_args() or "--nofit" in OS.get_cmdline_args():
+		use_fitkit = false
 	for slot in SLOTS:
 		_outfit[slot] = 0
 	_apply_nude()
@@ -88,6 +94,8 @@ func part_file(gender: String, outfit: String, slot: StringName) -> String:
 				return ""
 			return "%s%s_%s_Head_Hood.gltf" % [PART_DIR, gender, outfit]
 		&"Accessories":
+			if outfit == "RangerG" and gender == "Female":
+				return PART_DIR + "Female_Ranger_Gauntlets.gltf"
 			if outfit != "Ranger":
 				return ""
 			if gender == "Male":
@@ -98,8 +106,21 @@ func part_file(gender: String, outfit: String, slot: StringName) -> String:
 				return PART_DIR + "Male_Ranger_Feet_Boots.gltf"
 			return "%s%s_%s_Feet.gltf" % [PART_DIR, gender, outfit]
 		&"Body", &"Arms", &"Legs":
+			if outfit == "PeasantB" and slot == &"Body" and gender == "Female":
+				return PART_DIR + "Female_Peasant_Body_B.gltf"
+			if slot == &"Arms" and outfit == "Peasant" and gender == "Male":
+				return PART_DIR + "Male_Peasant_Arms_without_hands.gltf"
+			if slot == &"Arms" and outfit == "Ranger" and gender == "Female":
+				return PART_DIR + "Female_Ranger_Arms_without_hands.gltf"
+			if outfit == "PeasantB" or outfit == "RangerG":
+				return ""
 			return "%s%s_%s_%s.gltf" % [PART_DIR, gender, outfit, String(slot)]
 	return ""
+
+
+## Outfit choices for a slot: base OUTFITS + test extras (variant files).
+func _slot_outfits(slot: StringName) -> Array:
+	return OUTFITS + SLOT_EXTRA.get(slot, [])
 
 
 ## Swap one slot to its current (gender, outfit) combo, dressed toon.
@@ -112,10 +133,10 @@ func _apply_slot(slot: StringName) -> void:
 	for c in holder.get_children():
 		holder.remove_child(c)
 		c.queue_free()
-	var path := part_file(GENDERS[_gender], OUTFITS[int(_outfit[slot])], slot)
+	var path := part_file(GENDERS[_gender], _slot_outfits(slot)[int(_outfit[slot])], slot)
 	var want_fit := use_fitkit and not path.is_empty()
 	if path.is_empty():
-		print("[Character] %s: no part (%s %s)" % [String(slot), GENDERS[_gender], OUTFITS[int(_outfit[slot])]])
+		print("[Character] %s: no part (%s %s)" % [String(slot), GENDERS[_gender], String(_slot_outfits(slot)[int(_outfit[slot])])])
 		return
 	var packed := load(path) as PackedScene
 	if packed == null:
@@ -124,7 +145,11 @@ func _apply_slot(slot: StringName) -> void:
 	holder.add_child(packed.instantiate())
 	if want_fit:
 		if _nude_snap.get("ok", false):
-			FitKit.fit_holder(holder, _nude_snap, slot, _gender)
+			# Cloth: push-out only (authored silhouette intact, the inward
+			# cover tier reveals buried cloth instead of extracting it).
+			FitKit.fit_pushout(holder, _nude_snap, slot, _gender)
+			# Vendor skin: conformed snug (skin-tight registration witness).
+			FitKit.fit_holder(holder, _nude_snap, slot, _gender, true)
 		else:
 			push_error("[Character] FitKit without nude snapshot")
 	_dresser.reset_target(holder)
@@ -337,13 +362,14 @@ func reset_gender() -> void:
 
 
 func slot_display(slot: StringName) -> String:
-	if part_file(GENDERS[_gender], OUTFITS[int(_outfit[slot])], slot).is_empty():
+	var opts := _slot_outfits(slot)
+	if part_file(GENDERS[_gender], opts[int(_outfit[slot])], slot).is_empty():
 		return "--"
-	return OUTFITS[int(_outfit[slot])]
+	return opts[int(_outfit[slot])]
 
 
 func adjust_slot(slot: StringName, dir: int) -> void:
-	_outfit[slot] = posmod(int(_outfit[slot]) + dir, OUTFITS.size())
+	_outfit[slot] = posmod(int(_outfit[slot]) + dir, _slot_outfits(slot).size())
 	_apply_nude()
 	_rebuild_avatar()
 	if _anim_active:
@@ -369,6 +395,12 @@ func _run_headless_test() -> void:
 	fails += _expect("ranger hood male", part_file("Male", "Ranger", &"Head").ends_with("Male_Ranger_Head_Hood.gltf"))
 	fails += _expect("ranger boots male", part_file("Male", "Ranger", &"Feet").ends_with("Male_Ranger_Feet_Boots.gltf"))
 	fails += _expect("ranger pauldrons female", part_file("Female", "Ranger", &"Accessories").ends_with("Female_Ranger_Acc_Pauldrons.gltf"))
+	fails += _expect("male arms nohands", part_file("Male", "Peasant", &"Arms").ends_with("Male_Peasant_Arms_without_hands.gltf"))
+	fails += _expect("female ranger arms nohands", part_file("Female", "Ranger", &"Arms").ends_with("Female_Ranger_Arms_without_hands.gltf"))
+	fails += _expect("female gauntlets", part_file("Female", "RangerG", &"Accessories").ends_with("Female_Ranger_Gauntlets.gltf"))
+	fails += _expect("male gauntlets absent", part_file("Male", "RangerG", &"Accessories").is_empty())
+	fails += _expect("female body B", part_file("Female", "PeasantB", &"Body").ends_with("Female_Peasant_Body_B.gltf"))
+	fails += _expect("male body B absent", part_file("Male", "PeasantB", &"Body").is_empty())
 	# Fused avatar: one skeleton + two meshes (Skin / Cloths, X-ray toggle).
 	fails += _expect("avatar skeleton", _avatar_skeleton() != null)
 	fails += _expect("avatar two meshes", _avatar_skin_mi() != null and _avatar_cloth_mi() != null)
@@ -383,6 +415,12 @@ func _run_headless_test() -> void:
 	fails += _expect("body outfit kept", slot_display(&"Body") == "Ranger")
 	fails += _expect("female avatar fused", _avatar_mi() != null and _avatar_src_has("SuperHero"))
 	fails += _expect("female hands kept", _avatar_finger_verts() > 100)
+	_outfit[&"Body"] = 2
+	_apply_nude()
+	_rebuild_avatar()
+	fails += _expect("body B shown", slot_display(&"Body") == "PeasantB")
+	fails += _expect("body B fused", _avatar_mi() != null and _avatar_surf_count() > 1)
+	reset_slot(&"Body")
 	reset_gender()
 	reset_slot(&"Body")
 	fails += _expect("back to male peasant", gender_display() == "Male" and slot_display(&"Body") == "Peasant")
@@ -390,10 +428,11 @@ func _run_headless_test() -> void:
 	fails += _expect("male hands kept", _avatar_finger_verts() > 100)
 	fails += _expect("skin push on", _avatar_push("SuperHero") > 0.01)
 	fails += _expect("eyes push off", _avatar_push("Eyes") < 0.001)
-	fails += _expect("fitkit default on", use_fitkit)
+	fails += _expect("fitkit default on", use_fitkit or "--nofit" in OS.get_cmdline_user_args() or "--nofit" in OS.get_cmdline_args())
 	fails += _expect("fitkit cfg male legs", not FitKit.cfg_for(&"Legs", 0).is_empty())
 	fails += _expect("fitkit cfg female legs", not FitKit.cfg_for(&"Legs", 1).is_empty())
 	fails += _expect("fitkit cfg female arms", not FitKit.cfg_for(&"Arms", 1).is_empty())
+	fails += _expect("fitkit regular clamp", FitKit.REGULAR_CLAMP < FitKit.MAX_PUSH)
 	fails += _expect("avatar albedo wired", _avatar_tex() != null)
 	fails += _expect("cache reused", _avatar_cache.has(_avatar_key()))
 	_cycle_xray()

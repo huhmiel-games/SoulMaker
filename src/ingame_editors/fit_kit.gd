@@ -24,7 +24,7 @@ const SKIP_SUBSTR := "Regular"
 const SLOT_CFG := {
 	&"Body": [0.0, 0.01, 0.0, 0.01, 0.008, []],
 	&"Arms": [0.32, -0.07, -0.32, -0.07, 0.006, []],
-	&"Legs": [0.09, -0.03, -0.09, -0.03, 0.006, [0.75, 0.98, 0.10, 0.012]],
+	&"Legs": [0.09, -0.03, -0.09, -0.03, 0.010, [0.75, 0.98, 0.10, 0.012]],
 	&"Feet": [0.11, -0.06, -0.11, -0.06, 0.008, []],
 	&"Head": [0.0, 0.0, 0.0, 0.0, 0.008, []],
 	&"Accessories": [0.0, 0.0, 0.0, 0.0, 0.008, []],
@@ -32,7 +32,7 @@ const SLOT_CFG := {
 const SLOT_CFG_FEMALE := {
 	&"Body": [0.0, 0.01, 0.0, 0.01, 0.008, []],
 	&"Arms": [0.30, -0.07, -0.30, -0.07, 0.006, []],
-	&"Legs": [0.09, -0.03, -0.09, -0.03, 0.006, [0.75, 0.98, 0.10, 0.012]],
+	&"Legs": [0.09, -0.03, -0.09, -0.03, 0.010, [0.75, 0.98, 0.10, 0.012]],
 	&"Feet": [0.10, -0.06, -0.10, -0.06, 0.008, []],
 	&"Head": [0.0, 0.0, 0.0, 0.0, 0.008, []],
 	&"Accessories": [0.0, 0.0, 0.0, 0.0, 0.008, []],
@@ -75,6 +75,11 @@ const SANCTUARY_SUBSTR := ["Head", "Eye", "Brow", "Hair", "Teeth", "Tongue"]
 const RING_W := 0.015
 const RING_CUT := 0.5
 const RING_MIN_VOTES := 3
+## Vendor skin ("Regular") is real skin, not cloth: conform it snug to the
+## nude (small margin, tight clamp) instead of skipping it, so it serves as
+## an occlusion witness where the body is. Never welded: clamp caps travel.
+const REGULAR_MARGIN := 0.004
+const REGULAR_CLAMP := 0.015
 const LIMB_CHAINS := {
 	"ArmL": ["LeftUpperArm", "LeftLowerArm", "LeftHand"],
 	"ArmR": ["RightUpperArm", "RightLowerArm", "RightHand"],
@@ -188,6 +193,90 @@ static func neck_height(master: Skeleton3D) -> float:
 	return 1.35
 
 
+## Occlusion cover test: from each skin vert, cast taps over the outward
+## hemisphere (normal + rings at 45°/75°). A tap is blocked when a garment
+## vert sits within OCC_CELL_R of a march sample (OCC_STEP steps up to
+## OCC_RANGE). Covered = blocked fraction >= OCC_CUT. Encircled skin (even
+## under loose cloth) cuts; skin seeing open air (hems, V, bare limbs)
+## stays — no hole can open past a garment edge. Only garment verts occlude,
+## never the nude itself. Early-out: bare skin fails fast, covered zones pay
+## the full taps.
+const OCC_RING_ANGLES := [0.7853982, 1.309]
+const OCC_PER_RING := 8
+const OCC_RANGE := 0.06
+const OCC_STEP := 0.01
+const OCC_CELL := 0.04
+const OCC_CELL_R := 0.025
+const OCC_CUT := 0.8
+## Inward tier (measurement only): garment clearly INSIDE the skin (past the
+## grazing tolerance) within INWARD_R counts as covering — cutting the skin
+## reveals the authored garment, no fit deformation needed. Logged per ring
+## (inw spans); the delete still uses the outward union until the A/B
+## comparison validates the switch.
+const INWARD_R := 0.06
+
+
+## 1 when the nearest garment sits buried under the skin (dot past the
+## outward gate, within INWARD_R), else 0. Separate nearest query from the
+## cover test: _point_covered drops far indices, the inward tier needs them.
+static func _point_buried(gv: PackedVector3Array, grid: Dictionary, g: Vector3, sn: Vector3) -> int:
+	var j := _nearest(grid, gv, g)
+	if j == -1 or gv[j].distance_to(g) > INWARD_R:
+		return 0
+	if (gv[j] - g).dot(sn) < -COVER_OUT:
+		return 1
+	return 0
+
+
+static func _occ_dirs(sn: Vector3) -> Array:
+	var dirs := [sn]
+	var u := sn.cross(Vector3.UP)
+	if u.length_squared() < 1e-8:
+		u = sn.cross(Vector3.RIGHT)
+	u = u.normalized()
+	var w := sn.cross(u).normalized()
+	for ang in OCC_RING_ANGLES:
+		var ca := cos(ang)
+		var sa := sin(ang)
+		for k in OCC_PER_RING:
+			var phi := TAU * float(k) / float(OCC_PER_RING)
+			dirs.append((sn * ca + (u * cos(phi) + w * sin(phi)) * sa).normalized())
+	return dirs
+
+
+static func _tap_blocked(ogrid: Dictionary, gv: PackedVector3Array, g: Vector3, d: Vector3) -> bool:
+	var nsteps := int(OCC_RANGE / OCC_STEP)
+	for s in range(1, nsteps + 1):
+		var p := g + d * (OCC_STEP * float(s))
+		var c := Vector3i((p / OCC_CELL).floor())
+		if not ogrid.has(c):
+			continue
+		for j in (ogrid[c] as Array):
+			if gv[j].distance_to(p) <= OCC_CELL_R:
+				return true
+	return false
+
+
+static func _occ_frac(ogrid: Dictionary, gv: PackedVector3Array, g: Vector3, sn: Vector3) -> float:
+	var dirs := _occ_dirs(sn)
+	var total := dirs.size()
+	# Normal tap escapes = hole in the garment (open air straight out):
+	# the skin shows, keep it whatever the other taps say.
+	if not _tap_blocked(ogrid, gv, g, dirs[0]):
+		return 0.0
+	var need: int = int(ceil(OCC_CUT * float(total)))
+	var blocked := 1
+	var unblocked := 0
+	for k in range(1, total):
+		if _tap_blocked(ogrid, gv, g, dirs[k]):
+			blocked += 1
+		else:
+			unblocked += 1
+			if total - unblocked < need:
+				break
+	return float(blocked) / float(total)
+
+
 ## Pointwise cover test shared by the vote and delete passes: cloth within
 ## COVER_DIST outward along (or grazing) the SKIN normal. Returns [covered, nbuy].
 static func _point_covered(gv: PackedVector3Array, grid: Dictionary, g: Vector3, sn: Vector3) -> Array:
@@ -235,10 +324,14 @@ static func suppress_covered(nude_holder: Node, garment_holders: Array, master: 
 		stats["skipped"] = "no master (bone names needed)"
 		return stats
 	var grid := _build_grid(gv)
+	var ogrid := _build_grid(gv, OCC_CELL)
 	var cdata := _chain_data(master)
-	# Pass 1 — vote per ring along each bone chain (bind pose). Pointwise
-	# noise dies in the majority vote; the cut becomes contiguous bands.
+	# Pass 1 — occlusion per skin vert (bind pose). Covered = surrounded by
+	# garments in the outward hemisphere; open-air verts stay, so no hole
+	# can open past a garment edge. Ring fractions below are LOG ONLY
+	# (calibration aid, not the cut).
 	var votes := {} # "Chain|n" -> [covered, total]
+	var occ_hist := [0, 0, 0, 0, 0] # blocked-frac bins <0.2 <0.4 <0.6 <0.8 >=0.8
 	for mi in meshes_under(nude_holder):
 		var vmi := mi as MeshInstance3D
 		var vm := vmi.mesh as ArrayMesh
@@ -269,18 +362,21 @@ static func suppress_covered(nude_holder: Node, garment_holders: Array, master: 
 				var rk := _ring_key(cdata, _chain_of_bone(String(master.get_bone_name(db))), g)
 				if rk.is_empty():
 					continue
-				var pc := _point_covered(gv, grid, g, sn)
+				var frac := _occ_frac(ogrid, gv, g, sn)
+				# Union: tight cloth (25mm + gate) OR loose-but-surrounding
+				# (occlusion). Either alone under-cuts its own cases.
+				var cov := 1 if frac >= OCC_CUT or int(_point_covered(gv, grid, g, sn)[0]) == 1 else 0
+				var bur := _point_buried(gv, grid, g, sn)
+				occ_hist[mini(4, int(frac * 5.0))] += 1
 				if votes.has(rk):
-					(votes[rk] as Array)[0] += pc[0]
-					(votes[rk] as Array)[1] += 1
+					(votes[rk] as Array)[0] += cov
+					(votes[rk] as Array)[1] += bur
+					(votes[rk] as Array)[2] += 1
 				else:
-					votes[rk] = [pc[0], 1]
-	var cut := {}
-	for rk in votes:
-		var v: Array = votes[rk]
-		if v[1] >= RING_MIN_VOTES and float(v[0]) >= RING_CUT * float(v[1]):
-			cut[rk] = 1
-	# 1D despeckle per chain: isolated cut/kept rings flip to their neighbours.
+					votes[rk] = [cov, bur, 1]
+	print("[Merge] occ frac bins %s" % str(occ_hist))
+	# Ring fractions for the headless log (DIAGNOSTIC ONLY — the cut is
+	# per-triangle from the outward union; inw = buried tier, not applied).
 	var by_chain := {}
 	for rk in votes:
 		var parts := String(rk).split("|")
@@ -288,36 +384,25 @@ static func suppress_covered(nude_holder: Node, garment_holders: Array, master: 
 			continue
 		if not by_chain.has(parts[0]):
 			by_chain[parts[0]] = []
-		(by_chain[parts[0]] as Array).append([int(parts[1]), cut.has(rk)])
+		var v: Array = votes[rk]
+		(by_chain[parts[0]] as Array).append([int(parts[1]), float(v[0]) / float(maxi(1, v[2])), float(v[1]) / float(maxi(1, v[2])), v[2]])
 	for chain in by_chain:
 		var arr: Array = by_chain[chain]
 		arr.sort_custom(func(a, b): return a[0] < b[0])
-		for k in arr.size():
-			var is_cut: bool = arr[k][1]
-			var prev: bool = arr[k - 1][1] if k > 0 else is_cut
-			var nxt: bool = arr[k + 1][1] if k + 1 < arr.size() else is_cut
-			var want := (prev or nxt) if is_cut else (prev and nxt)
-			if want != is_cut:
-				arr[k][1] = want
-				var key := "%s|%d" % [String(chain), int(arr[k][0])]
-				if want:
-					cut[key] = 1
-				else:
-					cut.erase(key)
-	# Cut intervals per chain for the headless log.
-	for chain in by_chain:
-		var arr: Array = by_chain[chain]
-		var spans := []
-		var open := -1
-		for k in arr.size():
-			if arr[k][1] and open == -1:
-				open = int(arr[k][0])
-			if (not arr[k][1] or k == arr.size() - 1) and open != -1:
-				var last: int = int(arr[k - 1][0]) if not arr[k][1] else int(arr[k][0])
-				spans.append("[%d..%d]" % [open, last])
-				open = -1
-		if not spans.is_empty():
-			print("[Merge] cut %s: %s" % [String(chain), " ".join(spans)])
+		for tag in [["occ", 1], ["inw", 2]]:
+			var spans := []
+			var open := -1
+			for k in arr.size():
+				var hot: bool = arr[k][tag[1]] >= 0.5
+				if hot and open == -1:
+					open = int(arr[k][0])
+				if (not hot or k == arr.size() - 1) and open != -1:
+					var last: int = int(arr[k][0]) if hot else int(arr[k][0]) - 1
+					if last >= open:
+						spans.append("[%d..%d]" % [open, last])
+					open = -1
+			if not spans.is_empty():
+				print("[Merge] %s %s: %s" % [String(tag[0]), String(chain), " ".join(spans)])
 	var tb := 0
 	var ta := 0
 	for mi in meshes_under(nude_holder):
@@ -361,10 +446,7 @@ static func suppress_covered(nude_holder: Node, garment_holders: Array, master: 
 				nbuy[i] = -1
 			var snrm := PackedVector3Array()
 			snrm.resize(vv.size())
-			var vring := []
-			vring.resize(vv.size())
 			for i in vv.size():
-				vring[i] = ""
 				var g: Vector3 = xf * vv[i]
 				if g.y >= ny:
 					continue
@@ -375,25 +457,22 @@ static func suppress_covered(nude_holder: Node, garment_holders: Array, master: 
 					continue
 				snrm[i] = sn
 				var pc := _point_covered(gv, grid, g, sn)
-				covered[i] = pc[0]
+				if _occ_frac(ogrid, gv, g, sn) >= OCC_CUT or pc[0] == 1 or _point_buried(gv, grid, g, sn) == 1:
+					covered[i] = 1
+				# Nearest cloth stays skin-side: only the tuck target.
 				nbuy[i] = pc[1]
-				var db := _dominant_bone(a, i)
-				if db < 0 or db >= master.get_bone_count():
-					continue
-				var rk := _ring_key(cdata, _chain_of_bone(String(master.get_bone_name(db))), g)
-				if cut.has(rk):
-					vring[i] = rk
-			# Delete = tris fully inside cut rings. Boundaries are ring
-			# loops by construction — no tri-level speckle possible.
+			# Delete = tris fully occluded. Boundary follows the garment hem
+			# exactly (no ring quantization); open-air fringe is kept, so no
+			# hole can open past a garment edge.
 			var ntris := idx.size() / 3
 			var del := PackedByteArray()
 			del.resize(ntris)
 			for t in ntris:
-				if String(vring[idx[t * 3]]).is_empty():
+				if covered[idx[t * 3]] == 0:
 					continue
-				if String(vring[idx[t * 3 + 1]]).is_empty():
+				if covered[idx[t * 3 + 1]] == 0:
 					continue
-				if String(vring[idx[t * 3 + 2]]).is_empty():
+				if covered[idx[t * 3 + 2]] == 0:
 					continue
 				del[t] = 1
 			var edge_map := {}
@@ -406,6 +485,28 @@ static func suppress_covered(nude_holder: Node, garment_holders: Array, master: 
 						(edge_map[e] as Array).append(t)
 					else:
 						edge_map[e] = [t]
+			# Hole fill (1 pass): a kept tri whose 3 edges all touch deleted
+			# tris joins the cut — kills pinholes, cannot open gaps (its
+			# neighbours are already gone; open borders never qualify).
+			for t in ntris:
+				if del[t] == 1:
+					continue
+				var closed := true
+				for k in 3:
+					var e0: int = idx[t * 3 + k]
+					var e1: int = idx[t * 3 + (k + 1) % 3]
+					var e := Vector2i(mini(e0, e1), maxi(e0, e1))
+					var any_del := false
+					for nt in (edge_map[e] as Array):
+						if nt != t and del[nt] == 1:
+							any_del = true
+							break
+					if not any_del:
+						closed = false
+						break
+				if closed:
+					del[t] = 1
+					stats["holefill"] = int(stats.get("holefill", 0)) + 1
 			# Rim = uncovered verts of kept tris touching the cut. Tuck them
 			# under the cloth (idempotent per vert: same nearest + normal).
 			var vv2 := (vv as PackedVector3Array).duplicate()
@@ -523,6 +624,7 @@ static func order_pass(holders: Dictionary) -> Dictionary:
 				continue
 			var xf: Transform3D = mmi.global_transform
 			var inv := xf.affine_inverse()
+			var fitted := {} # surf -> fitted VERTEX array
 			for s in m.get_surface_count():
 				var a := m.surface_get_arrays(s)
 				if a[Mesh.ARRAY_VERTEX] == null:
@@ -548,13 +650,22 @@ static func order_pass(holders: Dictionary) -> Dictionary:
 						moved += 1
 						mx = maxf(mx, push.length())
 				if dirty:
+					fitted[s] = vv
+			if fitted.is_empty():
+				continue
+			# Rebuild the whole MI mesh: fitted surfaces take their verts,
+			# the rest copy verbatim (per-surface assign drops surfaces).
+			var nm := ArrayMesh.new()
+			for s in m.get_surface_count():
+				var a := m.surface_get_arrays(s)
+				if fitted.has(s):
 					var na := a.duplicate()
-					na[Mesh.ARRAY_VERTEX] = vv
+					na[Mesh.ARRAY_VERTEX] = fitted[s]
 					_strip_custom(na)
-					var nm := ArrayMesh.new()
-					nm.add_surface_from_arrays(m.surface_get_primitive_type(s), na)
-					nm.surface_set_material(0, m.surface_get_material(s))
-					mmi.mesh = nm
+					a = na
+				nm.add_surface_from_arrays(m.surface_get_primitive_type(s), a)
+				nm.surface_set_material(s, m.surface_get_material(s))
+			mmi.mesh = nm
 		(stats["pairs"] as Array).append({"name": pname, "moved": moved, "max_mm": mx * 1000.0})
 		print("[Merge] order %s: moved=%d max=%.1fmm" % [pname, moved, mx * 1000.0])
 	return stats
@@ -677,10 +788,10 @@ static func snapshot_nude(nude_holder: Node) -> Dictionary:
 		"ms": Time.get_ticks_msec() - t0}
 
 
-static func _build_grid(verts: PackedVector3Array) -> Dictionary:
+static func _build_grid(verts: PackedVector3Array, cell: float = CELL) -> Dictionary:
 	var g := {}
 	for i in verts.size():
-		var k := Vector3i((verts[i] / CELL).floor())
+		var k := Vector3i((verts[i] / cell).floor())
 		if g.has(k):
 			(g[k] as Array).append(i)
 		else:
@@ -688,8 +799,8 @@ static func _build_grid(verts: PackedVector3Array) -> Dictionary:
 	return g
 
 
-static func _nearest(g: Dictionary, verts: PackedVector3Array, q: Vector3) -> int:
-	var c := Vector3i((q / CELL).floor())
+static func _nearest(g: Dictionary, verts: PackedVector3Array, q: Vector3, cell: float = CELL) -> int:
+	var c := Vector3i((q / cell).floor())
 	for ring in [1, 2, 4]:
 		var best := -1
 		var bd := 1e30
@@ -723,9 +834,122 @@ static func _radial(pts: PackedVector3Array, ax: float, az: float, bx: float, bz
 	return d
 
 
+## Minimal cloth fit (push-out only): verts closer than margin are pushed OUT
+## to margin (anti-z-fight + motion clearance); buried or far verts are NEVER
+## touched — the authored silhouette stays intact, the inward cover tier
+## reveals buried cloth instead of extracting it. Vendor skin ("Regular")
+## still goes through fit_holder regular_mode (skin-tight registration).
+## Returns stats {ok, verts, moved, max_push, ms}.
+static func fit_pushout(holder: Node, nude: Dictionary, slot: StringName, gender: int = 0) -> Dictionary:
+	var t0 := Time.get_ticks_msec()
+	var stats := {"ok": false, "slot": String(slot)}
+	var cfg: Array = cfg_for(slot, gender)
+	if cfg.is_empty():
+		stats["skipped"] = "no cfg"
+		return stats
+	var margin: float = cfg[4]
+	var zone: Array = cfg[5]
+	var nv: PackedVector3Array = nude["verts"]
+	var nn: PackedVector3Array = nude["normals"]
+	var gv := PackedVector3Array()
+	var owners := [] # [mi, surf, local_idx]
+	for mi in meshes_under(holder):
+		var m := (mi as MeshInstance3D).mesh as ArrayMesh
+		if m == null or m.get_blend_shape_count() > 0:
+			continue
+		var xf: Transform3D = (mi as MeshInstance3D).global_transform
+		for s in m.get_surface_count():
+			var mat := m.surface_get_material(s)
+			if mat != null and SKIP_SUBSTR in mat.resource_name:
+				continue
+			var a := m.surface_get_arrays(s)
+			if a[Mesh.ARRAY_VERTEX] == null:
+				continue
+			var vv: PackedVector3Array = a[Mesh.ARRAY_VERTEX]
+			for i in vv.size():
+				gv.append(xf * vv[i])
+				owners.append([mi, s, i])
+	if gv.is_empty():
+		stats["skipped"] = "no verts"
+		return stats
+	var rad := _radial(gv, cfg[0], cfg[1], cfg[2], cfg[3])
+	var grid := _build_grid(nv)
+	var deltas := PackedVector3Array()
+	deltas.resize(gv.size())
+	var moved := 0
+	var mx := 0.0
+	for i in gv.size():
+		var marg: float = margin
+		if not zone.is_empty() and gv[i].y >= zone[0] and gv[i].y <= zone[1] and absf(gv[i].x) <= zone[2]:
+			marg = zone[3]
+		var j := _nearest(grid, nv, gv[i])
+		if j == -1:
+			continue
+		var diff := gv[i] - nv[j]
+		var c := diff.length()
+		if c >= marg:
+			continue
+		var dir := Vector3.ZERO
+		if c > 1e-6:
+			dir = diff / c
+		elif rad[i].length_squared() > 0.25:
+			dir = rad[i].normalized()
+		else:
+			continue
+		var d := dir * (marg - c)
+		if d.length() > MAX_PUSH:
+			d = d.normalized() * MAX_PUSH
+		deltas[i] = d
+		moved += 1
+		mx = maxf(mx, d.length())
+	var per_mi := {}
+	for i in owners.size():
+		var o: Array = owners[i]
+		if deltas[i].length_squared() < 1e-12:
+			continue
+		var key := str((o[0] as Node).get_instance_id()) + "|" + str(o[1])
+		if not per_mi.has(key):
+			per_mi[key] = [o[0], o[1], []]
+		(per_mi[key][2] as Array).append([o[2], deltas[i]])
+	var mi_groups := {}
+	for key in per_mi:
+		var e0: Array = per_mi[key]
+		mi_groups[(e0[0] as Node).get_instance_id()] = e0[0]
+	for mid in mi_groups:
+		var mi: MeshInstance3D = mi_groups[mid]
+		var m := mi.mesh as ArrayMesh
+		if m == null:
+			continue
+		var nm := ArrayMesh.new()
+		var inv := mi.global_transform.basis.inverse()
+		for s in m.get_surface_count():
+			var key := str(mid) + "|" + str(s)
+			var a := m.surface_get_arrays(s)
+			if per_mi.has(key):
+				var e: Array = per_mi[key]
+				a = a.duplicate()
+				var vv: PackedVector3Array = (a[Mesh.ARRAY_VERTEX] as PackedVector3Array).duplicate()
+				for pair in (e[2] as Array):
+					vv[pair[0]] = vv[pair[0]] + inv * (pair[1] as Vector3)
+				a[Mesh.ARRAY_VERTEX] = vv
+				_strip_custom(a)
+			nm.add_surface_from_arrays(m.surface_get_primitive_type(s), a)
+			nm.surface_set_material(s, m.surface_get_material(s))
+		mi.mesh = nm
+	stats["ok"] = true
+	stats["verts"] = gv.size()
+	stats["moved"] = moved
+	stats["max_push"] = mx
+	stats["ms"] = Time.get_ticks_msec() - t0
+	print("[FitKit] %s/pushout: %d verts moved=%d max=%.1fmm %dms" % [String(slot), gv.size(), moved, mx * 1000.0, stats["ms"]])
+	return stats
+
+
 ## Conforms holder meshes to the nude snapshot, rewrites surfaces in place.
+## regular_mode processes ONLY vendor-skin ("Regular") surfaces, snug
+## (REGULAR_MARGIN/CLAMP) instead of skipping them; normal mode skips them.
 ## Returns stats {ok, verts, buried_before, buried_after, moved, max_push, ms}.
-static func fit_holder(holder: Node, nude: Dictionary, slot: StringName, gender: int = 0) -> Dictionary:
+static func fit_holder(holder: Node, nude: Dictionary, slot: StringName, gender: int = 0, regular_mode: bool = false) -> Dictionary:
 	var t0 := Time.get_ticks_msec()
 	var stats := {"ok": false, "slot": String(slot)}
 	var cfg: Array = cfg_for(slot, gender)
@@ -736,8 +960,9 @@ static func fit_holder(holder: Node, nude: Dictionary, slot: StringName, gender:
 	var az: float = cfg[1]
 	var bx: float = cfg[2]
 	var bz: float = cfg[3]
-	var margin: float = cfg[4]
-	var zone: Array = cfg[5]
+	var margin: float = REGULAR_MARGIN if regular_mode else cfg[4]
+	var push_cap: float = REGULAR_CLAMP if regular_mode else MAX_PUSH
+	var zone: Array = [] if regular_mode else cfg[5]
 	var nv: PackedVector3Array = nude["verts"]
 	var nn: PackedVector3Array = nude["normals"]
 	# working set (global space) + owners for write-back
@@ -753,7 +978,8 @@ static func fit_holder(holder: Node, nude: Dictionary, slot: StringName, gender:
 		var nrm := xf.basis.inverse().transposed()
 		for s in m.get_surface_count():
 			var mat := m.surface_get_material(s)
-			if mat != null and SKIP_SUBSTR in mat.resource_name:
+			var is_reg := mat != null and SKIP_SUBSTR in mat.resource_name
+			if is_reg != regular_mode:
 				continue
 			var a := m.surface_get_arrays(s)
 			if a[Mesh.ARRAY_VERTEX] == null:
@@ -857,8 +1083,8 @@ static func fit_holder(holder: Node, nude: Dictionary, slot: StringName, gender:
 			else:
 				deltas[i] = diff / c * (marg[i] - c)
 	for i in gv.size():
-		if deltas[i].length() > MAX_PUSH:
-			deltas[i] = deltas[i].normalized() * MAX_PUSH
+		if deltas[i].length() > push_cap:
+			deltas[i] = deltas[i].normalized() * push_cap
 	# smooth (weld-consistent: coincident verts share one delta)
 	var groups := {}
 	for i in gv.size():
@@ -972,15 +1198,15 @@ static func fit_holder(holder: Node, nude: Dictionary, slot: StringName, gender:
 			break
 		for i in gv.size():
 			if bad[i] == 1:
-				if fix[i].length() > MAX_PUSH:
-					fix[i] = fix[i].normalized() * MAX_PUSH
+				if fix[i].length() > push_cap:
+					fix[i] = fix[i].normalized() * push_cap
 				deltas[i] = deltas[i] + fix[i]
 				moved[i] = gv[i] + deltas[i]
 	var nfrozen := 0
 	for i in gv.size():
 		if strikes[i] >= 3:
 			nfrozen += 1
-	print("[FitKit] %s: touchup rounds=%d remaining=%d frozen=%d" % [String(slot), rounds, remaining, nfrozen])
+	print("[FitKit] %s%s: touchup rounds=%d remaining=%d frozen=%d" % [String(slot), "/reg" if regular_mode else "", rounds, remaining, nfrozen])
 	# trap revert: ping-ponging 3+ rounds AND still bad -> vendor raw
 	# (occluded folds, never needles)
 	var ntraps := 0
@@ -1054,7 +1280,10 @@ static func fit_holder(holder: Node, nude: Dictionary, slot: StringName, gender:
 	for k in mini(6, peaks.size()):
 		var p: Vector3 = peaks[k][1]
 		print("[FitKit] spike@%+d,%+d,%+dmm move=%.1fmm" % [int(p.x * 1000.0), int(p.y * 1000.0), int(p.z * 1000.0), float(peaks[k][0]) * 1000.0])
-	# write back (global delta -> local; VERTEX only, skinning preserved)
+	# write back (global delta -> local; VERTEX only, skinning preserved).
+	# One mesh per MI: fitted surfaces take their deltas, the other surfaces
+	# (vendor skin in normal mode, cloth in regular mode) copy verbatim.
+	# Assigning mi.mesh per surface would drop every other surface.
 	var per_mi := {}
 	for i in owners.size():
 		var o: Array = owners[i]
@@ -1062,22 +1291,30 @@ static func fit_holder(holder: Node, nude: Dictionary, slot: StringName, gender:
 		if not per_mi.has(key):
 			per_mi[key] = [o[0], o[1], []]
 		(per_mi[key][2] as Array).append([o[2], deltas[i]])
+	var mi_groups := {}
 	for key in per_mi:
-		var e: Array = per_mi[key]
-		var mi: MeshInstance3D = e[0]
-		var s: int = e[1]
+		var e0: Array = per_mi[key]
+		mi_groups[(e0[0] as Node).get_instance_id()] = e0[0]
+	for mid in mi_groups:
+		var mi: MeshInstance3D = mi_groups[mid]
 		var m := mi.mesh as ArrayMesh
 		if m == null:
 			continue
-		var a := m.surface_get_arrays(s)
-		var vv: PackedVector3Array = (a[Mesh.ARRAY_VERTEX] as PackedVector3Array).duplicate()
-		var inv := mi.global_transform.basis.inverse()
-		for pair in (e[2] as Array):
-			vv[pair[0]] = vv[pair[0]] + inv * (pair[1] as Vector3)
-		a[Mesh.ARRAY_VERTEX] = vv
 		var nm := ArrayMesh.new()
-		nm.add_surface_from_arrays(m.surface_get_primitive_type(s), a)
-		nm.surface_set_material(0, m.surface_get_material(s))
+		var inv := mi.global_transform.basis.inverse()
+		for s in m.get_surface_count():
+			var key := str(mid) + "|" + str(s)
+			var a := m.surface_get_arrays(s)
+			if per_mi.has(key):
+				var e: Array = per_mi[key]
+				a = a.duplicate()
+				var vv: PackedVector3Array = (a[Mesh.ARRAY_VERTEX] as PackedVector3Array).duplicate()
+				for pair in (e[2] as Array):
+					vv[pair[0]] = vv[pair[0]] + inv * (pair[1] as Vector3)
+				a[Mesh.ARRAY_VERTEX] = vv
+				_strip_custom(a)
+			nm.add_surface_from_arrays(m.surface_get_primitive_type(s), a)
+			nm.surface_set_material(s, m.surface_get_material(s))
 		mi.mesh = nm
 	# final stats (signed recheck; frozen buried = occluded interiors by design)
 	var b1 := 0
@@ -1095,7 +1332,7 @@ static func fit_holder(holder: Node, nude: Dictionary, slot: StringName, gender:
 			if frozen[i] == 0:
 				b1free += 1
 	var ms := Time.get_ticks_msec() - t0
-	print("[FitKit] %s: %d verts buried %d->%d (free %d) moved=%d max=%.1fmm spikes=%d %dms" % [String(slot), gv.size(), b0, b1, b1free, nmoved, mx * 1000.0, nspike, ms])
+	print("[FitKit] %s%s: %d verts buried %d->%d (free %d) moved=%d max=%.1fmm spikes=%d %dms" % [String(slot), "/reg" if regular_mode else "", gv.size(), b0, b1, b1free, nmoved, mx * 1000.0, nspike, ms])
 	stats["ok"] = true
 	stats["verts"] = gv.size()
 	stats["buried_before"] = b0
