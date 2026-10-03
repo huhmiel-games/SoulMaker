@@ -6,11 +6,10 @@ extends Node3D
 ## GameState persistence comes later when the game reads the config).
 ## Six slots (Body/Arms/Legs/Feet/Head/Accessories), two outfits
 ## (Peasant/Ranger — extend OUTFITS plus part_file for more). Parts are
-## Modular-Parts glTF conformed in memory by FitKit, the nude is amputated
-## to visible skin only (cut rim tucked under the cloth) with a runtime
-## cloth-on-cloth order pass, and everything fuses into ONE skeleton + TWO
-## meshes (Skin / Cloths, X-ray toggle) under the Avatar holder (memory
-## cache per gender/outfit key). The left panel is a CharacterMenu
+## Modular-Parts glTF conformed in memory by FitKit, the nude is reduced by
+## the pass-1 garment volumes (no tuck, no order since 03/10), and everything
+## fuses into ONE skeleton + TWO meshes (Skin / Cloths, X-ray toggle) under
+## the Avatar holder (memory cache per gender/outfit key). The left panel is a CharacterMenu
 ## (GenericMenu subclass): value rows cycle live on L/R, A/E resets to
 ## default, explicit Back rows only (menu grammar, no B).
 ## Run: Godot --path . scenes/ingame_editors/character_editor.tscn
@@ -39,13 +38,16 @@ const ANIM_DEFAULT_TAKE := "rig/ual1__Walk"
 ## female), slots load the RAW vendor part and FitKit conforms it in memory.
 ## The old fitted/ bake routing is removed — raw + FitKit is the only path.
 @export var use_fitkit := true
-## Stage isolation flags (inspector tick + F5, or CLI override): --notuck
-## (cut without rim tuck), --noorder (skip cloth-on-cloth order), --nosuppress
+## Stage isolation flag (inspector tick + F5, or CLI override): --nosuppress
 ## (intact nude under fitted cloth). Eye-recipe matrix, see WORKLOG.
-## Local-only: do NOT commit the scene with these ticked.
-@export var no_tuck := false
-@export var no_order := false
+## Local-only: do NOT commit the scene with this ticked.
 @export var no_suppress := false
+## Pass-1 volume debug (inspector tick or --showvol at boot, N at runtime):
+## draws the garment suppression volumes (limb cylinders + torso/boot boxes,
+## one color per chain, semi-transparent) over the mannequin. Read-only
+## overlay, zero behavior change when unticked. Local-only: do NOT commit
+## the scene with this ticked.
+@export var show_volumes := false
 var _nude_snap := {"ok": false}
 
 var _gender := 0
@@ -56,9 +58,11 @@ const USE_CACHE := false
 var _avatar_cache := {} # build key -> {skin: ArrayMesh, cloth: ArrayMesh, skin_srcs, cloth_srcs}
 var _avatar_skin_src := PackedStringArray()
 var _avatar_cloth_src := PackedStringArray()
-## X-ray debug (TEMP, N key / L3 pad): 0 fused, 1 skin only, 2 cloth only.
+## X-ray debug (TEMP, N key / L3 pad): 0 fused, 1 skin only, 2 volumes.
 var _xray := 0
-const XRAY_NAMES := ["Fused", "Skin", "Cloths"]
+const XRAY_NAMES := ["Fused", "Skin", "Volumes"]
+var _last_vols := {}
+var _last_cdata := {}
 var _dresser: ColorEditor = null
 var _menu: CharacterMenu = null
 var _anim_active := false
@@ -80,12 +84,12 @@ func _ready() -> void:
 	# A/B measurement only: skip FitKit conform, suppress raw vendor parts.
 	if "--nofit" in OS.get_cmdline_user_args() or "--nofit" in OS.get_cmdline_args():
 		use_fitkit = false
-	if "--notuck" in OS.get_cmdline_user_args() or "--notuck" in OS.get_cmdline_args():
-		no_tuck = true
-	if "--noorder" in OS.get_cmdline_user_args() or "--noorder" in OS.get_cmdline_args():
-		no_order = true
 	if "--nosuppress" in OS.get_cmdline_user_args() or "--nosuppress" in OS.get_cmdline_args():
 		no_suppress = true
+	if "--showvol" in OS.get_cmdline_user_args() or "--showvol" in OS.get_cmdline_args():
+		show_volumes = true
+	if show_volumes:
+		_xray = 2
 	for slot in SLOTS:
 		_outfit[slot] = 0
 	_apply_nude()
@@ -126,6 +130,8 @@ func part_file(gender: String, outfit: String, slot: StringName) -> String:
 				return PART_DIR + "Female_Peasant_Body_B.gltf"
 			if slot == &"Arms" and outfit == "Peasant" and gender == "Male":
 				return PART_DIR + "Male_Peasant_Arms_without_hands.gltf"
+			if slot == &"Arms" and outfit == "Ranger" and gender == "Male":
+				return PART_DIR + "Male_Ranger_Arms_without_hands.gltf"
 			if slot == &"Arms" and outfit == "Ranger" and gender == "Female":
 				return PART_DIR + "Female_Ranger_Arms_without_hands.gltf"
 			if outfit == "PeasantB" or outfit == "RangerG":
@@ -161,9 +167,9 @@ func _apply_slot(slot: StringName) -> void:
 	holder.add_child(packed.instantiate())
 	if want_fit:
 		if _nude_snap.get("ok", false):
-			# Cloth: push-out only (authored silhouette intact, the inward
-			# cover tier reveals buried cloth instead of extracting it).
-			FitKit.fit_pushout(holder, _nude_snap, slot, _gender)
+			# Cloth is kept 100% authored (03/10: fit_pushout removed — it
+			# deformed glove fingers via wrong-finger nearest pushes, and
+			# the inward cover tier handles buried cloth instead).
 			# Vendor skin: conformed snug (skin-tight registration witness).
 			FitKit.fit_holder(holder, _nude_snap, slot, _gender, true)
 		else:
@@ -179,8 +185,8 @@ func _apply_all() -> void:
 
 ## Build key: gender + per-slot outfit (only combos with parts matter, the
 ## full key is cheaper to reason about).
-## TODO cache: when re-enabling, include no_tuck/no_order/no_suppress (and
-## use_fitkit) in the key, or a --notuck run will be served tucked geometry.
+## TODO cache: when re-enabling, include no_suppress (and
+## use_fitkit) in the key, or a --nosuppress run will be served cut geometry.
 func _avatar_key() -> String:
 	var k := [GENDERS[_gender]]
 	for slot in SLOTS:
@@ -194,6 +200,80 @@ func _clear_holder(h: Node) -> void:
 	for c in h.get_children():
 		h.remove_child(c)
 		c.queue_free()
+
+
+## Volume overlay colors (one per chain, alpha applied at draw time).
+const VOL_COLORS := {
+	"ArmL": Color(1.0, 0.25, 0.25),
+	"ArmR": Color(1.0, 0.6, 0.15),
+	"LegL": Color(0.3, 0.5, 1.0),
+	"LegR": Color(0.3, 0.9, 0.9),
+	"FootL": Color(1.0, 0.9, 0.3),
+	"FootR": Color(1.0, 0.45, 0.9),
+	"Torso": Color(0.35, 1.0, 0.4),
+}
+const VOL_ALPHA := 0.25
+
+
+## Frees the pass-1 volume overlay (rebuilt on demand by _draw_volumes).
+func _clear_volumes() -> void:
+	var old := get_node_or_null("Volumes")
+	if old != null:
+		remove_child(old)
+		old.queue_free()
+
+
+## Draws the pass-1 suppression volumes returned by FitKit.suppress_covered:
+## limb cylinders (axis segment + VOL_REACH both ends, rmax + VOL_REACH) and
+## the torso/boot boxes (+ reach), one semi-transparent color per chain. Same
+## math as the cut — what you see is what gets deleted. Read-only overlay (no
+## scene state to commit).
+func _draw_volumes(vols: Dictionary, cdata: Dictionary) -> void:
+	_clear_volumes()
+	if vols.is_empty():
+		return
+	var root := Node3D.new()
+	root.name = "Volumes"
+	add_child(root)
+	for chain in vols:
+		var v: Dictionary = vols[chain]
+		var col: Color = VOL_COLORS.get(String(chain), Color(1.0, 1.0, 1.0))
+		col.a = VOL_ALPHA
+		var mat := StandardMaterial3D.new()
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.albedo_color = col
+		var mi := MeshInstance3D.new()
+		mi.name = "Vol_%s" % String(chain)
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		if not bool(v["limb"]):
+			var bmin: Vector3 = (v["bmin"] as Vector3) - Vector3.ONE * FitKit.VOL_REACH
+			var bmax: Vector3 = (v["bmax"] as Vector3) + Vector3.ONE * FitKit.VOL_REACH
+			var box := BoxMesh.new()
+			box.size = bmax - bmin
+			mi.mesh = box
+			mi.position = (bmin + bmax) * 0.5
+		else:
+			if not cdata.has(chain):
+				continue
+			var start: Vector3 = (cdata[chain] as Dictionary)["start"]
+			var dir: Vector3 = ((cdata[chain] as Dictionary)["dir"] as Vector3).normalized()
+			var a := start + dir * (float(v["tmin"]) - FitKit.VOL_REACH)
+			var b := start + dir * (float(v["tmax"]) + FitKit.VOL_REACH)
+			var radius := float(v["rmax"]) + FitKit.VOL_REACH
+			var cyl := CylinderMesh.new()
+			cyl.top_radius = radius
+			cyl.bottom_radius = radius
+			cyl.height = a.distance_to(b)
+			mi.mesh = cyl
+			mi.position = (a + b) * 0.5
+			if dir.dot(Vector3.UP) < -0.999:
+				mi.rotation = Vector3(PI, 0.0, 0.0)
+			elif dir.dot(Vector3.UP) < 0.999:
+				mi.rotation = (Quaternion(Vector3.UP, dir)).get_euler()
+		mi.material_override = mat
+		root.add_child(mi)
+	print("[Merge] volumes drawn: %d" % root.get_child_count())
 
 
 ## The fused skeleton + fused mesh (null/empty before the first rebuild).
@@ -263,11 +343,12 @@ func _mount_avatar(master: Skeleton3D, skin: ArrayMesh, cloth: ArrayMesh, skin_s
 
 
 ## Full rebuild: cache hit = nude skeleton + cached meshes only (garments are
-## never reloaded); miss = load + FitKit fit + order pass + nude suppression
-## (cut rim tucked under the cloth) + fusion. Sources (Nude/slot holders)
-## are freed — the Avatar is the only body left.
+## never reloaded); miss = load + FitKit fit + pass-1 volume suppression +
+## fusion. Sources (Nude/slot holders) are freed — the Avatar is the only
+## body left.
 func _rebuild_avatar() -> void:
 	var t0 := Time.get_ticks_msec()
+	_clear_volumes()
 	var key := _avatar_key()
 	var nude_holder := get_node_or_null("Nude")
 	if USE_CACHE and _avatar_cache.has(key):
@@ -287,13 +368,17 @@ func _rebuild_avatar() -> void:
 	var holders := {}
 	for slot in SLOTS:
 		holders[slot] = get_node_or_null(String(slot))
-	if not no_order:
-		FitKit.order_pass(holders)
 	var gholders: Array = []
 	for slot in SLOTS:
 		gholders.append(holders[slot])
 	if not no_suppress:
-		FitKit.suppress_covered(nude_holder, gholders, master, not no_tuck)
+		var sup := FitKit.suppress_covered(nude_holder, gholders, master)
+		if bool(sup.get("ok", false)):
+			_last_vols = sup.get("vols", {})
+			_last_cdata = sup.get("cdata", {})
+		else:
+			_last_vols = {}
+			_last_cdata = {}
 	var parts: Array = []
 	for mi in FitKit.meshes_under(nude_holder):
 		parts.append({"mi": mi, "skeleton": master, "kind": "skin"})
@@ -314,7 +399,7 @@ func _rebuild_avatar() -> void:
 	_avatar_cache[key] = {"skin": res["skin_mesh"], "cloth": res["cloth_mesh"], "skin_srcs": res["skin_srcs"], "cloth_srcs": res["cloth_srcs"]}
 	if not USE_CACHE:
 		_avatar_cache.clear()
-	print("[Merge] built %s (%dms, cached keys=%d, tuck=%s order=%s suppress=%s)" % [key, Time.get_ticks_msec() - t0, _avatar_cache.size(), str(not no_tuck), str(not no_order), str(not no_suppress)])
+	print("[Merge] built %s (%dms, cached keys=%d, suppress=%s)" % [key, Time.get_ticks_msec() - t0, _avatar_cache.size(), str(not no_suppress)])
 
 
 ## Nude base body (Superhero fullbody: skin everywhere but underwear, head
@@ -418,6 +503,7 @@ func _run_headless_test() -> void:
 	fails += _expect("ranger boots male", part_file("Male", "Ranger", &"Feet").ends_with("Male_Ranger_Feet_Boots.gltf"))
 	fails += _expect("ranger pauldrons female", part_file("Female", "Ranger", &"Accessories").ends_with("Female_Ranger_Acc_Pauldrons.gltf"))
 	fails += _expect("male arms nohands", part_file("Male", "Peasant", &"Arms").ends_with("Male_Peasant_Arms_without_hands.gltf"))
+	fails += _expect("male ranger arms nohands", part_file("Male", "Ranger", &"Arms").ends_with("Male_Ranger_Arms_without_hands.gltf"))
 	fails += _expect("female ranger arms nohands", part_file("Female", "Ranger", &"Arms").ends_with("Female_Ranger_Arms_without_hands.gltf"))
 	fails += _expect("female gauntlets", part_file("Female", "RangerG", &"Accessories").ends_with("Female_Ranger_Gauntlets.gltf"))
 	fails += _expect("male gauntlets absent", part_file("Male", "RangerG", &"Accessories").is_empty())
@@ -451,19 +537,21 @@ func _run_headless_test() -> void:
 	fails += _expect("skin push on", _avatar_push("SuperHero") > 0.01)
 	fails += _expect("eyes push off", _avatar_push("Eyes") < 0.001)
 	fails += _expect("fitkit default on", use_fitkit or "--nofit" in OS.get_cmdline_user_args() or "--nofit" in OS.get_cmdline_args())
-	fails += _expect("stages default on", (not no_tuck and not no_order and not no_suppress) or "--notuck" in OS.get_cmdline_user_args() or "--notuck" in OS.get_cmdline_args() or "--noorder" in OS.get_cmdline_user_args() or "--noorder" in OS.get_cmdline_args() or "--nosuppress" in OS.get_cmdline_user_args() or "--nosuppress" in OS.get_cmdline_args())
+	fails += _expect("stages default on", (not no_suppress) or "--nosuppress" in OS.get_cmdline_user_args() or "--nosuppress" in OS.get_cmdline_args())
 	fails += _expect("fitkit cfg male legs", not FitKit.cfg_for(&"Legs", 0).is_empty())
 	fails += _expect("fitkit cfg female legs", not FitKit.cfg_for(&"Legs", 1).is_empty())
 	fails += _expect("fitkit cfg female arms", not FitKit.cfg_for(&"Arms", 1).is_empty())
 	fails += _expect("fitkit regular clamp", FitKit.REGULAR_CLAMP < FitKit.MAX_PUSH)
 	fails += _expect("avatar albedo wired", _avatar_tex() != null)
 	fails += _expect("cache bypassed dev", not USE_CACHE and _avatar_cache.is_empty())
+	_xray = 0
+	_apply_xray()
 	_cycle_xray()
 	fails += _expect("xray skin only", _avatar_skin_mi().visible and not _avatar_cloth_mi().visible)
 	_cycle_xray()
-	fails += _expect("xray cloth only", _avatar_cloth_mi().visible and not _avatar_skin_mi().visible)
+	fails += _expect("xray volumes", _avatar_skin_mi().visible and _avatar_cloth_mi().visible and get_node_or_null("Volumes") != null)
 	_cycle_xray()
-	fails += _expect("xray back to fused", _avatar_skin_mi().visible and _avatar_cloth_mi().visible)
+	fails += _expect("xray back to fused", _avatar_skin_mi().visible and _avatar_cloth_mi().visible and get_node_or_null("Volumes") == null)
 	adjust_slot(&"Head", 1)
 	fails += _expect("hood shown", slot_display(&"Head") == "Ranger")
 	fails += _expect("hood fused", _avatar_mi() != null and _avatar_surf_count() > 1)
@@ -486,7 +574,7 @@ func _run_headless_test() -> void:
 	get_tree().quit()
 
 
-## X-ray debug (TEMP, N / L3): 0 fused, 1 skin only, 2 cloth only.
+## X-ray debug (TEMP, N / L3): 0 fused, 1 skin only, 2 fused + volumes.
 func _cycle_xray() -> void:
 	_xray = posmod(_xray + 1, 3)
 	_apply_xray()
@@ -497,9 +585,13 @@ func _apply_xray() -> void:
 	var skin := _avatar_skin_mi()
 	var cloth := _avatar_cloth_mi()
 	if skin != null:
-		skin.visible = _xray != 2
+		skin.visible = true
 	if cloth != null:
 		cloth.visible = _xray != 1
+	if _xray == 2 and not (_last_vols as Dictionary).is_empty():
+		_draw_volumes(_last_vols, _last_cdata)
+	else:
+		_clear_volumes()
 	var hud := get_node_or_null("MenuLayer/HUD")
 	if hud != null and hud.has_method("set_persistent"):
 		hud.set_persistent(&"xray", "XRAY: %s" % XRAY_NAMES[_xray])
