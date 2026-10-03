@@ -39,10 +39,20 @@ const ANIM_DEFAULT_TAKE := "rig/ual1__Walk"
 ## female), slots load the RAW vendor part and FitKit conforms it in memory.
 ## The old fitted/ bake routing is removed — raw + FitKit is the only path.
 @export var use_fitkit := true
+## Stage isolation flags (inspector tick + F5, or CLI override): --notuck
+## (cut without rim tuck), --noorder (skip cloth-on-cloth order), --nosuppress
+## (intact nude under fitted cloth). Eye-recipe matrix, see WORKLOG.
+## Local-only: do NOT commit the scene with these ticked.
+@export var no_tuck := false
+@export var no_order := false
+@export var no_suppress := false
 var _nude_snap := {"ok": false}
 
 var _gender := 0
 var _outfit := {} # StringName slot -> int index into OUTFITS
+## Avatar cache: OFF during the cut-detection dev phase (every switch must
+## rebuild). Re-enable when the cuts are final.
+const USE_CACHE := false
 var _avatar_cache := {} # build key -> {skin: ArrayMesh, cloth: ArrayMesh, skin_srcs, cloth_srcs}
 var _avatar_skin_src := PackedStringArray()
 var _avatar_cloth_src := PackedStringArray()
@@ -70,6 +80,12 @@ func _ready() -> void:
 	# A/B measurement only: skip FitKit conform, suppress raw vendor parts.
 	if "--nofit" in OS.get_cmdline_user_args() or "--nofit" in OS.get_cmdline_args():
 		use_fitkit = false
+	if "--notuck" in OS.get_cmdline_user_args() or "--notuck" in OS.get_cmdline_args():
+		no_tuck = true
+	if "--noorder" in OS.get_cmdline_user_args() or "--noorder" in OS.get_cmdline_args():
+		no_order = true
+	if "--nosuppress" in OS.get_cmdline_user_args() or "--nosuppress" in OS.get_cmdline_args():
+		no_suppress = true
 	for slot in SLOTS:
 		_outfit[slot] = 0
 	_apply_nude()
@@ -163,6 +179,8 @@ func _apply_all() -> void:
 
 ## Build key: gender + per-slot outfit (only combos with parts matter, the
 ## full key is cheaper to reason about).
+## TODO cache: when re-enabling, include no_tuck/no_order/no_suppress (and
+## use_fitkit) in the key, or a --notuck run will be served tucked geometry.
 func _avatar_key() -> String:
 	var k := [GENDERS[_gender]]
 	for slot in SLOTS:
@@ -252,7 +270,7 @@ func _rebuild_avatar() -> void:
 	var t0 := Time.get_ticks_msec()
 	var key := _avatar_key()
 	var nude_holder := get_node_or_null("Nude")
-	if _avatar_cache.has(key):
+	if USE_CACHE and _avatar_cache.has(key):
 		var e: Dictionary = _avatar_cache[key]
 		var master := _slot_skeleton(&"Nude")
 		_mount_avatar(master, e["skin"] as ArrayMesh, e["cloth"] as ArrayMesh, e["skin_srcs"] as PackedStringArray, e["cloth_srcs"] as PackedStringArray)
@@ -269,11 +287,13 @@ func _rebuild_avatar() -> void:
 	var holders := {}
 	for slot in SLOTS:
 		holders[slot] = get_node_or_null(String(slot))
-	FitKit.order_pass(holders)
+	if not no_order:
+		FitKit.order_pass(holders)
 	var gholders: Array = []
 	for slot in SLOTS:
 		gholders.append(holders[slot])
-	FitKit.suppress_covered(nude_holder, gholders, master)
+	if not no_suppress:
+		FitKit.suppress_covered(nude_holder, gholders, master, not no_tuck)
 	var parts: Array = []
 	for mi in FitKit.meshes_under(nude_holder):
 		parts.append({"mi": mi, "skeleton": master, "kind": "skin"})
@@ -292,7 +312,9 @@ func _rebuild_avatar() -> void:
 	for slot in SLOTS:
 		_clear_holder(get_node_or_null(String(slot)))
 	_avatar_cache[key] = {"skin": res["skin_mesh"], "cloth": res["cloth_mesh"], "skin_srcs": res["skin_srcs"], "cloth_srcs": res["cloth_srcs"]}
-	print("[Merge] built %s (%dms, cached keys=%d)" % [key, Time.get_ticks_msec() - t0, _avatar_cache.size()])
+	if not USE_CACHE:
+		_avatar_cache.clear()
+	print("[Merge] built %s (%dms, cached keys=%d, tuck=%s order=%s suppress=%s)" % [key, Time.get_ticks_msec() - t0, _avatar_cache.size(), str(not no_tuck), str(not no_order), str(not no_suppress)])
 
 
 ## Nude base body (Superhero fullbody: skin everywhere but underwear, head
@@ -429,12 +451,13 @@ func _run_headless_test() -> void:
 	fails += _expect("skin push on", _avatar_push("SuperHero") > 0.01)
 	fails += _expect("eyes push off", _avatar_push("Eyes") < 0.001)
 	fails += _expect("fitkit default on", use_fitkit or "--nofit" in OS.get_cmdline_user_args() or "--nofit" in OS.get_cmdline_args())
+	fails += _expect("stages default on", (not no_tuck and not no_order and not no_suppress) or "--notuck" in OS.get_cmdline_user_args() or "--notuck" in OS.get_cmdline_args() or "--noorder" in OS.get_cmdline_user_args() or "--noorder" in OS.get_cmdline_args() or "--nosuppress" in OS.get_cmdline_user_args() or "--nosuppress" in OS.get_cmdline_args())
 	fails += _expect("fitkit cfg male legs", not FitKit.cfg_for(&"Legs", 0).is_empty())
 	fails += _expect("fitkit cfg female legs", not FitKit.cfg_for(&"Legs", 1).is_empty())
 	fails += _expect("fitkit cfg female arms", not FitKit.cfg_for(&"Arms", 1).is_empty())
 	fails += _expect("fitkit regular clamp", FitKit.REGULAR_CLAMP < FitKit.MAX_PUSH)
 	fails += _expect("avatar albedo wired", _avatar_tex() != null)
-	fails += _expect("cache reused", _avatar_cache.has(_avatar_key()))
+	fails += _expect("cache bypassed dev", not USE_CACHE and _avatar_cache.is_empty())
 	_cycle_xray()
 	fails += _expect("xray skin only", _avatar_skin_mi().visible and not _avatar_cloth_mi().visible)
 	_cycle_xray()
