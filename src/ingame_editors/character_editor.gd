@@ -20,7 +20,7 @@ const GENDERS: Array[String] = ["Male", "Female"]
 const OUTFITS: Array[String] = ["Peasant", "Ranger"]
 ## Extra test variants per slot (Blender-edited files): cycled after OUTFITS
 ## for that slot only. part_file returns "" when the combo ships no file.
-const SLOT_EXTRA := {&"Body": ["PeasantB"], &"Accessories": ["RangerG"]}
+const SLOT_EXTRA := {&"Body": ["PeasantB", "PeasantF"], &"Accessories": ["RangerG"], &"Feet": ["PeasantF"], &"Legs": ["PeasantF"], &"Arms": ["PeasantF"]}
 const SLOTS: Array[StringName] = [&"Body", &"Arms", &"Legs", &"Feet", &"Head", &"Accessories"]
 ## Face meshes (push must stay OFF: eyes sit millimeters above the face and
 ## a pushed face would swallow them). Node names, identical in both fullbodies.
@@ -124,6 +124,10 @@ func part_file(gender: String, outfit: String, slot: StringName) -> String:
 		&"Feet":
 			if gender == "Male" and outfit == "Ranger":
 				return PART_DIR + "Male_Ranger_Feet_Boots.gltf"
+			if gender == "Male" and outfit == "PeasantF":
+				return PART_DIR + "Male_Peasant_Feet_Fix.gltf"
+			if outfit == "PeasantF":
+				return ""
 			return "%s%s_%s_Feet.gltf" % [PART_DIR, gender, outfit]
 		&"Body", &"Arms", &"Legs":
 			if outfit == "PeasantB" and slot == &"Body" and gender == "Female":
@@ -134,7 +138,13 @@ func part_file(gender: String, outfit: String, slot: StringName) -> String:
 				return PART_DIR + "Male_Ranger_Arms_without_hands.gltf"
 			if slot == &"Arms" and outfit == "Ranger" and gender == "Female":
 				return PART_DIR + "Female_Ranger_Arms_without_hands.gltf"
-			if outfit == "PeasantB" or outfit == "RangerG":
+			if outfit == "PeasantF" and slot == &"Legs" and gender == "Male":
+				return PART_DIR + "Male_Peasant_Legs_Fix.gltf"
+			if outfit == "PeasantF" and slot == &"Body" and gender == "Male":
+				return PART_DIR + "Male_Peasant_Body_Fix.gltf"
+			if outfit == "PeasantF" and slot == &"Arms" and gender == "Male":
+				return PART_DIR + "Male_Peasant_Arms_Fix.gltf"
+			if outfit == "PeasantB" or outfit == "RangerG" or outfit == "PeasantF":
 				return ""
 			return "%s%s_%s_%s.gltf" % [PART_DIR, gender, outfit, String(slot)]
 	return ""

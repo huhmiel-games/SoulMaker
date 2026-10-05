@@ -147,6 +147,18 @@ static func _chain_data(master: Skeleton3D) -> Dictionary:
 	return out
 
 
+## Neck-bone rest origin (holders are identity: rest space == global).
+## Only x/z are used (column axis); y comes from neck_height + margin.
+static func neck_center(master: Skeleton3D) -> Vector3:
+	if master != null:
+		var bi := master.find_bone("Neck")
+		if bi == -1:
+			bi = master.find_bone("neck_01")
+		if bi != -1:
+			return master.get_bone_global_rest(bi).origin
+	return Vector3(0.0, 1.35, 0.0)
+
+
 ## Neck-plane height from the master skeleton rest (Standard "Neck", UE
 ## fallback "neck_01", else a 1.35 m constant) plus NECK_MARGIN: the plane
 ## keeps the head/neck tube, but the trapezius dome sloping up to the neck
@@ -262,6 +274,24 @@ static func _box_hit(v: Dictionary, g: Vector3) -> int:
 	return 1 if Vector3(dx, dy, dz).length() <= VOL_REACH else 0
 
 
+## Pass-2 restore tuning: daylight cone around the nude normal (±axis + ring
+## at CONE_DEG), forward RANGE only. Restores openings (V, collar, cuffs);
+## poke-through cleanup is pass 3 (backward cone, separate). Global test
+## over ALL deleted verts (flood could never reach enclosed islands).
+const PASS2_RANGE := 0.05
+const PASS2_CONE_DEG := 60.0
+## Pass-3 poke cleanup (own stage so front/back stay observable separately):
+## re-tests pass-2-restored verts with the backward cone; cloth right behind
+## (tight garment, BACK_RANGE) re-deletes. Neck-column forced verts are
+## exempt (the collar is always right there).
+const PASS3_BACK_RANGE := 0.02
+const PASS3_CONE_DEG := 10.0
+## Forced-restore neck column (no ray test: the collar hides mistakes):
+## horizontal radius around the Neck rest axis + depth below the plane.
+const NECK_COLUMN_R := 0.06
+const NECK_COLUMN_DN := 0.25
+
+
 ## First garment volume containing the skin point (VOL_ORDER), "" when the
 ## skin survives: a nude vert goes when inside ANY garment volume — thigh
 ## under thigh-boot, leg under robe, calf under shaft. Limbs are flat-ended
@@ -294,14 +324,125 @@ static func _vol_hit(vols: Dictionary, cdata: Dictionary, g: Vector3) -> String:
 	return ""
 
 
-## Pass-1 volume cut: deletes nude triangles inside the garment volumes (in
-## place). garment_holders carry FITTED garment meshes. Returns stats {ok,
-## tris_before, tris_after, removed, vol_del_<volume> (verts)}. No tuck, no
-## order, no fringe: the hero diff (log + X-ray) is the measure; pass 2
-## recovers the openings (V, window, neckline, limb ends).
+## Pass-1 volume cut (+ pass-2 daylight restore): deletes nude triangles
+## inside the garment volumes (in place), then restores boundary-band deleted
+## tris whose verts see daylight (no garment within the ±normal cone+range):
+## V, window, neckline, wrist/ankle rims come back. garment_holders carry
+## FITTED garment meshes. Returns stats {ok, tris_before, tris_after,
+## removed, vol_del_<volume> (verts), pass2_candidates (verts),
+## pass2_restored_tris}. No tuck, no order, no fringe: the hero diff (log +
+## X-ray) is the measure.
+## Garment triangle soup (global bind space) for pass-2 daylight rays:
+## {verts, tris, grid (cell -> Array of tri), cell}. Indexed surfaces only.
+static func _pass2_trigrid(garment_holders: Array) -> Dictionary:
+	var verts := PackedVector3Array()
+	var tris := PackedInt32Array()
+	for h in garment_holders:
+		if h == null:
+			continue
+		for mi in meshes_under(h):
+			var m := (mi as MeshInstance3D).mesh as ArrayMesh
+			if m == null or m.get_blend_shape_count() > 0:
+				continue
+			var xf: Transform3D = (mi as MeshInstance3D).global_transform
+			for s in m.get_surface_count():
+				var a := m.surface_get_arrays(s)
+				if a[Mesh.ARRAY_VERTEX] == null or a[Mesh.ARRAY_INDEX] == null:
+					continue
+				var vv: PackedVector3Array = a[Mesh.ARRAY_VERTEX]
+				var base := verts.size()
+				for v in vv:
+					verts.append(xf * v)
+				var ii: PackedInt32Array = a[Mesh.ARRAY_INDEX]
+				for t in range(0, ii.size() - ii.size() % 3, 3):
+					tris.append_array([ii[t] + base, ii[t + 1] + base, ii[t + 2] + base])
+	var cell := 0.02
+	var grid := {}
+	for t in range(0, tris.size(), 3):
+		var bmin: Vector3 = verts[tris[t]]
+		var bmax: Vector3 = bmin
+		for k in range(1, 3):
+			bmin = bmin.min(verts[tris[t + k]])
+			bmax = bmax.max(verts[tris[t + k]])
+		var c0 := Vector3i((bmin / cell).floor())
+		var c1 := Vector3i((bmax / cell).floor())
+		for cx in range(c0.x, c1.x + 1):
+			for cy in range(c0.y, c1.y + 1):
+				for cz in range(c0.z, c1.z + 1):
+					var key := Vector3i(cx, cy, cz)
+					if grid.has(key):
+						(grid[key] as Array).append(t / 3)
+					else:
+						grid[key] = [t / 3]
+	return {"verts": verts, "tris": tris, "grid": grid, "cell": cell}
+
+
+## Möller–Trumbore, no culling (inner cloth walls are backfaces): hit
+## distance along d, -1 on miss.
+static func _ray_tri(o: Vector3, d: Vector3, v0: Vector3, v1: Vector3, v2: Vector3) -> float:
+	var e1 := v1 - v0
+	var e2 := v2 - v0
+	var p := d.cross(e2)
+	var det := e1.dot(p)
+	if absf(det) < 1e-9:
+		return -1.0
+	var inv := 1.0 / det
+	var tvec := o - v0
+	var u := tvec.dot(p) * inv
+	if u < 0.0 or u > 1.0:
+		return -1.0
+	var q := tvec.cross(e1)
+	var v := d.dot(q) * inv
+	if v < 0.0 or u + v > 1.0:
+		return -1.0
+	return e2.dot(q) * inv
+
+
+## True when any garment tri is hit within max_dist: cell stepping (step <
+## cell, every pierced cell visited), deduped tri tests per ray.
+static func _ray_occluded(td: Dictionary, o: Vector3, d: Vector3, max_dist: float) -> bool:
+	var cell: float = td["cell"]
+	var gv: PackedVector3Array = td["verts"]
+	var gt: PackedInt32Array = td["tris"]
+	var grid: Dictionary = td["grid"]
+	var seen := {}
+	var step := cell * 0.25
+	var dist := 0.0
+	while dist <= max_dist:
+		var key := Vector3i(((o + d * dist) / cell).floor())
+		if grid.has(key):
+			for ti in (grid[key] as Array):
+				if seen.has(ti):
+					continue
+				seen[ti] = true
+				var t := _ray_tri(o, d, gv[gt[ti * 3]], gv[gt[ti * 3 + 1]], gv[gt[ti * 3 + 2]])
+				if t >= 1e-4 and t <= max_dist:
+					return true
+		dist += step
+	return false
+
+
+## 5 dirs: axis + 4-ring at deg. Pass 2 calls it with +n (openings); pass 3
+## with -n (tight cloth behind the skin).
+static func _cone_half(n: Vector3, deg: float) -> Array:
+	var out: Array = [n]
+	var up := Vector3.UP
+	if absf(n.dot(up)) > 0.95:
+		up = Vector3.RIGHT
+	var u := n.cross(up).normalized()
+	var w0 := n.cross(u).normalized()
+	var co := cos(deg_to_rad(deg))
+	var si := sin(deg_to_rad(deg))
+	for az in [0.0, PI * 0.5, PI, PI * 1.5]:
+		var w := u * cos(az) + w0 * sin(az)
+		out.append((n * co + w * si).normalized())
+	return out
+
+
 static func suppress_covered(nude_holder: Node, garment_holders: Array, master: Skeleton3D) -> Dictionary:
 	var stats := {"ok": false, "tris_before": 0, "tris_after": 0, "removed": 0}
 	var ny := neck_height(master)
+	var neck_c := neck_center(master)
 	if master == null:
 		stats["skipped"] = "no master (bone names needed)"
 		return stats
@@ -310,6 +451,7 @@ static func suppress_covered(nude_holder: Node, garment_holders: Array, master: 
 	if vols.is_empty():
 		stats["skipped"] = "no garment volumes"
 		return stats
+	var td := _pass2_trigrid(garment_holders)
 	for chain in vols:
 		var v: Dictionary = vols[chain]
 		if bool(v["limb"]):
@@ -407,6 +549,92 @@ static func suppress_covered(nude_holder: Node, garment_holders: Array, master: 
 				if closed:
 					del[t] = 1
 					stats["holefill"] = int(stats.get("holefill", 0)) + 1
+			# Pass 2 (restore): GLOBAL daylight test over ALL deleted verts —
+			# flood could never reach enclosed islands (V, collar). A tri
+			# is re-emitted whole as soon as 1 vert sees daylight: neck
+			# column = forced (collar hides mistakes), else forward cone
+			# clear AND no tight cloth behind the skin (poke-through stays
+			# deleted).
+			var has_del := false
+			for t in ntris:
+				if del[t] == 1:
+					has_del = true
+					break
+			if has_del and not (td["tris"] as PackedInt32Array).is_empty():
+				var an: PackedVector3Array = a[Mesh.ARRAY_NORMAL]
+				var nrm := xf.basis.inverse().transposed()
+				var indel := PackedByteArray()
+				indel.resize(vv.size())
+				for t in ntris:
+					if del[t] == 1:
+						indel[idx[t * 3]] = 1
+						indel[idx[t * 3 + 1]] = 1
+						indel[idx[t * 3 + 2]] = 1
+				var lit := PackedByteArray()
+				lit.resize(vv.size())
+				var forced := PackedByteArray()
+				forced.resize(vv.size())
+				var ncand := 0
+				for i in vv.size():
+					if indel[i] == 0:
+						continue
+					var n := Vector3.ZERO
+					if i < an.size() and an[i].length_squared() > 0.25:
+						n = (nrm * an[i]).normalized()
+					if n.length_squared() < 0.5:
+						continue
+					ncand += 1
+					var g: Vector3 = xf * vv[i]
+					# Neck column: forced daylight (collar hides mistakes),
+					# else forward-daylight only (existential: one clear
+					# ray). No backward test here — poke-through is pass 3.
+					var cdx: float = g.x - neck_c.x
+					var cdz: float = g.z - neck_c.z
+					if cdx * cdx + cdz * cdz <= NECK_COLUMN_R * NECK_COLUMN_R and g.y >= ny - NECK_COLUMN_DN:
+						lit[i] = 1
+						forced[i] = 1
+						stats["pass2_neck"] = int(stats.get("pass2_neck", 0)) + 1
+						continue
+					for d in _cone_half(n, PASS2_CONE_DEG):
+						if not _ray_occluded(td, g, d, PASS2_RANGE):
+							lit[i] = 1
+							break
+				var nrest := 0
+				var repoked: Array = []
+				for t in ntris:
+					if del[t] == 1:
+						if lit[idx[t * 3]] == 1 or lit[idx[t * 3 + 1]] == 1 or lit[idx[t * 3 + 2]] == 1:
+							del[t] = 0
+							nrest += 1
+							repoked.append(t)
+				stats["pass2_candidates"] = int(stats.get("pass2_candidates", 0)) + ncand
+				stats["pass2_restored_tris"] = int(stats.get("pass2_restored_tris", 0)) + nrest
+				# Pass 3 (poke): re-test restored verts with the backward
+				# cone — tight cloth behind re-deletes (hole shows the
+				# opaque cloth, visually sound). Forced neck verts exempt.
+				var nredel := 0
+				for t in repoked:
+					var backed := false
+					for k in 3:
+						var vi: int = idx[t * 3 + k]
+						if lit[vi] == 0 or forced[vi] == 1:
+							continue
+						var bn := Vector3.ZERO
+						if vi < an.size() and an[vi].length_squared() > 0.25:
+							bn = (nrm * an[vi]).normalized()
+						if bn.length_squared() < 0.5:
+							continue
+						var bg: Vector3 = xf * vv[vi]
+						for d in _cone_half(-bn, PASS3_CONE_DEG):
+							if _ray_occluded(td, bg, d, PASS3_BACK_RANGE):
+								backed = true
+								break
+						if backed:
+							break
+					if backed:
+						del[t] = 1
+						nredel += 1
+				stats["pass3_redeleted_tris"] = int(stats.get("pass3_redeleted_tris", 0)) + nredel
 			var vv2 := (vv as PackedVector3Array).duplicate()
 			var nidx := PackedInt32Array()
 			for t in ntris:
@@ -439,6 +667,10 @@ static func suppress_covered(nude_holder: Node, garment_holders: Array, master: 
 	vparts.sort()
 	if not vparts.is_empty():
 		print("[Merge] vol-del %s" % " ".join(vparts))
+	if stats.has("pass2_restored_tris"):
+		print("[Merge] pass2 candidates=%d restored_tris=%d neck=%d" % [int(stats.get("pass2_candidates", 0)), int(stats["pass2_restored_tris"]), int(stats.get("pass2_neck", 0))])
+	if stats.has("pass3_redeleted_tris"):
+		print("[Merge] pass3 redeleted_tris=%d" % int(stats["pass3_redeleted_tris"]))
 	stats["vols"] = vols
 	stats["cdata"] = cdata
 	return stats
