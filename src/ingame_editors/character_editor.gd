@@ -783,13 +783,13 @@ func _run_headless_test() -> void:
 	_chartest_key(KEY_RIGHT, false)
 	for f in 2:
 		await get_tree().process_frame
-	fails += _expect("color tap one step", is_equal_approx(float(_dresser.current_params()["hue"]), 2.0))
+	fails += _expect("color tap one step", is_equal_approx(float(_dresser.current_params()["hue"]), 1.0))
 	_chartest_key(KEY_RIGHT, true)
 	for f in 30:
 		await get_tree().process_frame
 	_chartest_key(KEY_RIGHT, false)
 	fails += _expect("color keyboard sweep", float(_dresser.current_params()["hue"]) > 0.0)
-	fails += _expect("color sweep on grid", is_equal_approx(fmod(float(_dresser.current_params()["hue"]), 2.0), 0.0))
+	fails += _expect("color sweep on grid", is_equal_approx(fmod(float(_dresser.current_params()["hue"]), 1.0), 0.0))
 	_chartest_key(KEY_E, true)
 	for f in 2:
 		await get_tree().process_frame

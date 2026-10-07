@@ -25,7 +25,7 @@ const SAT_RATE := 1.2 # /sec
 const VAL_RATE := 1.0 # /sec
 ## Typematic repeat (06/10): a tap steps once, holding repeats by steps,
 ## then accelerates to the full sweep rates. Tune by eye.
-const STEP := {&"hue": 2.0, &"sat": 0.05, &"val": 0.05}
+const STEP := {&"hue": 1.0, &"sat": 0.05, &"val": 0.05}
 const REPEAT_DELAY := 0.4 # sec held before repeat starts
 const REPEAT_PER_SEC := 12.0 # steps/sec during the repeat phase
 const ACCEL_AFTER := 2.5 # sec held when the full sweep rate is reached
