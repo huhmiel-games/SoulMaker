@@ -1,11 +1,9 @@
-[gd_resource type="Environment" load_steps=1 format=3]
+[gd_resource type="Environment" format=3 uid="uid://cjjk2daf0gvy5"]
 
 [resource]
 resource_name = "EnvDefault"
 background_mode = 1
 background_color = Color(0.07, 0.08, 0.1, 1)
-ambient_light_source = 0
 ambient_light_color = Color(0.35, 0.36, 0.4, 1)
 ambient_light_energy = 0.6
 tonemap_mode = 2
-tonemap_exposure = 1.0

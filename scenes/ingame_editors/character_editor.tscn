@@ -1,7 +1,7 @@
 [gd_scene format=3 uid="uid://30igom2lu28t"]
 
 [ext_resource type="Script" uid="uid://wyvnupyrs3uk" path="res://src/ingame_editors/character_editor.gd" id="1"]
-[ext_resource type="Environment" path="res://scenes/ingame_editors/env_default.tres" id="2"]
+[ext_resource type="Environment" uid="uid://cjjk2daf0gvy5" path="res://scenes/ingame_editors/env_default.tres" id="2"]
 [ext_resource type="Script" uid="uid://c44cymw7pjxvg" path="res://src/runtime/orbit_camera_with_zoom.gd" id="3"]
 [ext_resource type="PackedScene" path="res://scenes/ui/generic_menu.tscn" id="4"]
 [ext_resource type="Script" uid="uid://nal33cnp181a" path="res://src/ui/character_menu.gd" id="5"]
@@ -38,22 +38,6 @@ fov = 50.0
 
 [node name="GroundMesh" type="MeshInstance3D" parent="Ground" unique_id=480757860]
 mesh = SubResource("ground_mesh")
-
-[node name="Nude" type="Node3D" parent="." unique_id=1717000001]
-
-[node name="Body" type="Node3D" parent="." unique_id=812195354]
-
-[node name="Arms" type="Node3D" parent="." unique_id=794065049]
-
-[node name="Legs" type="Node3D" parent="." unique_id=803769963]
-
-[node name="Feet" type="Node3D" parent="." unique_id=518636929]
-
-[node name="Head" type="Node3D" parent="." unique_id=1353915275]
-
-[node name="Accessories" type="Node3D" parent="." unique_id=1963531604]
-
-[node name="Avatar" type="Node3D" parent="." unique_id=1717000002]
 
 [node name="MenuLayer" type="CanvasLayer" parent="." unique_id=485800586]
 
