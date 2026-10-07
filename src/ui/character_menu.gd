@@ -3,10 +3,10 @@ extends GenericMenu
 
 ## Left-panel menu of the character editor (swapped in place so the
 ## mannequin stays dressed): root = Gender value row + Outfits/Outfits Colors/
-## Physics/Hair/Eyebrows/Skin submenus + Back to hub; outfit level = one value
+## Physics/Hair/Eyebrows/Eyes/Beard/Skin submenus + Back to hub; outfit level = one value
 ## row per slot; outfit-colors level = one color entry per outfit slot;
-## physics level = one value row per morph slider; hair/eyebrows/eyes levels =
-## style + color; skin level = color only (room for more later).
+## physics level = one value row per morph slider; hair/eyebrows/eyes/beard
+## levels = style + color; skin level = color only (room for more later).
 ## (menu grammar, no B). Value rows cycle live on L/R (tab_prev/tab_next)
 ## and reset on A/E; navigation is explicit rows only (B is inert in menus,
 ## same as MapMenu). The menu's own HUD is hidden (it would squash into the
@@ -25,8 +25,9 @@ const LEVEL_HAIR := 4
 const LEVEL_EYEBROWS := 5
 const LEVEL_SKIN := 6
 const LEVEL_EYES := 7
+const LEVEL_BEARD := 8
 
-var _level := LEVEL_ROOT # 0 root, 1 outfits, 2 outfit colors, 3 physics, 4 hair, 5 brows, 6 skin, 7 eyes
+var _level := LEVEL_ROOT # 0 root, 1 outfits, 2 outfit colors, 3 physics, 4 hair, 5 brows, 6 skin, 7 eyes, 8 beard
 var _host: CharacterEditor = null
 
 
@@ -60,6 +61,8 @@ func _menu_title() -> String:
 			return "SKIN"
 		LEVEL_EYES:
 			return "EYES"
+		LEVEL_BEARD:
+			return "BEARD"
 	return "CHARACTER"
 
 
@@ -134,6 +137,15 @@ func _load_entries() -> Array:
 			{"label": "Color", "call": _host.open_color.bind(&"Eyes")},
 			{"label": "[ ← Back ]", "call": _pop},
 		]
+	if _level == LEVEL_BEARD:
+		return [
+			{"label": "Style", "kind": "value",
+				"get": _host.beard_display,
+				"adjust": _host.adjust_beard,
+				"reset": _host.reset_beard},
+			{"label": "Color", "call": _host.open_color.bind(&"Beard")},
+			{"label": "[ ← Back ]", "call": _pop},
+		]
 	return [
 		{"label": "Gender", "kind": "value",
 			"get": _host.gender_display,
@@ -145,6 +157,7 @@ func _load_entries() -> Array:
 		{"label": "Hair >", "call": _push.bind(LEVEL_HAIR)},
 		{"label": "Eyebrows >", "call": _push.bind(LEVEL_EYEBROWS)},
 		{"label": "Eyes >", "call": _push.bind(LEVEL_EYES)},
+		{"label": "Beard >", "call": _push.bind(LEVEL_BEARD)},
 		{"label": "Skin >", "call": _push.bind(LEVEL_SKIN)},
 		{"label": "[ ← Back ]", "open": HUB_SCENE},
 	]

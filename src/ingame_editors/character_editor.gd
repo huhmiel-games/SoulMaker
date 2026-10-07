@@ -270,7 +270,7 @@ var _face_saved := {} # empty, or {pos: Vector3, arm: float}
 
 
 func on_menu_level(level: int) -> void:
-	if level == CharacterMenu.LEVEL_HAIR or level == CharacterMenu.LEVEL_EYEBROWS or level == CharacterMenu.LEVEL_EYES:
+	if level == CharacterMenu.LEVEL_HAIR or level == CharacterMenu.LEVEL_EYEBROWS or level == CharacterMenu.LEVEL_EYES or level == CharacterMenu.LEVEL_BEARD:
 		face_push()
 	else:
 		face_pop()
@@ -354,6 +354,22 @@ func adjust_hair(dir: int) -> void:
 
 func reset_hair() -> void:
 	_avatar.reset_hair()
+
+
+func beard_display() -> String:
+	return _avatar.beard_display()
+
+
+func beard_file(gender: String, style: StringName) -> String:
+	return _avatar.beard_file(gender, style)
+
+
+func adjust_beard(dir: int) -> void:
+	_avatar.adjust_beard(dir)
+
+
+func reset_beard() -> void:
+	_avatar.reset_beard()
 
 
 func eyebrow_display() -> String:
@@ -551,6 +567,7 @@ func _run_headless_test() -> void:
 	fails += _expect("menu root hair", root_labels.has("Hair >"))
 	fails += _expect("menu root eyebrows", root_labels.has("Eyebrows >"))
 	fails += _expect("menu root eyes", root_labels.has("Eyes >"))
+	fails += _expect("menu root beard", root_labels.has("Beard >"))
 	fails += _expect("menu root skin", root_labels.has("Skin >"))
 	_menu._push(CharacterMenu.LEVEL_COLORS)
 	fails += _expect("menu outfit colors 6+back", _menu._entries.size() == 7)
@@ -771,6 +788,33 @@ func _run_headless_test() -> void:
 	fails += _expect("face cam on eyes", face_active())
 	_menu._pop()
 	fails += _expect("face cam off eyes", not face_active())
+	# 10. Beard submenu (single vendor file now, more later — albedo like hair).
+	fails += _expect("beard none default", beard_display() == "None" and beard_file("Male", &"None").is_empty())
+	fails += _expect("beard file male", beard_file("Male", &"Beard").ends_with("Hair_Beard.gltf"))
+	open_color(&"Beard")
+	fails += _expect("beard color empty no-op", not is_color_open())
+	adjust_beard(1)
+	fails += _expect("beard style shown", beard_display() == "Beard")
+	var bmi := get_node_or_null("Avatar/Beard/Beard") as MeshInstance3D
+	fails += _expect("beard mounted", bmi != null and bmi.mesh != null)
+	fails += _expect("beard on master", bmi != null and hmaster != null and bmi.get_node_or_null(bmi.skeleton) == hmaster)
+	open_color(&"Beard")
+	fails += _expect("beard color opens", is_color_open())
+	fails += _expect("beard defaults mid", is_equal_approx(float(_dresser.current_params()["sat"]), 0.5) and is_equal_approx(float(_dresser.current_params()["val"]), 0.5))
+	_dresser._params = {"hue": 10.0, "sat": 0.7, "val": 0.5}
+	_dresser._apply()
+	var want_beard := Color.from_hsv(10.0 / 360.0, 0.7, 0.5)
+	fails += _expect("beard albedo written", ((bmi.mesh as ArrayMesh) != null and ((_slot_mats(&"Beard")[0] as ShaderMaterial).get_shader_parameter("albedo") as Color).is_equal_approx(want_beard)))
+	fails += _expect("beard shift neutral", is_equal_approx(float((_slot_mats(&"Beard")[0] as ShaderMaterial).get_shader_parameter("hue_shift_deg")), 0.0))
+	_dresser._confirm()
+	fails += _expect("beard color stored", _avatar._color_params.has(&"Beard"))
+	reset_beard()
+	fails += _expect("beard reset clean", beard_display() == "None" and get_node_or_null("Avatar/Beard/Beard") == null)
+	_menu._push(CharacterMenu.LEVEL_BEARD)
+	fails += _expect("menu beard rows", _menu._entries.size() == 3)
+	fails += _expect("face cam on beard", face_active())
+	_menu._pop()
+	fails += _expect("face cam off beard", not face_active())
 	print("[CharTest] %d FAIL" % fails)
 	get_tree().quit()
 

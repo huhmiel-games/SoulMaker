@@ -28,7 +28,7 @@ const SLOTS: Array[StringName] = [&"Body", &"Arms", &"Legs", &"Feet", &"Head", &
 const OUTFIT_COLOR_SLOTS: Array[StringName] = [&"Body", &"Arms", &"Legs", &"Feet", &"Head", &"Accessories"]
 ## Slots edited in albedo mode (quasi-white vendor textures with nothing to
 ## hue-shift: Hair + Eyebrows share the T_Hair set).
-const ALBEDO_SLOTS: Array[StringName] = [&"Hair", &"Eyebrows"]
+const ALBEDO_SLOTS: Array[StringName] = [&"Hair", &"Eyebrows", &"Beard"]
 ## Hair styles (07/10, user-attributed): rigged-to-HeadBone vendor files,
 ## one mesh each, all verts 100% Head (verified headless). Beard ignored.
 const HAIR_DIR := "res://assets/meshes/Hairstyles/Rigged to Head Bone/glTF (Godot -Unreal)/"
@@ -36,6 +36,10 @@ const HAIR_FILES := {
 	"Male": [&"Buzzed", &"SimpleParted"],
 	"Female": [&"Buns", &"Long", &"BuzzedFemale"],
 }
+## Beard styles (07/10): same vendor pack/dir as hair, mounted the same way
+## (rigid head-follow, albedo color). Male only for now — more files later,
+## same plumbing as eyebrows (single vendor style prepared).
+const BEARD_FILES := {"Male": [&"Beard"]}
 ## Fused-surface source substrings per color slot (src = source node name,
 ## recorded per surface at fusion). Skin reads the skin src list, slots read
 ## the cloth src list — a nude head can never leak into the Head slot.
@@ -80,6 +84,7 @@ var _avatar_cache := {} # build key -> {skin: ArrayMesh, cloth: ArrayMesh, skin_
 var _gender := 0
 var _outfit := {} # StringName slot -> int index into OUTFITS
 var _hair := 0 # index into hair_styles() (0 = None/bald)
+var _beard := 0 # index into beard_styles() (0 = None/clean-shaven)
 var _eyebrow := 0 # index into EYEBROW_STYLES (single Default for now)
 var _eye := 0 # index into EYE_STYLES (single Default for now)
 var _phys := {} # StringName phys key -> float scale (1.0 default)
@@ -95,7 +100,7 @@ var _hud = null # host HUD for the height readout (nullable, duck-typed)
 
 
 func _ready() -> void:
-	for h in ["Nude", "Fused", "Hair"]:
+	for h in ["Nude", "Fused", "Hair", "Beard"]:
 		_add_holder(h)
 	for slot in SLOTS:
 		_add_holder(String(slot))
@@ -138,6 +143,7 @@ func full_rebuild() -> void:
 ## hosts re-anchor (signal below).
 func _post_build() -> void:
 	_apply_hair()
+	_apply_beard()
 	_reapply_colors()
 	_apply_physics()
 	rebuilt.emit()
@@ -152,6 +158,7 @@ func gender_display() -> String:
 func adjust_gender(dir: int) -> void:
 	_gender = posmod(_gender + dir, GENDERS.size())
 	_hair = 0
+	_beard = 0
 	full_rebuild()
 	print("[Character] gender %s" % GENDERS[_gender])
 
@@ -159,6 +166,7 @@ func adjust_gender(dir: int) -> void:
 func reset_gender() -> void:
 	_gender = 0
 	_hair = 0
+	_beard = 0
 	full_rebuild()
 
 
@@ -477,8 +485,8 @@ func last_cdata() -> Dictionary:
 ## skin src list, slots = cloth src list). Empty = no part, toast only.
 func slot_mats(slot: StringName) -> Array:
 	var out := []
-	if slot == &"Hair":
-		var holder := get_node_or_null("Hair")
+	if slot == &"Hair" or slot == &"Beard":
+		var holder := get_node_or_null(String(slot))
 		if holder == null:
 			return out
 		for mi in ColorEditor._meshes_under(holder):
@@ -512,7 +520,7 @@ func slot_mats(slot: StringName) -> Array:
 
 
 ## Stored per-slot colors reapplied to the fresh fused materials. Albedo-mode
-## slots (Hair/Eyebrows): albedo from HSV, shift params neutral. Albedo slots
+## slots (Hair/Eyebrows/Beard): albedo from HSV, shift params neutral. Albedo slots
 ## with no stored color get ALBEDO_DEFAULTS (Hair already mounts dressed at
 ## defaults; Eyebrows are born inside the hue-shift-dressed nude, so without
 ## this they would open white with a dead Color row).
@@ -690,6 +698,98 @@ func _apply_hair() -> void:
 	mi.skeleton = mi.get_path_to(master)
 	_reset_dress(holder, true)
 	print("[Character] Hair -> %s" % path.get_file())
+
+
+## Beard menu verbs (same value-row contract as hair). Default None
+## (clean-shaven); gender swap resets (lists differ — female has no entry).
+func beard_styles() -> Array:
+	return [&"None"] + BEARD_FILES.get(GENDERS[_gender], [])
+
+
+func beard_file(gender: String, style: StringName) -> String:
+	if style == &"None":
+		return ""
+	return "%sHair_%s.gltf" % [HAIR_DIR, String(style)]
+
+
+func beard_display() -> String:
+	return String(beard_styles()[_beard])
+
+
+func adjust_beard(dir: int) -> void:
+	_beard = posmod(_beard + dir, beard_styles().size())
+	_apply_beard()
+	_reapply_colors()
+
+
+func reset_beard() -> void:
+	_beard = 0
+	_apply_beard()
+	_reapply_colors()
+
+
+## Runtime Beard holder (created, never saved). Same mount as hair: style
+## mesh on the fused master skeleton, bone indices remapped by name
+## (missing -> Head). No FitKit: rigid head-follow, follows Head scale +
+## idle/probe for free.
+func _beard_holder() -> Node3D:
+	var h := get_node_or_null("Beard") as Node3D
+	if h == null:
+		h = Node3D.new()
+		h.name = "Beard"
+		add_child(h)
+	return h
+
+
+func _apply_beard() -> void:
+	var holder := _beard_holder()
+	_clear_holder(holder)
+	var styles := beard_styles()
+	if _beard >= styles.size():
+		_beard = 0
+	var path := beard_file(GENDERS[_gender], styles[_beard])
+	if path.is_empty():
+		return
+	var packed := load(path) as PackedScene
+	if packed == null:
+		push_error("[Character] cannot load %s" % path)
+		return
+	var inst := packed.instantiate()
+	var found := inst.find_children("*", "MeshInstance3D", true, false)
+	if found.is_empty():
+		push_error("[Character] no beard mesh in %s" % path)
+		inst.queue_free()
+		return
+	var src := found[0] as MeshInstance3D
+	var sks := inst.find_children("*", "Skeleton3D", true, false)
+	var src_sk := sks[0] as Skeleton3D if not sks.is_empty() else null
+	var master := master_skeleton()
+	if master == null or src_sk == null or src.mesh == null:
+		push_error("[Character] beard mount failed (%s)" % path)
+		inst.queue_free()
+		return
+	var head := master.find_bone(&"Head")
+	var mesh := src.mesh
+	var out := ArrayMesh.new()
+	for s in mesh.get_surface_count():
+		var a := mesh.surface_get_arrays(s)
+		var bi: PackedInt32Array = a[Mesh.ARRAY_BONES]
+		var nb := PackedInt32Array()
+		nb.resize(bi.size())
+		for i in bi.size():
+			var ti := master.find_bone(src_sk.get_bone_name(bi[i]))
+			nb[i] = ti if ti != -1 else head
+		a[Mesh.ARRAY_BONES] = nb
+		out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, a)
+		out.surface_set_material(s, mesh.surface_get_material(s))
+	inst.queue_free()
+	var mi := MeshInstance3D.new()
+	mi.name = String(styles[_beard])
+	mi.mesh = out
+	holder.add_child(mi)
+	mi.skeleton = mi.get_path_to(master)
+	_reset_dress(holder, true)
+	print("[Character] Beard -> %s" % path.get_file())
 
 
 ## Eyebrow menu verbs (same value-row contract; single vendor style for now,

@@ -20,7 +20,7 @@ signal closed(applied: bool)
 
 const ROW_KEYS: Array[StringName] = [&"hue", &"sat", &"val"]
 const DEFAULTS := {"hue": 0.0, "sat": 1.0, "val": 1.0}
-## Albedo mode (Hair/Eyebrows, 07/10): vendor hair is quasi-white (nothing to hue-shift),
+## Albedo mode (Hair/Eyebrows/Beard, 07/10): vendor hair is quasi-white (nothing to hue-shift),
 ## so the same 3 rows drive the material `albedo` (Color.from_hsv) over the
 ## untouched source texture. Defaults = mid grey-red starting point (user tune
 ## 07/10: sat/val 0.5 so the Color row answers from the first step); sat/val

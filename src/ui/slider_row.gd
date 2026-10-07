@@ -2,13 +2,11 @@ extends Control
 class_name SliderRow
 
 ## One labeled slider row (character_editor groundwork): D-pad-native pick,
-## mouse-draggable as the same capability in other units.
-## - Keyboard/gamepad: the host selects the row (F) and nudges Left/Right;
-##   call nudge() or set_value() from the host — this node only displays.
-## - Mouse: drag on the bar sets the value from the x position (motion while
-##   left-held; Input.is_mouse_button_pressed is NOT in the input_audit raw
-##   list, and position comes from the UI event — same "adjust" capability
-##   as D-pad Left/Right, no new capability, no device branch).
+## display-only. Keyboard/gamepad: the host selects the row (F) and nudges
+## Left/Right; call nudge() or set_value() from the host — this node only
+## displays. Mouse (07/10): deliberately inert (MOUSE_FILTER_IGNORE, no drag
+## handling) — the dresser is keyboard/gamepad only, so the cursor mode is
+## never touched and menu orbit control can't leak.
 ## Emits value_changed(v) on every set (host writes through to the shader).
 
 signal value_changed(v: float)
@@ -27,7 +25,7 @@ var selected := false
 
 func _ready() -> void:
 	custom_minimum_size = Vector2(300, 30)
-	mouse_filter = Control.MOUSE_FILTER_STOP
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 
 func setup(p_label: String, p_min: float, p_max: float, p_decimals: int) -> void:
@@ -52,14 +50,6 @@ func fraction() -> float:
 	if is_equal_approx(max_value, min_value):
 		return 0.0
 	return (value - min_value) / (max_value - min_value)
-
-
-func _gui_input(event: InputEvent) -> void:
-	if event is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
-		var bx := LABEL_W + PAD
-		var bw: float = size.x - bx - VALUE_W - PAD * 2.0
-		if bw > 0.0:
-			set_value(min_value + clampf(((event as InputEventMouseMotion).position.x - bx) / bw, 0.0, 1.0) * (max_value - min_value))
 
 
 func _draw() -> void:
