@@ -23,11 +23,21 @@ const VAL_MAX := 2.5
 const HUE_RATE := 90.0 # deg/sec while Left/Right held
 const SAT_RATE := 1.2 # /sec
 const VAL_RATE := 1.0 # /sec
+## Typematic repeat (06/10): a tap steps once, holding repeats by steps,
+## then accelerates to the full sweep rates. Tune by eye.
+const STEP := {&"hue": 2.0, &"sat": 0.05, &"val": 0.05}
+const REPEAT_DELAY := 0.4 # sec held before repeat starts
+const REPEAT_PER_SEC := 12.0 # steps/sec during the repeat phase
+const ACCEL_AFTER := 2.5 # sec held when the full sweep rate is reached
 const BASE_TOON: Shader = preload("res://src/shaders/base_toon.gdshader")
 
 var _mats: Array[ShaderMaterial] = []
 var _params := DEFAULTS.duplicate()
 var _entry := DEFAULTS.duplicate() # values at open() — cancel restores these
+var _raw := DEFAULTS.duplicate() # precise pre-snap accumulation (07/10:
+# the grid snap froze slow phases — per-frame increments smaller than half
+# a step rounded back to the start every frame. Raw accumulates, params show
+# the snapped value)
 var _row := 0
 var _rows: Array[SliderRow] = []
 var _armed := false
@@ -63,6 +73,33 @@ func edit(slot_name: String, target: Node) -> void:
 	_params = DEFAULTS.duplicate()
 	_mats = _dress(target)
 	_params = _adopted_params()
+	_raw = (_params as Dictionary).duplicate()
+	_entry = (_params as Dictionary).duplicate()
+	_row = 0
+	_sync_rows(false)
+	_sync_row_select()
+	if _title != null:
+		_title.text = "Edit color — %s" % slot_name
+	_armed = false
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	show()
+	print("[ColorEditor] open '%s' (%d surfaces)" % [slot_name, _mats.size()])
+
+
+## Open the editor on an explicit material list (fused avatar: per-slot
+## surfaces whose source mesh belongs to the slot). Live values are adopted
+## as-is (the host reapplies stored params after every rebuild, so there is
+## no fresh/default distinction here unlike edit()). Same panel, same flow.
+func edit_mats(slot_name: String, mats: Array) -> void:
+	if visible:
+		push_warning("[ColorEditor] already open, ignoring edit('%s')" % slot_name)
+		return
+	_mats.clear()
+	for m in mats:
+		if m is ShaderMaterial:
+			_mats.append(m)
+	_params = _adopted_params()
+	_raw = (_params as Dictionary).duplicate()
 	_entry = (_params as Dictionary).duplicate()
 	_row = 0
 	_sync_rows(false)
@@ -79,6 +116,7 @@ func edit(slot_name: String, target: Node) -> void:
 func reset_target(target: Node) -> void:
 	_mats = _dress(target)
 	_params = DEFAULTS.duplicate()
+	_raw = DEFAULTS.duplicate()
 	_entry = DEFAULTS.duplicate()
 	_apply()
 	_sync_rows(false)
@@ -92,27 +130,59 @@ func _process(delta: float) -> void:
 	if not visible:
 		return
 	if not _armed:
-		if not InputManager.is_pressed(&"interact") and not InputManager.is_pressed(&"dodge"):
+		if not (_held(&"interact", &"place_select") or _held(&"dodge", &"deselect")):
 			_armed = true
 		return
-	if InputManager.is_just_pressed(&"cycle_spell"):
+	if _hit(&"cycle_spell", &"catalog_prev"):
 		_row = posmod(_row - 1, _rows.size())
 		_sync_row_select()
-	elif InputManager.is_just_pressed(&"cycle_item"):
+	elif _hit(&"cycle_item", &"catalog_next"):
 		_row = posmod(_row + 1, _rows.size())
 		_sync_row_select()
 	var dir := 0.0
-	if InputManager.is_pressed(&"cycle_lhand"):
+	if _hit(&"cycle_lhand", &"tab_prev"):
 		dir -= 1.0
-	if InputManager.is_pressed(&"cycle_rhand"):
+	if _hit(&"cycle_rhand", &"tab_next"):
 		dir += 1.0
 	if dir != 0.0:
-		_nudge(ROW_KEYS[_row], dir * delta)
+		# Tap = exactly one step (no sweep on the press frame).
+		_step_key(ROW_KEYS[_row], dir)
 		_rows[_row].set_value(float(_params[ROW_KEYS[_row]]), false)
-	if InputManager.is_just_pressed(&"interact"):
+	else:
+		var hdir := 0.0
+		var held_t := 0.0
+		if _held(&"cycle_lhand", &"tab_prev"):
+			hdir -= 1.0
+			held_t = _held_time(&"cycle_lhand", &"tab_prev")
+		if _held(&"cycle_rhand", &"tab_next"):
+			hdir += 1.0
+			held_t = maxf(held_t, _held_time(&"cycle_rhand", &"tab_next"))
+		if hdir != 0.0 and held_t > REPEAT_DELAY:
+			var k := clampf((held_t - REPEAT_DELAY) / maxf(ACCEL_AFTER - REPEAT_DELAY, 0.01), 0.0, 1.0)
+			var rate := lerpf(REPEAT_PER_SEC * float(STEP[ROW_KEYS[_row]]), _full_rate(ROW_KEYS[_row]), k)
+			_nudge(ROW_KEYS[_row], hdir * rate * delta)
+			_rows[_row].set_value(float(_params[ROW_KEYS[_row]]), false)
+	if _hit(&"interact", &"place_select"):
 		_confirm()
-	elif InputManager.is_just_pressed(&"dodge"):
+	elif _hit(&"dodge", &"deselect"):
 		_cancel()
+
+
+## Dual-vocabulary reads (06/10): the dresser lives in editor hosts (editor
+## profile: tab/catalog/place/deselect) and game-profile test scenes (cycle/
+## interact/dodge). Same capability, both names — no table/profile change,
+## keyboard and gamepad stay the same logical device either way.
+static func _held(game_action: StringName, editor_action: StringName) -> bool:
+	return InputManager.is_pressed(game_action) or InputManager.is_pressed(editor_action)
+
+
+static func _hit(game_action: StringName, editor_action: StringName) -> bool:
+	return InputManager.is_just_pressed(game_action) or InputManager.is_just_pressed(editor_action)
+
+
+## Longest hold time of either vocabulary (typematic repeat staging).
+static func _held_time(game_action: StringName, editor_action: StringName) -> float:
+	return maxf(InputManager.time_held(game_action), InputManager.time_held(editor_action))
 
 
 ## OK: keep live values. Also called by the headless self-test (--huetest).
@@ -125,6 +195,7 @@ func _confirm() -> void:
 ## Cancel: restore entry values. Also called by the headless self-test.
 func _cancel() -> void:
 	_params = (_entry as Dictionary).duplicate()
+	_raw = (_params as Dictionary).duplicate()
 	_apply()
 	hide()
 	print("[ColorEditor] cancel, restored %s" % _fmt())
@@ -132,13 +203,42 @@ func _cancel() -> void:
 
 
 func _nudge(key: StringName, amount: float) -> void:
+	# amount is an absolute parameter delta (rates applied by the caller).
+	# Raw accumulates unwrapped precision; only the published value snaps,
+	# so sub-step phases (repeat) advance instead of freezing.
 	if key == &"hue":
-		_params["hue"] = wrapf(float(_params["hue"]) + HUE_RATE * amount, 0.0, 360.0)
+		_raw[key] = wrapf(float(_raw[key]) + amount, 0.0, 360.0)
 	elif key == &"sat":
-		_params["sat"] = clampf(float(_params["sat"]) + SAT_RATE * amount, 0.0, SAT_MAX)
+		_raw[key] = clampf(float(_raw[key]) + amount, 0.0, SAT_MAX)
 	elif key == &"val":
-		_params["val"] = clampf(float(_params["val"]) + VAL_RATE * amount, 0.0, VAL_MAX)
+		_raw[key] = clampf(float(_raw[key]) + amount, 0.0, VAL_MAX)
+	_params[key] = _snap_in(key, float(_raw[key]))
 	_apply()
+
+
+## Grid snap (07/10): published values stop on standard step multiples
+## (1.50, never 1.52). Defaults and maxes are on-grid, so values never
+## leave it.
+func _snap_in(key: StringName, v: float) -> float:
+	var st := float(STEP[key])
+	if key == &"hue":
+		return wrapf(snappedf(v, st), 0.0, 360.0)
+	if key == &"sat":
+		return clampf(snappedf(v, st), 0.0, SAT_MAX)
+	return clampf(snappedf(v, st), 0.0, VAL_MAX)
+
+
+## One discrete step (tap response).
+func _step_key(key: StringName, dir: float) -> void:
+	_nudge(key, dir * float(STEP[key]))
+
+
+func _full_rate(key: StringName) -> float:
+	if key == &"sat":
+		return SAT_RATE
+	if key == &"val":
+		return VAL_RATE
+	return HUE_RATE
 
 
 func _fmt() -> String:
@@ -166,7 +266,10 @@ func _sync_row_select() -> void:
 func _on_row_changed(v: float, i: int) -> void:
 	_row = posmod(i, _rows.size())
 	_sync_row_select()
-	_params[ROW_KEYS[_row]] = v
+	var sv := _snap_in(ROW_KEYS[_row], v)
+	_params[ROW_KEYS[_row]] = sv
+	_raw[ROW_KEYS[_row]] = sv
+	_rows[_row].set_value(sv, false)
 	_apply()
 
 

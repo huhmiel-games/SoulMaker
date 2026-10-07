@@ -426,6 +426,16 @@ func _deadzone(value: float) -> float:
 	return value if absf(value) >= DEADZONE else 0.0
 
 
+## Chartest-only synthetic key (headless keyboard proofs, e.g. the dresser
+## sweep in editor profile). Lives here because input_audit forbids raw key
+## event fields anywhere else; never used by game code.
+static func inject_test_key(code: Key, down: bool) -> void:
+	var ev := InputEventKey.new()
+	ev.physical_keycode = code
+	ev.pressed = down
+	Input.parse_input_event(ev)
+
+
 func _deadzone_vec(x: float, y: float) -> Vector2:
 	var v := Vector2(_deadzone(x), _deadzone(y))
 	return v if v.length() > DEADZONE else Vector2.ZERO

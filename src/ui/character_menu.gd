@@ -1,17 +1,27 @@
 class_name CharacterMenu
 extends GenericMenu
 
-## Left-panel menu of the character editor (two levels, swapped in place so
-## the mannequin stays dressed): root = Gender value row + Outfit submenu +
-## Back to hub; outfit level = one value row per slot + Back. Value rows
-## cycle live on L/R (tab_prev/tab_next) and reset on A/E; navigation is
-## explicit rows only (B is inert in menus, same as MapMenu). The menu's own
-## HUD is hidden (it would squash into the 360px strip); hints and toasts go
-## to the editor's fullscreen HUD instead.
+## Left-panel menu of the character editor (swapped in place so the
+## mannequin stays dressed): root = Gender value row + Outfits/Colors/
+## Physics submenus + Back to hub; outfit level = one value row per slot;
+## colors level = one entry per slot + nude skin (opens the dresser panel);
+## physics level = one value row per morph slider. Explicit Back rows only
+## (menu grammar, no B). Value rows cycle live on L/R (tab_prev/tab_next)
+## and reset on A/E; navigation is explicit rows only (B is inert in menus,
+## same as MapMenu). The menu's own HUD is hidden (it would squash into the
+## 360px strip); hints and toasts go to the editor's fullscreen HUD instead.
+## While the dresser panel is open, menu input is gated (both read the same
+## InputManager actions — otherwise Up/Down would move the cursor behind
+## the panel).
 
 const HUB_SCENE := "res://scenes/main.tscn"
 
-var _level := 0 # 0 root, 1 outfit slots
+const LEVEL_ROOT := 0
+const LEVEL_OUTFITS := 1
+const LEVEL_COLORS := 2
+const LEVEL_PHYSICS := 3
+
+var _level := LEVEL_ROOT # 0 root, 1 outfits, 2 colors, 3 physics
 var _host: CharacterEditor = null
 
 
@@ -30,17 +40,26 @@ func enter_root(host: CharacterEditor) -> void:
 
 
 func _menu_title() -> String:
-	return "OUTFIT" if _level == 1 else "CHARACTER"
+	match _level:
+		LEVEL_OUTFITS:
+			return "OUTFIT"
+		LEVEL_COLORS:
+			return "COLORS"
+		LEVEL_PHYSICS:
+			return "PHYSICS"
+	return "CHARACTER"
 
 
 func _menu_hint() -> String:
+	if _level == LEVEL_COLORS:
+		return "Up/Down select · A/E edit color"
 	return "Up/Down select · L/R change · A/E reset"
 
 
 func _load_entries() -> Array:
 	if _host == null:
 		return []
-	if _level == 1:
+	if _level == LEVEL_OUTFITS:
 		var out: Array = []
 		for slot in CharacterEditor.SLOTS:
 			var s := slot
@@ -53,26 +72,53 @@ func _load_entries() -> Array:
 				"reset": _host.reset_slot.bind(s)})
 		out.append({"label": "[ ← Back ]", "call": _pop})
 		return out
+	if _level == LEVEL_COLORS:
+		var cout: Array = []
+		for slot in CharacterEditor.COLOR_SLOTS:
+			var s := slot
+			cout.append({"label": String(s), "call": _host.open_color.bind(s)})
+		cout.append({"label": "[ ← Back ]", "call": _pop})
+		return cout
+	if _level == LEVEL_PHYSICS:
+		var pout: Array = []
+		for key in CharacterEditor.PHYS_KEYS:
+			var k := key
+			pout.append({"label": String(k), "kind": "value",
+				"get": _host.phys_display.bind(k),
+				"adjust": func(dir: int) -> void: _host.adjust_phys(k, dir),
+				"reset": _host.reset_phys.bind(k)})
+		pout.append({"label": "[ ← Back ]", "call": _pop})
+		return pout
 	return [
 		{"label": "Gender", "kind": "value",
 			"get": _host.gender_display,
 			"adjust": _host.adjust_gender,
 			"reset": _host.reset_gender},
-		{"label": "Outfit >", "call": _push},
+		{"label": "Outfits >", "call": _push.bind(LEVEL_OUTFITS)},
+		{"label": "Colors >", "call": _push.bind(LEVEL_COLORS)},
+		{"label": "Physics >", "call": _push.bind(LEVEL_PHYSICS)},
 		{"label": "[ ← Back ]", "open": HUB_SCENE},
 	]
 
 
-func _push() -> void:
-	_level = 1
+func _push(level: int = LEVEL_OUTFITS) -> void:
+	_level = level
 	_refresh_list()
 	title_label.text = _menu_title()
 
 
 func _pop() -> void:
-	_level = 0
+	_level = LEVEL_ROOT
 	_refresh_list()
 	title_label.text = _menu_title()
+
+
+## Gate: the dresser panel reads the same InputManager actions — while it
+## is open the menu stays out of the way (preview remains visible behind).
+func _on_input_action(action: StringName) -> void:
+	if _host != null and _host.is_color_open():
+		return
+	super._on_input_action(action)
 
 
 func _notice(msg: String) -> void:

@@ -22,6 +22,35 @@ const OUTFITS: Array[String] = ["Peasant", "Ranger"]
 ## for that slot only. part_file returns "" when the combo ships no file.
 const SLOT_EXTRA := {&"Body": ["PeasantB", "PeasantF"], &"Accessories": ["RangerG"], &"Feet": ["PeasantF"], &"Legs": ["PeasantF"], &"Arms": ["PeasantF"]}
 const SLOTS: Array[StringName] = [&"Body", &"Arms", &"Legs", &"Feet", &"Head", &"Accessories"]
+## Colors menu entries: one per slot + the nude skin. Colors are per slot
+## (kept across outfit swaps) and reapplied after every rebuild (fused
+## materials are fresh each time — sources are freed at fusion).
+const COLOR_SLOTS: Array[StringName] = [&"Body", &"Arms", &"Legs", &"Feet", &"Head", &"Accessories", &"Skin"]
+## Fused-surface source substrings per color slot (src = source node name,
+## recorded per surface at fusion). Skin reads the skin src list, slots read
+## the cloth src list — a nude head can never leak into the Head slot.
+const SLOT_SRC_KEYS := {
+	&"Body": ["Body"], &"Arms": ["Arms"], &"Legs": ["Legs"],
+	&"Feet": ["Feet", "Boot"], &"Head": ["Head", "Hood"],
+	&"Accessories": ["Acc", "Gauntlet"],
+	&"Skin": ["SuperHero", "Eyebrow", "Eye"],
+}
+## Physics silhouette pack (v1): slider key -> bones + scaled axes (Standard
+## bone names). Applied as absolute bone-pose scale on the fused master
+## skeleton, reapplied after every rebuild (new skeleton each time).
+const PHYS_KEYS: Array[StringName] = [&"Height", &"Shoulders", &"Waist", &"Hips"]
+const PHYS_MIN := 0.8
+const PHYS_MAX := 1.3
+const PHYS_STEP := 0.05
+const PHYS_BONES := {
+	&"Height": {"bones": [&"LeftUpperLeg", &"RightUpperLeg", &"LeftLowerLeg", &"RightLowerLeg"], "axes": Vector3(0, 1, 0)},
+	&"Shoulders": {"bones": [&"LeftShoulder", &"RightShoulder"], "axes": Vector3(1, 0, 0)},
+	&"Waist": {"bones": [&"Spine", &"Chest"], "axes": Vector3(1, 0, 1)},
+	&"Hips": {"bones": [&"Hips"], "axes": Vector3(1, 0, 1)},
+}
+## Idle preview (06/10): the mannequin plays this instead of the T-pose.
+## Single-take remap (cheap per rebuild) on the fused master skeleton.
+const IDLE_TAKE := "rig/ual1__Idle"
 ## Face meshes (push must stay OFF: eyes sit millimeters above the face and
 ## a pushed face would swallow them). Node names, identical in both fullbodies.
 const FACE_NODES: Array[StringName] = [&"Eyebrows", &"Eyes"]
@@ -71,6 +100,10 @@ var _anim_master: Skeleton3D = null
 var _anim_targets: Array[Skeleton3D] = []
 var _anim_pairs: Array = [] # per target: Array of [master_idx, target_idx]
 var _anim_frame := 0
+var _idle_only := false # idle preview mode (vs full animtest probe)
+var _color_params := {} # StringName color slot -> {hue, sat, val}
+var _color_slot := &"" # slot currently open in the dresser
+var _phys := {} # StringName phys key -> float scale (1.0 default)
 
 
 func _ready() -> void:
@@ -92,6 +125,9 @@ func _ready() -> void:
 		_xray = 2
 	for slot in SLOTS:
 		_outfit[slot] = 0
+	for key in PHYS_KEYS:
+		_phys[key] = 1.0
+	_dresser.closed.connect(_on_color_closed)
 	_apply_nude()
 	_rebuild_avatar()
 	print("[Character] ready (gender %s, all slots %s)" % [GENDERS[_gender], OUTFITS[0]])
@@ -102,6 +138,8 @@ func _ready() -> void:
 		_run_capture_test()
 	if _animtest_wanted():
 		_animtest_setup()
+	else:
+		_idle_setup()
 
 
 ## glTF file for a (gender, outfit, slot) combo, "" when the combo ships no
@@ -191,6 +229,140 @@ func _apply_slot(slot: StringName) -> void:
 func _apply_all() -> void:
 	for slot in SLOTS:
 		_apply_slot(slot)
+
+
+## Post-build session state: fused materials/skeleton are fresh every
+## rebuild (sources freed), so stored colors + physics reapply here and the
+## preview animation (re)attaches to the new master.
+func _post_build() -> void:
+	_reapply_colors()
+	_apply_physics()
+	_restart_preview_anim()
+
+
+func _restart_preview_anim() -> void:
+	if _animtest_wanted():
+		_animtest_setup()
+	else:
+		_idle_setup()
+
+
+## Colors menu: fused materials whose source belongs to the slot (Skin =
+## skin src list, slots = cloth src list). Empty = no part, toast only.
+func open_color(slot: StringName) -> void:
+	var mats := _slot_mats(slot)
+	if mats.is_empty():
+		_menu._notice("no part for %s" % String(slot))
+		return
+	_color_slot = slot
+	_dresser.edit_mats(String(slot), mats)
+
+
+func is_color_open() -> bool:
+	return _dresser != null and _dresser.visible
+
+
+func _on_color_closed(applied: bool) -> void:
+	if applied and _color_slot != &"":
+		_color_params[_color_slot] = _dresser.current_params()
+		print("[Character] color %s %s" % [String(_color_slot), str(_color_params[_color_slot])])
+	_color_slot = &""
+
+
+func _slot_mats(slot: StringName) -> Array:
+	var out := []
+	var keys: Array = SLOT_SRC_KEYS.get(slot, [])
+	var skin_side := slot == &"Skin"
+	for e in _avatar_each_mat():
+		var src := String(e["src"])
+		var from_skin := _avatar_skin_src.has(src)
+		if from_skin != skin_side:
+			continue
+		var low := src.to_lower()
+		for k in keys:
+			if low.contains(String(k).to_lower()):
+				out.append(e["mat"])
+				break
+	return out
+
+
+## Stored per-slot colors reapplied to the fresh fused materials.
+func _reapply_colors() -> void:
+	for slot in _color_params:
+		var p: Dictionary = _color_params[slot]
+		for m in _slot_mats(slot):
+			(m as ShaderMaterial).set_shader_parameter("hue_shift_deg", float(p.get("hue", 0.0)))
+			(m as ShaderMaterial).set_shader_parameter("sat_mult", float(p.get("sat", 1.0)))
+			(m as ShaderMaterial).set_shader_parameter("val_mult", float(p.get("val", 1.0)))
+
+
+## Physics menu verbs (GenericMenu value rows, same contract as outfits).
+func phys_display(key: StringName) -> String:
+	return "%d%%" % int(round(float(_phys.get(key, 1.0)) * 100.0))
+
+
+func adjust_phys(key: StringName, dir: int) -> void:
+	_phys[key] = clampf(float(_phys.get(key, 1.0)) + float(dir) * PHYS_STEP, PHYS_MIN, PHYS_MAX)
+	_apply_physics()
+
+
+func reset_phys(key: StringName) -> void:
+	_phys[key] = 1.0
+	_apply_physics()
+
+
+## Absolute bone-pose scale on the fused master (single skeleton). Bones
+## missing from the rig are skipped with one line (chartest pins the v1 set).
+func _apply_physics() -> void:
+	var sk := _avatar_skeleton()
+	if sk == null:
+		return
+	for key in PHYS_KEYS:
+		var spec: Dictionary = PHYS_BONES[key]
+		var v := float(_phys.get(key, 1.0))
+		var axes: Vector3 = spec["axes"]
+		var sc := Vector3(1.0 + (v - 1.0) * axes.x, 1.0 + (v - 1.0) * axes.y, 1.0 + (v - 1.0) * axes.z)
+		for bn in spec["bones"]:
+			var bi := sk.find_bone(StringName(bn))
+			if bi == -1:
+				print("[Phys] bone missing: %s" % String(bn))
+				continue
+			sk.set_bone_pose_scale(bi, sc)
+
+
+## Idle preview: same manual-advance player as the probe but a single take
+## remapped (cheap per rebuild) instead of the whole 161-take pack.
+func _idle_setup() -> void:
+	_animtest_teardown()
+	_anim_frame = 0
+	var master := _avatar_skeleton()
+	if master == null:
+		master = _slot_skeleton(&"Nude")
+	if master == null:
+		push_error("[Idle] no avatar/nude skeleton")
+		return
+	var pack := load(ANIM_PACK) as AnimationLibrary
+	if pack == null:
+		push_error("[Idle] cannot load %s" % ANIM_PACK)
+		return
+	_anim_player = AnimationPlayer.new()
+	_anim_player.name = "IdlePlayer"
+	add_child(_anim_player)
+	_anim_player.playback_process_mode = AnimationPlayer.ANIMATION_PROCESS_MANUAL
+	var libs := AnimationLibrary.new()
+	# Library-level names are bare ("ual1__Idle"); the "rig/" prefix only
+	# exists at player level once the library is mounted.
+	var bare := IDLE_TAKE.trim_prefix("rig/")
+	if not pack.has_animation(bare):
+		bare = ANIM_DEFAULT_TAKE.trim_prefix("rig/")
+		print("[Idle] %s missing, fallback %s" % [IDLE_TAKE, bare])
+	libs.add_animation(bare, _animtest_remap(pack.get_animation(bare), master))
+	_anim_player.add_animation_library("rig", libs)
+	_anim_player.play(IDLE_TAKE)
+	_anim_master = master
+	_anim_active = true
+	_idle_only = true
+	print("[Idle] playing %s on %s" % [IDLE_TAKE, master.get_path()])
 
 
 ## Build key: gender + per-slot outfit (only combos with parts matter, the
@@ -368,6 +540,7 @@ func _rebuild_avatar() -> void:
 		_clear_holder(nude_holder)
 		for slot in SLOTS:
 			_clear_holder(get_node_or_null(String(slot)))
+		_post_build()
 		print("[Merge] cache hit %s (%dms)" % [key, Time.get_ticks_msec() - t0])
 		return
 	_apply_all()
@@ -409,6 +582,7 @@ func _rebuild_avatar() -> void:
 	_avatar_cache[key] = {"skin": res["skin_mesh"], "cloth": res["cloth_mesh"], "skin_srcs": res["skin_srcs"], "cloth_srcs": res["cloth_srcs"]}
 	if not USE_CACHE:
 		_avatar_cache.clear()
+	_post_build()
 	print("[Merge] built %s (%dms, cached keys=%d, suppress=%s)" % [key, Time.get_ticks_msec() - t0, _avatar_cache.size(), str(not no_suppress)])
 
 
@@ -466,16 +640,12 @@ func adjust_gender(dir: int) -> void:
 	_apply_nude()
 	_rebuild_avatar()
 	print("[Character] gender %s" % GENDERS[_gender])
-	if _anim_active:
-		_animtest_setup()
 
 
 func reset_gender() -> void:
 	_gender = 0
 	_apply_nude()
 	_rebuild_avatar()
-	if _anim_active:
-		_animtest_setup()
 
 
 func slot_display(slot: StringName) -> String:
@@ -489,16 +659,12 @@ func adjust_slot(slot: StringName, dir: int) -> void:
 	_outfit[slot] = posmod(int(_outfit[slot]) + dir, _slot_outfits(slot).size())
 	_apply_nude()
 	_rebuild_avatar()
-	if _anim_active:
-		_animtest_setup()
 
 
 func reset_slot(slot: StringName) -> void:
 	_outfit[slot] = 0
 	_apply_nude()
 	_rebuild_avatar()
-	if _anim_active:
-		_animtest_setup()
 
 
 ## Headless self-test (--chartest): table lookups, live swap dressing, gender
@@ -580,6 +746,81 @@ func _run_headless_test() -> void:
 		(body_entry["reset"] as Callable).call()
 		fails += _expect("menu A/E resets outfit", slot_display(&"Body") == "Peasant")
 	_menu._pop()
+	# 5. Four-level menu (root/outfits/colors/physics) + idle preview.
+	var root_labels := []
+	for e in _menu._entries:
+		root_labels.append(String((e as Dictionary).get("label", "")))
+	fails += _expect("menu root outfits", root_labels.has("Outfits >"))
+	fails += _expect("menu root colors", root_labels.has("Colors >"))
+	fails += _expect("menu root physics", root_labels.has("Physics >"))
+	_menu._push(CharacterMenu.LEVEL_COLORS)
+	fails += _expect("menu colors 7+back", _menu._entries.size() == 8)
+	_menu._push(CharacterMenu.LEVEL_PHYSICS)
+	fails += _expect("menu physics 4+back", _menu._entries.size() == 5)
+	_menu._pop()
+	var want_take := _animtest_take() if _animtest_wanted() else IDLE_TAKE
+	fails += _expect("preview anim playing", _anim_player != null and _anim_player.current_animation == want_take)
+	fails += _expect("color body mapped", not _slot_mats(&"Body").is_empty())
+	fails += _expect("color skin mapped", not _slot_mats(&"Skin").is_empty())
+	open_color(&"Head")
+	fails += _expect("color empty slot no-op", not is_color_open())
+	open_color(&"Body")
+	fails += _expect("color panel opens", is_color_open())
+	var cur0 := _menu._cursor
+	_menu._on_input_action(&"catalog_next")
+	fails += _expect("menu gated while color open", _menu._cursor == cur0)
+	_dresser._confirm()
+	fails += _expect("color stored on OK", _color_params.has(&"Body"))
+	_menu._on_input_action(&"catalog_next")
+	fails += _expect("menu resumes after close", _menu._cursor != cur0)
+	# 6. Keyboard in editor profile (Right = tab_next, E = place OK).
+	# Tap = exactly one step (typematic).
+	open_color(&"Body")
+	for f in 2:
+		await get_tree().process_frame
+	_chartest_key(KEY_RIGHT, true)
+	await get_tree().process_frame
+	_chartest_key(KEY_RIGHT, false)
+	for f in 2:
+		await get_tree().process_frame
+	fails += _expect("color tap one step", is_equal_approx(float(_dresser.current_params()["hue"]), 2.0))
+	_chartest_key(KEY_RIGHT, true)
+	for f in 30:
+		await get_tree().process_frame
+	_chartest_key(KEY_RIGHT, false)
+	fails += _expect("color keyboard sweep", float(_dresser.current_params()["hue"]) > 0.0)
+	fails += _expect("color sweep on grid", is_equal_approx(fmod(float(_dresser.current_params()["hue"]), 2.0), 0.0))
+	_chartest_key(KEY_E, true)
+	for f in 2:
+		await get_tree().process_frame
+	_chartest_key(KEY_E, false)
+	for f in 2:
+		await get_tree().process_frame
+	fails += _expect("color keyboard OK", not is_color_open())
+	open_color(&"Body")
+	for f in 2:
+		await get_tree().process_frame
+	_chartest_key(KEY_Q, true)
+	for f in 2:
+		await get_tree().process_frame
+	_chartest_key(KEY_Q, false)
+	for f in 2:
+		await get_tree().process_frame
+	fails += _expect("color keyboard cancel", not is_color_open())
+	_color_params[&"Body"] = {"hue": 90.0, "sat": 1.5, "val": 1.0}
+	_reapply_colors()
+	var body_mat := (_slot_mats(&"Body")[0] as ShaderMaterial)
+	fails += _expect("color reapply hue", is_equal_approx(float(body_mat.get_shader_parameter("hue_shift_deg")), 90.0))
+	adjust_phys(&"Height", 1)
+	var sk := _avatar_skeleton()
+	var thigh := sk.find_bone(&"LeftUpperLeg")
+	fails += _expect("phys thigh found", thigh != -1)
+	fails += _expect("phys display", phys_display(&"Height") == "105%")
+	for f in 5:
+		await get_tree().process_frame
+	fails += _expect("phys scale survives idle", sk.get_bone_pose_scale(thigh).is_equal_approx(Vector3(1, 1.05, 1)))
+	reset_phys(&"Height")
+	fails += _expect("phys reset", sk.get_bone_pose_scale(thigh).is_equal_approx(Vector3.ONE))
 	print("[CharTest] %d FAIL" % fails)
 	get_tree().quit()
 
@@ -714,6 +955,13 @@ func _avatar_tex() -> Texture2D:
 func _expect(test_name: String, cond: bool) -> int:
 	print("[CharTest] %s %s" % ["PASS" if cond else "FAIL", test_name])
 	return 0 if cond else 1
+
+
+## Synthetic key press for headless input tests (real Input state, so the
+## InputManager tracks and both vocabularies behave as in-game). The raw
+## event construction lives in InputManager.inject_test_key (audit-exempt).
+func _chartest_key(code: Key, down: bool) -> void:
+	InputManager.inject_test_key(code, down)
 
 
 ## Render capture for headless pixel analysis (--capturetest <path>
@@ -873,7 +1121,9 @@ func _animtest_setup() -> void:
 		_anim_targets.append(sk)
 		_anim_pairs.append(pairs)
 	_anim_player.play(take)
+	_anim_master = master
 	_anim_active = true
+	_idle_only = false
 	if _anim_targets.is_empty():
 		print("[AnimTest] playing %s on fused %s (0 part skeletons, nothing copied), player %s" % [take, master.get_path(), _anim_player.get_path()])
 	else:
