@@ -5,7 +5,7 @@ extends GenericMenu
 ## mannequin stays dressed): root = Gender value row + Outfits/Outfits Colors/
 ## Physics/Hair/Eyebrows/Skin submenus + Back to hub; outfit level = one value
 ## row per slot; outfit-colors level = one color entry per outfit slot;
-## physics level = one value row per morph slider; hair/eyebrows levels =
+## physics level = one value row per morph slider; hair/eyebrows/eyes levels =
 ## style + color; skin level = color only (room for more later).
 ## (menu grammar, no B). Value rows cycle live on L/R (tab_prev/tab_next)
 ## and reset on A/E; navigation is explicit rows only (B is inert in menus,
@@ -24,8 +24,9 @@ const LEVEL_PHYSICS := 3
 const LEVEL_HAIR := 4
 const LEVEL_EYEBROWS := 5
 const LEVEL_SKIN := 6
+const LEVEL_EYES := 7
 
-var _level := LEVEL_ROOT # 0 root, 1 outfits, 2 outfit colors, 3 physics, 4 hair, 5 brows, 6 skin
+var _level := LEVEL_ROOT # 0 root, 1 outfits, 2 outfit colors, 3 physics, 4 hair, 5 brows, 6 skin, 7 eyes
 var _host: CharacterEditor = null
 
 
@@ -57,6 +58,8 @@ func _menu_title() -> String:
 			return "EYEBROWS"
 		LEVEL_SKIN:
 			return "SKIN"
+		LEVEL_EYES:
+			return "EYES"
 	return "CHARACTER"
 
 
@@ -122,6 +125,15 @@ func _load_entries() -> Array:
 			{"label": "Color", "call": _host.open_color.bind(&"Skin")},
 			{"label": "[ ← Back ]", "call": _pop},
 		]
+	if _level == LEVEL_EYES:
+		return [
+			{"label": "Style", "kind": "value",
+				"get": _host.eye_display,
+				"adjust": _host.adjust_eye,
+				"reset": _host.reset_eye},
+			{"label": "Color", "call": _host.open_color.bind(&"Eyes")},
+			{"label": "[ ← Back ]", "call": _pop},
+		]
 	return [
 		{"label": "Gender", "kind": "value",
 			"get": _host.gender_display,
@@ -132,6 +144,7 @@ func _load_entries() -> Array:
 		{"label": "Physics >", "call": _push.bind(LEVEL_PHYSICS)},
 		{"label": "Hair >", "call": _push.bind(LEVEL_HAIR)},
 		{"label": "Eyebrows >", "call": _push.bind(LEVEL_EYEBROWS)},
+		{"label": "Eyes >", "call": _push.bind(LEVEL_EYES)},
 		{"label": "Skin >", "call": _push.bind(LEVEL_SKIN)},
 		{"label": "[ ← Back ]", "open": HUB_SCENE},
 	]

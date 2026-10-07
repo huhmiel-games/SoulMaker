@@ -45,6 +45,7 @@ const SLOT_SRC_KEYS := {
 	&"Accessories": ["Acc", "Gauntlet"],
 	&"Skin": ["SuperHero", "Eye"],
 	&"Eyebrows": ["Eyebrow"],
+	&"Eyes": ["Eyes"],
 }
 ## Physics silhouette pack (v1): slider key -> bones + scaled axes (Standard
 ## bone names). Applied as absolute bone-pose scale on the fused master
@@ -80,6 +81,7 @@ var _gender := 0
 var _outfit := {} # StringName slot -> int index into OUTFITS
 var _hair := 0 # index into hair_styles() (0 = None/bald)
 var _eyebrow := 0 # index into EYEBROW_STYLES (single Default for now)
+var _eye := 0 # index into EYE_STYLES (single Default for now)
 var _phys := {} # StringName phys key -> float scale (1.0 default)
 var _color_params := {} # StringName color slot -> {hue, sat, val}
 var _crown_rest := 0.0 # rest crown height (fused mesh AABB, skeleton space)
@@ -493,15 +495,15 @@ func slot_mats(slot: StringName) -> Array:
 					out.append(base)
 		return out
 	var keys: Array = SLOT_SRC_KEYS.get(slot, [])
-	var skin_side := slot == &"Skin" or slot == &"Eyebrows" # brows live on the nude
+	var skin_side := slot == &"Skin" or slot == &"Eyebrows" or slot == &"Eyes" # face bits live on the nude
 	for e in _avatar_each_mat():
 		var src := String(e["src"])
 		var from_skin := _avatar_skin_src.has(src)
 		if from_skin != skin_side:
 			continue
 		var low := src.to_lower()
-		if slot == &"Skin" and low.contains("eyebrow"):
-			continue # brows have their own slot ("Eyebrows" srcs contain "eye")
+		if slot == &"Skin" and (low.contains("eyebrow") or low.contains("eyes")):
+			continue # brows + eyes have their own slots
 		for k in keys:
 			if low.contains(String(k).to_lower()):
 				out.append(e["mat"])
@@ -693,6 +695,23 @@ func adjust_eyebrow(dir: int) -> void:
 
 func reset_eyebrow() -> void:
 	_eyebrow = 0
+
+
+## Eye menu verbs (same value-row contract; single vendor pair for now,
+## more files later — the cycle/reset plumbing is ready).
+const EYE_STYLES: Array[StringName] = [&"Default"]
+
+
+func eye_display() -> String:
+	return String(EYE_STYLES[_eye])
+
+
+func adjust_eye(dir: int) -> void:
+	_eye = posmod(_eye + dir, EYE_STYLES.size())
+
+
+func reset_eye() -> void:
+	_eye = 0
 
 
 ## Face anchor for host close-ups: Head bone world position.

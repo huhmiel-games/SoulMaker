@@ -270,7 +270,7 @@ var _face_saved := {} # empty, or {pos: Vector3, arm: float}
 
 
 func on_menu_level(level: int) -> void:
-	if level == CharacterMenu.LEVEL_HAIR or level == CharacterMenu.LEVEL_EYEBROWS:
+	if level == CharacterMenu.LEVEL_HAIR or level == CharacterMenu.LEVEL_EYEBROWS or level == CharacterMenu.LEVEL_EYES:
 		face_push()
 	else:
 		face_pop()
@@ -366,6 +366,18 @@ func adjust_eyebrow(dir: int) -> void:
 
 func reset_eyebrow() -> void:
 	_avatar.reset_eyebrow()
+
+
+func eye_display() -> String:
+	return _avatar.eye_display()
+
+
+func adjust_eye(dir: int) -> void:
+	_avatar.adjust_eye(dir)
+
+
+func reset_eye() -> void:
+	_avatar.reset_eye()
 
 
 func phys_display(key: StringName) -> String:
@@ -538,6 +550,7 @@ func _run_headless_test() -> void:
 	fails += _expect("menu root physics", root_labels.has("Physics >"))
 	fails += _expect("menu root hair", root_labels.has("Hair >"))
 	fails += _expect("menu root eyebrows", root_labels.has("Eyebrows >"))
+	fails += _expect("menu root eyes", root_labels.has("Eyes >"))
 	fails += _expect("menu root skin", root_labels.has("Skin >"))
 	_menu._push(CharacterMenu.LEVEL_COLORS)
 	fails += _expect("menu outfit colors 6+back", _menu._entries.size() == 7)
@@ -735,6 +748,29 @@ func _run_headless_test() -> void:
 	fails += _expect("skin hue written", is_equal_approx(float((_slot_mats(&"Skin")[0] as ShaderMaterial).get_shader_parameter("hue_shift_deg")), 40.0))
 	_dresser._confirm()
 	fails += _expect("skin color stored", _avatar._color_params.has(&"Skin"))
+	# 9. Eyes submenu (single style prepared, own color slot, hue-shift).
+	fails += _expect("eye style default", eye_display() == "Default")
+	adjust_eye(1)
+	fails += _expect("eye style single", eye_display() == "Default")
+	reset_eye()
+	var eye_mats := _slot_mats(&"Eyes")
+	var eye_shared := false
+	for m in eye_mats:
+		if _slot_mats(&"Skin").has(m):
+			eye_shared = true
+	fails += _expect("eyes split from skin", not eye_mats.is_empty() and not eye_shared)
+	open_color(&"Eyes")
+	fails += _expect("eyes color opens", is_color_open())
+	_dresser._params = {"hue": 120.0, "sat": 1.2, "val": 1.0}
+	_dresser._apply()
+	fails += _expect("eyes hue written", is_equal_approx(float((eye_mats[0] as ShaderMaterial).get_shader_parameter("hue_shift_deg")), 120.0))
+	_dresser._confirm()
+	fails += _expect("eyes color stored", _avatar._color_params.has(&"Eyes"))
+	_menu._push(CharacterMenu.LEVEL_EYES)
+	fails += _expect("menu eyes rows", _menu._entries.size() == 3)
+	fails += _expect("face cam on eyes", face_active())
+	_menu._pop()
+	fails += _expect("face cam off eyes", not face_active())
 	print("[CharTest] %d FAIL" % fails)
 	get_tree().quit()
 
