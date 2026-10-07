@@ -18,9 +18,11 @@ const BASE_TOON := preload("res://src/shaders/base_toon.gdshader")
 ## (no render_priority games: Forward+'s depth prepass defeats sampling).
 ## Automatic, zero per-garment work.
 const SKIN_METALLIC_MAX := 0.5
-## Push 25mm: worst measured burial is male hips/thigh sides, 22mm (female
+## Push 45mm: worst measured burial is male hips/thigh sides, 22mm (female
 ## 17-18mm, chest 8mm). Static-v0 tradeoff, documented: skin hovering
 ## within the band in front of cloth (hand near thigh) yields to the cloth.
+## Uniform everywhere (07/10): no face exemption — mixed push let true-depth
+## eyes swallow millimeter-close pushed lid skin (exorbités).
 const DEPTH_PUSH := 0.045
 
 static var _cache := {}
@@ -88,9 +90,10 @@ static func material_for(tex: Texture2D, tint: Color, normal_tex: Texture2D = nu
 
 
 ## Depth-push wiring shared by material_for() and ColorEditor (which builds
-## its own materials). force >= 0 overrides the metallic rule (face meshes:
-## push must stay off — eyes sit millimeters above the face and a pushed
-## face would swallow them).
+## its own materials). force >= 0 overrides the metallic rule. Uniform push
+## everywhere (07/10): eyes sit millimeters above the face, so exempting them
+## while the lids are pushed lets the eyeballs swallow lid skin — same push
+## on all skin keeps relative order (see the shader comment).
 static func set_skin_push(mat: ShaderMaterial, orm_metallic: float, force: float = -1.0) -> void:
 	var is_skin := orm_metallic < SKIN_METALLIC_MAX
 	if force >= 0.0:

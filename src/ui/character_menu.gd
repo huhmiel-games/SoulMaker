@@ -2,10 +2,11 @@ class_name CharacterMenu
 extends GenericMenu
 
 ## Left-panel menu of the character editor (swapped in place so the
-## mannequin stays dressed): root = Gender value row + Outfits/Colors/
-## Physics submenus + Back to hub; outfit level = one value row per slot;
-## colors level = one entry per slot + nude skin (opens the dresser panel);
-## physics level = one value row per morph slider. Explicit Back rows only
+## mannequin stays dressed): root = Gender value row + Outfits/Outfits Colors/
+## Physics/Hair/Eyebrows/Skin submenus + Back to hub; outfit level = one value
+## row per slot; outfit-colors level = one color entry per outfit slot;
+## physics level = one value row per morph slider; hair/eyebrows levels =
+## style + color; skin level = color only (room for more later).
 ## (menu grammar, no B). Value rows cycle live on L/R (tab_prev/tab_next)
 ## and reset on A/E; navigation is explicit rows only (B is inert in menus,
 ## same as MapMenu). The menu's own HUD is hidden (it would squash into the
@@ -20,8 +21,11 @@ const LEVEL_ROOT := 0
 const LEVEL_OUTFITS := 1
 const LEVEL_COLORS := 2
 const LEVEL_PHYSICS := 3
+const LEVEL_HAIR := 4
+const LEVEL_EYEBROWS := 5
+const LEVEL_SKIN := 6
 
-var _level := LEVEL_ROOT # 0 root, 1 outfits, 2 colors, 3 physics
+var _level := LEVEL_ROOT # 0 root, 1 outfits, 2 outfit colors, 3 physics, 4 hair, 5 brows, 6 skin
 var _host: CharacterEditor = null
 
 
@@ -44,14 +48,20 @@ func _menu_title() -> String:
 		LEVEL_OUTFITS:
 			return "OUTFIT"
 		LEVEL_COLORS:
-			return "COLORS"
+			return "OUTFITS COLORS"
 		LEVEL_PHYSICS:
 			return "PHYSICS"
+		LEVEL_HAIR:
+			return "HAIR"
+		LEVEL_EYEBROWS:
+			return "EYEBROWS"
+		LEVEL_SKIN:
+			return "SKIN"
 	return "CHARACTER"
 
 
 func _menu_hint() -> String:
-	if _level == LEVEL_COLORS:
+	if _level == LEVEL_COLORS or _level == LEVEL_SKIN:
 		return "Up/Down select · A/E edit color"
 	return "Up/Down select · L/R change · A/E reset"
 
@@ -61,7 +71,7 @@ func _load_entries() -> Array:
 		return []
 	if _level == LEVEL_OUTFITS:
 		var out: Array = []
-		for slot in CharacterEditor.SLOTS:
+		for slot in CharacterAvatar.SLOTS:
 			var s := slot
 			# Note: Callable.bind() appends bound args AFTER call-time args,
 			# but GenericMenu calls adjust.call(dir) — so lambdas keep the
@@ -74,14 +84,14 @@ func _load_entries() -> Array:
 		return out
 	if _level == LEVEL_COLORS:
 		var cout: Array = []
-		for slot in CharacterEditor.COLOR_SLOTS:
+		for slot in CharacterAvatar.OUTFIT_COLOR_SLOTS:
 			var s := slot
 			cout.append({"label": String(s), "call": _host.open_color.bind(s)})
 		cout.append({"label": "[ ← Back ]", "call": _pop})
 		return cout
 	if _level == LEVEL_PHYSICS:
 		var pout: Array = []
-		for key in CharacterEditor.PHYS_KEYS:
+		for key in CharacterAvatar.PHYS_KEYS:
 			var k := key
 			pout.append({"label": String(k), "kind": "value",
 				"get": _host.phys_display.bind(k),
@@ -89,14 +99,40 @@ func _load_entries() -> Array:
 				"reset": _host.reset_phys.bind(k)})
 		pout.append({"label": "[ ← Back ]", "call": _pop})
 		return pout
+	if _level == LEVEL_HAIR:
+		return [
+			{"label": "Style", "kind": "value",
+				"get": _host.hair_display,
+				"adjust": _host.adjust_hair,
+				"reset": _host.reset_hair},
+			{"label": "Color", "call": _host.open_color.bind(&"Hair")},
+			{"label": "[ ← Back ]", "call": _pop},
+		]
+	if _level == LEVEL_EYEBROWS:
+		return [
+			{"label": "Style", "kind": "value",
+				"get": _host.eyebrow_display,
+				"adjust": _host.adjust_eyebrow,
+				"reset": _host.reset_eyebrow},
+			{"label": "Color", "call": _host.open_color.bind(&"Eyebrows")},
+			{"label": "[ ← Back ]", "call": _pop},
+		]
+	if _level == LEVEL_SKIN:
+		return [
+			{"label": "Color", "call": _host.open_color.bind(&"Skin")},
+			{"label": "[ ← Back ]", "call": _pop},
+		]
 	return [
 		{"label": "Gender", "kind": "value",
 			"get": _host.gender_display,
 			"adjust": _host.adjust_gender,
 			"reset": _host.reset_gender},
 		{"label": "Outfits >", "call": _push.bind(LEVEL_OUTFITS)},
-		{"label": "Colors >", "call": _push.bind(LEVEL_COLORS)},
+		{"label": "Outfits Colors >", "call": _push.bind(LEVEL_COLORS)},
 		{"label": "Physics >", "call": _push.bind(LEVEL_PHYSICS)},
+		{"label": "Hair >", "call": _push.bind(LEVEL_HAIR)},
+		{"label": "Eyebrows >", "call": _push.bind(LEVEL_EYEBROWS)},
+		{"label": "Skin >", "call": _push.bind(LEVEL_SKIN)},
 		{"label": "[ ← Back ]", "open": HUB_SCENE},
 	]
 
@@ -105,12 +141,16 @@ func _push(level: int = LEVEL_OUTFITS) -> void:
 	_level = level
 	_refresh_list()
 	title_label.text = _menu_title()
+	if _host != null:
+		_host.on_menu_level(_level)
 
 
 func _pop() -> void:
 	_level = LEVEL_ROOT
 	_refresh_list()
 	title_label.text = _menu_title()
+	if _host != null:
+		_host.on_menu_level(_level)
 
 
 ## Gate: the dresser panel reads the same InputManager actions — while it

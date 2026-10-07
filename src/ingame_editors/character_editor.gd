@@ -2,66 +2,17 @@ class_name CharacterEditor
 extends Node3D
 
 ## Character editor v0 (base): gender + per-slot outfit picker with a live
-## mannequin preview. Session-only (defaults Male/Peasant every boot;
-## GameState persistence comes later when the game reads the config).
-## Six slots (Body/Arms/Legs/Feet/Head/Accessories), two outfits
-## (Peasant/Ranger — extend OUTFITS plus part_file for more). Parts are
-## Modular-Parts glTF conformed in memory by FitKit, the nude is reduced by
-## the pass-1 garment volumes (no tuck, no order since 03/10), and everything
-## fuses into ONE skeleton + TWO meshes (Skin / Cloths, X-ray toggle) under
-## the Avatar holder (memory cache per gender/outfit key). The left panel is a CharacterMenu
-## (GenericMenu subclass): value rows cycle live on L/R, A/E resets to
-## default, explicit Back rows only (menu grammar, no B).
+## mannequin preview. Session-only (defaults every boot; GameState
+## persistence comes later when the game reads the config).
+## Thin editor shell over CharacterAvatar (runtime): menus, dresser, camera,
+## preview/probe animation, self-tests. Build state (gender/outfits/hair/
+## colors/physics) lives in the avatar so the game can drive the same node.
 ## Run: Godot --path . scenes/ingame_editors/character_editor.tscn
 
-const PART_DIR := "res://assets/meshes/outfits/universal_outfit_free/Exports/glTF (Godot-Unreal)/Modular Parts/"
-const NUDE_DIR := "res://assets/meshes/characters/"
-const GENDERS: Array[String] = ["Male", "Female"]
-const OUTFITS: Array[String] = ["Peasant", "Ranger"]
-## Extra test variants per slot (Blender-edited files): cycled after OUTFITS
-## for that slot only. part_file returns "" when the combo ships no file.
-const SLOT_EXTRA := {&"Body": ["PeasantB", "PeasantF"], &"Accessories": ["RangerG"], &"Feet": ["PeasantF"], &"Legs": ["PeasantF"], &"Arms": ["PeasantF"]}
-const SLOTS: Array[StringName] = [&"Body", &"Arms", &"Legs", &"Feet", &"Head", &"Accessories"]
-## Colors menu entries: one per slot + the nude skin. Colors are per slot
-## (kept across outfit swaps) and reapplied after every rebuild (fused
-## materials are fresh each time — sources are freed at fusion).
-const COLOR_SLOTS: Array[StringName] = [&"Body", &"Arms", &"Legs", &"Feet", &"Head", &"Accessories", &"Skin"]
-## Fused-surface source substrings per color slot (src = source node name,
-## recorded per surface at fusion). Skin reads the skin src list, slots read
-## the cloth src list — a nude head can never leak into the Head slot.
-const SLOT_SRC_KEYS := {
-	&"Body": ["Body"], &"Arms": ["Arms"], &"Legs": ["Legs"],
-	&"Feet": ["Feet", "Boot"], &"Head": ["Head", "Hood"],
-	&"Accessories": ["Acc", "Gauntlet"],
-	&"Skin": ["SuperHero", "Eyebrow", "Eye"],
-}
-## Physics silhouette pack (v1): slider key -> bones + scaled axes (Standard
-## bone names). Applied as absolute bone-pose scale on the fused master
-## skeleton, reapplied after every rebuild (new skeleton each time).
-const PHYS_KEYS: Array[StringName] = [&"Height", &"Legs", &"Shoulders", &"Waist", &"Hips", &"Head"]
-const PHYS_STEP := 0.01
-## Per-row bounds (Height stays near 1.0: 90-110%, the rest 80-130%).
-## Bounds per row (07/10, eye-tuned): limbs/height stay near the authored
-## body (90-110); Waist is tighter (95-105, the nude is already muscular —
-## 90 puts hands inside the torso, 110+ reads non-human).
-const PHYS_LIMITS := {
-	&"Height": [0.9, 1.1], &"Legs": [0.9, 1.1], &"Shoulders": [0.9, 1.1],
-	&"Waist": [0.95, 1.05], &"Hips": [0.9, 1.1], &"Head": [0.9, 1.1],
-}
-const PHYS_BONES := {
-	&"Height": {"bones": [&"Root"], "axes": Vector3(1, 1, 1)},
-	&"Legs": {"bones": [&"LeftUpperLeg", &"RightUpperLeg", &"LeftLowerLeg", &"RightLowerLeg"], "axes": Vector3(1, 0, 1)},
-	&"Shoulders": {"bones": [&"LeftShoulder", &"RightShoulder"], "axes": Vector3(1, 0, 0)},
-	&"Waist": {"bones": [&"Spine", &"Chest"], "axes": Vector3(1, 0, 1)},
-	&"Hips": {"bones": [&"Hips"], "axes": Vector3(1, 0, 1)},
-	&"Head": {"bones": [&"Head"], "axes": Vector3(1, 1, 1)},
-}
+var _avatar: CharacterAvatar = null
 ## Idle preview (06/10): the mannequin plays this instead of the T-pose.
 ## Single-take remap (cheap per rebuild) on the fused master skeleton.
 const IDLE_TAKE := "rig/ual1__Idle"
-## Face meshes (push must stay OFF: eyes sit millimeters above the face and
-## a pushed face would swallow them). Node names, identical in both fullbodies.
-const FACE_NODES: Array[StringName] = [&"Eyebrows", &"Eyes"]
 ## Anim-fit probe pack (take names inside are already "lib__clip", e.g.
 ## "ual1__Walk"; the "rig/" prefix is the player library name, same as game).
 const ANIM_PACK := "res://scenes/anim_lab/player_pack.res"
@@ -85,21 +36,9 @@ const ANIM_DEFAULT_TAKE := "rig/ual1__Walk"
 ## overlay, zero behavior change when unticked. Local-only: do NOT commit
 ## the scene with this ticked.
 @export var show_volumes := false
-var _nude_snap := {"ok": false}
-
-var _gender := 0
-var _outfit := {} # StringName slot -> int index into OUTFITS
-## Avatar cache: OFF during the cut-detection dev phase (every switch must
-## rebuild). Re-enable when the cuts are final.
-const USE_CACHE := false
-var _avatar_cache := {} # build key -> {skin: ArrayMesh, cloth: ArrayMesh, skin_srcs, cloth_srcs}
-var _avatar_skin_src := PackedStringArray()
-var _avatar_cloth_src := PackedStringArray()
 ## X-ray debug (TEMP, N key / L3 pad): 0 fused, 1 skin only, 2 volumes.
 var _xray := 0
 const XRAY_NAMES := ["Fused", "Skin", "Volumes"]
-var _last_vols := {}
-var _last_cdata := {}
 var _dresser: ColorEditor = null
 var _menu: CharacterMenu = null
 var _anim_active := false
@@ -109,10 +48,7 @@ var _anim_targets: Array[Skeleton3D] = []
 var _anim_pairs: Array = [] # per target: Array of [master_idx, target_idx]
 var _anim_frame := 0
 var _idle_only := false # idle preview mode (vs full animtest probe)
-var _color_params := {} # StringName color slot -> {hue, sat, val}
 var _color_slot := &"" # slot currently open in the dresser
-var _phys := {} # StringName phys key -> float scale (1.0 default)
-var _crown_rest := 0.0 # rest crown height (fused mesh AABB, skeleton space)
 
 
 func _ready() -> void:
@@ -132,14 +68,16 @@ func _ready() -> void:
 		show_volumes = true
 	if show_volumes:
 		_xray = 2
-	for slot in SLOTS:
-		_outfit[slot] = 0
-	for key in PHYS_KEYS:
-		_phys[key] = 1.0
+	_avatar = CharacterAvatar.new()
+	_avatar.name = "Avatar"
+	add_child(_avatar)
+	_avatar.use_fitkit = use_fitkit
+	_avatar.no_suppress = no_suppress
+	_avatar.setup(_dresser, get_node_or_null("MenuLayer/HUD"))
+	_avatar.rebuilt.connect(_on_avatar_rebuilt)
 	_dresser.closed.connect(_on_color_closed)
-	_apply_nude()
-	_rebuild_avatar()
-	print("[Character] ready (gender %s, all slots %s)" % [GENDERS[_gender], OUTFITS[0]])
+	_avatar.full_rebuild()
+	print("[Character] ready (gender %s, all slots %s)" % [_avatar.gender_display(), CharacterAvatar.OUTFITS[0]])
 	_menu.enter_root(self)
 	if "--chartest" in OS.get_cmdline_user_args() or "--chartest" in OS.get_cmdline_args():
 		_run_headless_test()
@@ -151,101 +89,17 @@ func _ready() -> void:
 		_idle_setup()
 
 
-## glTF file for a (gender, outfit, slot) combo, "" when the combo ships no
-## part (Peasant has no Head/Accessories; Ranger side names are irregular:
-## Feet_Boots on male, Head_Hood, Acc_Pauldron vs Acc_Pauldrons).
+## glTF part lookup (avatar-owned table). Delegated: chartest calls it here.
 func part_file(gender: String, outfit: String, slot: StringName) -> String:
-	match slot:
-		&"Head":
-			if outfit != "Ranger":
-				return ""
-			return "%s%s_%s_Head_Hood.gltf" % [PART_DIR, gender, outfit]
-		&"Accessories":
-			if outfit == "RangerG" and gender == "Female":
-				return PART_DIR + "Female_Ranger_Gauntlets.gltf"
-			if outfit != "Ranger":
-				return ""
-			if gender == "Male":
-				return PART_DIR + "Male_Ranger_Acc_Pauldron.gltf"
-			return PART_DIR + "Female_Ranger_Acc_Pauldrons.gltf"
-		&"Feet":
-			if gender == "Male" and outfit == "Ranger":
-				return PART_DIR + "Male_Ranger_Feet_Boots.gltf"
-			if gender == "Male" and outfit == "PeasantF":
-				return PART_DIR + "Male_Peasant_Feet_Fix.gltf"
-			if outfit == "PeasantF":
-				return ""
-			return "%s%s_%s_Feet.gltf" % [PART_DIR, gender, outfit]
-		&"Body", &"Arms", &"Legs":
-			if outfit == "PeasantB" and slot == &"Body" and gender == "Female":
-				return PART_DIR + "Female_Peasant_Body_B.gltf"
-			if slot == &"Arms" and outfit == "Peasant" and gender == "Male":
-				return PART_DIR + "Male_Peasant_Arms_without_hands.gltf"
-			if slot == &"Arms" and outfit == "Ranger" and gender == "Male":
-				return PART_DIR + "Male_Ranger_Arms_without_hands.gltf"
-			if slot == &"Arms" and outfit == "Ranger" and gender == "Female":
-				return PART_DIR + "Female_Ranger_Arms_without_hands.gltf"
-			if outfit == "PeasantF" and slot == &"Legs" and gender == "Male":
-				return PART_DIR + "Male_Peasant_Legs_Fix.gltf"
-			if outfit == "PeasantF" and slot == &"Body" and gender == "Male":
-				return PART_DIR + "Male_Peasant_Body_Fix.gltf"
-			if outfit == "PeasantF" and slot == &"Arms" and gender == "Male":
-				return PART_DIR + "Male_Peasant_Arms_Fix.gltf"
-			if outfit == "PeasantB" or outfit == "RangerG" or outfit == "PeasantF":
-				return ""
-			return "%s%s_%s_%s.gltf" % [PART_DIR, gender, outfit, String(slot)]
-	return ""
+	return _avatar.part_file(gender, outfit, slot)
 
 
-## Outfit choices for a slot: base OUTFITS + test extras (variant files).
-func _slot_outfits(slot: StringName) -> Array:
-	return OUTFITS + SLOT_EXTRA.get(slot, [])
-
-
-## Swap one slot to its current (gender, outfit) combo, dressed toon.
-## Raw vendor part + in-memory FitKit conform (both genders) — no files.
-func _apply_slot(slot: StringName) -> void:
-	var holder := get_node_or_null(String(slot)) as Node3D
-	if holder == null:
-		push_error("[Character] missing slot node %s" % slot)
-		return
-	for c in holder.get_children():
-		holder.remove_child(c)
-		c.queue_free()
-	var path := part_file(GENDERS[_gender], _slot_outfits(slot)[int(_outfit[slot])], slot)
-	var want_fit := use_fitkit and not path.is_empty()
-	if path.is_empty():
-		print("[Character] %s: no part (%s %s)" % [String(slot), GENDERS[_gender], String(_slot_outfits(slot)[int(_outfit[slot])])])
-		return
-	var packed := load(path) as PackedScene
-	if packed == null:
-		push_error("[Character] cannot load %s" % path)
-		return
-	holder.add_child(packed.instantiate())
-	if want_fit:
-		if _nude_snap.get("ok", false):
-			# Cloth is kept 100% authored (03/10: fit_pushout removed — it
-			# deformed glove fingers via wrong-finger nearest pushes, and
-			# the inward cover tier handles buried cloth instead).
-			# Vendor skin: conformed snug (skin-tight registration witness).
-			FitKit.fit_holder(holder, _nude_snap, slot, _gender, true)
-		else:
-			push_error("[Character] FitKit without nude snapshot")
-	_dresser.reset_target(holder)
-	print("[Character] %s -> %s" % [String(slot), path.get_file()])
-
-
-func _apply_all() -> void:
-	for slot in SLOTS:
-		_apply_slot(slot)
-
-
-## Post-build session state: fused materials/skeleton are fresh every
-## rebuild (sources freed), so stored colors + physics reapply here and the
-## preview animation (re)attaches to the new master.
-func _post_build() -> void:
-	_reapply_colors()
-	_apply_physics()
+## Rebuild follow-up (avatar signal): the preview animation attaches to the
+## new master (face re-anchor + colors/physics already handled avatar-side).
+func _on_avatar_rebuilt() -> void:
+	if face_active():
+		face_push() # re-anchor: the new head moved (height/gender)
+	_apply_xray() # new MIs default visible; restore the xray state
 	_restart_preview_anim()
 
 
@@ -264,7 +118,7 @@ func open_color(slot: StringName) -> void:
 		_menu._notice("no part for %s" % String(slot))
 		return
 	_color_slot = slot
-	_dresser.edit_mats(String(slot), mats)
+	_dresser.edit_mats(String(slot), mats, slot in CharacterAvatar.ALBEDO_SLOTS)
 
 
 func is_color_open() -> bool:
@@ -273,89 +127,8 @@ func is_color_open() -> bool:
 
 func _on_color_closed(applied: bool) -> void:
 	if applied and _color_slot != &"":
-		_color_params[_color_slot] = _dresser.current_params()
-		print("[Character] color %s %s" % [String(_color_slot), str(_color_params[_color_slot])])
+		_avatar.store_color(_color_slot, _dresser.current_params())
 	_color_slot = &""
-
-
-func _slot_mats(slot: StringName) -> Array:
-	var out := []
-	var keys: Array = SLOT_SRC_KEYS.get(slot, [])
-	var skin_side := slot == &"Skin"
-	for e in _avatar_each_mat():
-		var src := String(e["src"])
-		var from_skin := _avatar_skin_src.has(src)
-		if from_skin != skin_side:
-			continue
-		var low := src.to_lower()
-		for k in keys:
-			if low.contains(String(k).to_lower()):
-				out.append(e["mat"])
-				break
-	return out
-
-
-## Stored per-slot colors reapplied to the fresh fused materials.
-func _reapply_colors() -> void:
-	for slot in _color_params:
-		var p: Dictionary = _color_params[slot]
-		for m in _slot_mats(slot):
-			(m as ShaderMaterial).set_shader_parameter("hue_shift_deg", float(p.get("hue", 0.0)))
-			(m as ShaderMaterial).set_shader_parameter("sat_mult", float(p.get("sat", 1.0)))
-			(m as ShaderMaterial).set_shader_parameter("val_mult", float(p.get("val", 1.0)))
-
-
-## Physics menu verbs (GenericMenu value rows, same contract as outfits).
-func phys_display(key: StringName) -> String:
-	return "%d%%" % int(round(float(_phys.get(key, 1.0)) * 100.0))
-
-
-func adjust_phys(key: StringName, dir: int) -> void:
-	var lim: Array = PHYS_LIMITS.get(key, [0.8, 1.3])
-	_phys[key] = clampf(float(_phys.get(key, 1.0)) + float(dir) * PHYS_STEP, float(lim[0]), float(lim[1]))
-	_apply_physics()
-
-
-func reset_phys(key: StringName) -> void:
-	_phys[key] = 1.0
-	_apply_physics()
-
-
-## Absolute bone-pose scale on the fused master (single skeleton). Bones
-## missing from the rig are skipped with one line (chartest pins the v1 set).
-func _apply_physics() -> void:
-	var sk := _avatar_skeleton()
-	if sk == null:
-		return
-	for key in PHYS_KEYS:
-		var spec: Dictionary = PHYS_BONES[key]
-		var v := float(_phys.get(key, 1.0))
-		var axes: Vector3 = spec["axes"]
-		var sc := Vector3(1.0 + (v - 1.0) * axes.x, 1.0 + (v - 1.0) * axes.y, 1.0 + (v - 1.0) * axes.z)
-		for bn in spec["bones"]:
-			var bi := sk.find_bone(StringName(bn))
-			if bi == -1:
-				print("[Phys] bone missing: %s" % String(bn))
-				continue
-			sk.set_bone_pose_scale(bi, sc)
-	# Head stays out of Waist/Hips: bone scale inherits down the chain, so
-	# the neck counter-scales the ancestor XZ product (arms still inherit —
-	# known approximation until arm-local rows exist).
-	var torso_xz := float(_phys.get(&"Waist", 1.0)) * float(_phys.get(&"Hips", 1.0))
-	var neck := sk.find_bone(&"Neck")
-	if neck != -1:
-		var inv := 1.0 / maxf(torso_xz, 0.01)
-		sk.set_bone_pose_scale(neck, Vector3(inv, 1.0, inv))
-	# Height readout (top-right status line): rest crown from the fused
-	# bind-pose AABBs times the Root scale.
-	_crown_rest = 0.0
-	for mi in _avatar_mis():
-		var mmi := mi as MeshInstance3D
-		if mmi != null and mmi.mesh != null:
-			_crown_rest = maxf(_crown_rest, mmi.mesh.get_aabb().end.y)
-	var hud := get_node_or_null("MenuLayer/HUD")
-	if hud != null and hud.has_method("set_persistent"):
-		hud.set_persistent(&"height", "HEIGHT: %.2fm" % (_crown_rest * float(_phys.get(&"Height", 1.0))))
 
 
 ## Idle preview: same manual-advance player as the probe but a single take
@@ -391,25 +164,6 @@ func _idle_setup() -> void:
 	_anim_active = true
 	_idle_only = true
 	print("[Idle] playing %s on %s" % [IDLE_TAKE, master.get_path()])
-
-
-## Build key: gender + per-slot outfit (only combos with parts matter, the
-## full key is cheaper to reason about).
-## TODO cache: when re-enabling, include no_suppress (and
-## use_fitkit) in the key, or a --nosuppress run will be served cut geometry.
-func _avatar_key() -> String:
-	var k := [GENDERS[_gender]]
-	for slot in SLOTS:
-		k.append(str(int(_outfit[slot])))
-	return "|".join(k)
-
-
-func _clear_holder(h: Node) -> void:
-	if h == null:
-		return
-	for c in h.get_children():
-		h.remove_child(c)
-		c.queue_free()
 
 
 ## Volume overlay colors (one per chain, alpha applied at draw time).
@@ -486,213 +240,214 @@ func _draw_volumes(vols: Dictionary, cdata: Dictionary) -> void:
 	print("[Merge] volumes drawn: %d" % root.get_child_count())
 
 
-## The fused skeleton + fused mesh (null/empty before the first rebuild).
+## Fused-avatar accessors (delegated, see the delegates block above).
+
+
+## Fused-avatar accessors (delegated, see the delegates block above).
+
+
+## Nude base body (delegated, see the delegates block above).
+
+
+## Nude base body (delegated, see the delegates block above).
+
+
+## Menu verbs (delegated, see the delegates block above).
+
+
+## Hair (delegated, see the delegates block above).
+
+
+## Eyebrows (delegated, see the delegates block above).
+
+
+## Face close-up (Hair/Eyebrows submenus): the orbit pivot + arm are saved,
+## the pivot moves to the Head bone and the arm shortens; leaving the submenu
+## restores both. Yaw/pitch untouched — the user keeps orbiting the face.
+## Re-anchored after every rebuild while active (height/gender move the head).
+const FACE_ARM := 0.9
+var _face_saved := {} # empty, or {pos: Vector3, arm: float}
+
+
+func on_menu_level(level: int) -> void:
+	if level == CharacterMenu.LEVEL_HAIR or level == CharacterMenu.LEVEL_EYEBROWS:
+		face_push()
+	else:
+		face_pop()
+
+
+func face_active() -> bool:
+	return not _face_saved.is_empty()
+
+
+func _head_world() -> Vector3:
+	return _avatar.head_world()
+
+
+func _face_pivot() -> Node3D:
+	return get_node_or_null("CamPivot") as Node3D
+
+
+func face_push() -> void:
+	var pivot := _face_pivot()
+	if pivot == null:
+		return
+	var arm := pivot.get_node_or_null("SpringArm3D") as SpringArm3D
+	if arm == null:
+		return
+	if _face_saved.is_empty():
+		_face_saved = {"pos": pivot.position, "arm": arm.spring_length}
+	pivot.position = _head_world()
+	arm.spring_length = FACE_ARM
+
+
+func face_pop() -> void:
+	if _face_saved.is_empty():
+		return
+	var pivot := _face_pivot()
+	var arm := (pivot.get_node_or_null("SpringArm3D") as SpringArm3D) if pivot != null else null
+	if pivot != null:
+		pivot.position = _face_saved["pos"]
+	if arm != null:
+		arm.spring_length = float(_face_saved["arm"])
+	_face_saved.clear()
+
+
+## Menu verbs (GenericMenu value rows: get = display, adjust(L/R) = cycle,
+## reset(A/E) = default). Thin delegates: state + build live in the avatar.
+func gender_display() -> String:
+	return _avatar.gender_display()
+
+
+func adjust_gender(dir: int) -> void:
+	_avatar.adjust_gender(dir)
+	print("[Character] gender %s" % _avatar.gender_display())
+
+
+func reset_gender() -> void:
+	_avatar.reset_gender()
+
+
+func slot_display(slot: StringName) -> String:
+	return _avatar.slot_display(slot)
+
+
+func adjust_slot(slot: StringName, dir: int) -> void:
+	_avatar.adjust_slot(slot, dir)
+
+
+func reset_slot(slot: StringName) -> void:
+	_avatar.reset_slot(slot)
+
+
+func hair_display() -> String:
+	return _avatar.hair_display()
+
+
+func hair_file(gender: String, style: StringName) -> String:
+	return _avatar.hair_file(gender, style)
+
+
+func adjust_hair(dir: int) -> void:
+	_avatar.adjust_hair(dir)
+
+
+func reset_hair() -> void:
+	_avatar.reset_hair()
+
+
+func eyebrow_display() -> String:
+	return _avatar.eyebrow_display()
+
+
+func adjust_eyebrow(dir: int) -> void:
+	_avatar.adjust_eyebrow(dir)
+
+
+func reset_eyebrow() -> void:
+	_avatar.reset_eyebrow()
+
+
+func phys_display(key: StringName) -> String:
+	return _avatar.phys_display(key)
+
+
+func adjust_phys(key: StringName, dir: int) -> void:
+	_avatar.adjust_phys(key, dir)
+
+
+func reset_phys(key: StringName) -> void:
+	_avatar.reset_phys(key)
+
+
+## Avatar data access for the probe/overlay/capture tools + chartest.
 func _avatar_skeleton() -> Skeleton3D:
-	var avatar := get_node_or_null("Avatar")
-	if avatar == null:
-		return null
-	var found := avatar.find_children("*", "Skeleton3D", true, false)
-	if found.is_empty():
-		return null
-	return found[0] as Skeleton3D
+	return _avatar.master_skeleton()
+
+
+func _avatar_mis() -> Array:
+	return _avatar.avatar_mis()
 
 
 func _avatar_mi() -> MeshInstance3D:
 	return _avatar_skin_mi() if _avatar_skin_mi() != null else _avatar_cloth_mi()
 
 
-func _avatar_mis() -> Array:
-	var avatar := get_node_or_null("Avatar")
-	var out := []
-	if avatar == null:
-		return out
-	for c in avatar.get_children():
-		if c is MeshInstance3D:
-			out.append(c)
-	return out
-
-
 func _avatar_skin_mi() -> MeshInstance3D:
-	var avatar := get_node_or_null("Avatar")
-	if avatar == null:
-		return null
-	return avatar.get_node_or_null("Skin") as MeshInstance3D
+	return _avatar.get_node_or_null("Fused/Skin") as MeshInstance3D
 
 
 func _avatar_cloth_mi() -> MeshInstance3D:
-	var avatar := get_node_or_null("Avatar")
-	if avatar == null:
-		return null
-	return avatar.get_node_or_null("Cloths") as MeshInstance3D
+	return _avatar.get_node_or_null("Fused/Cloths") as MeshInstance3D
 
 
-## Moves the master skeleton under Avatar and hangs the two fused
-## MeshInstances on it (Skin + Cloths share the one skeleton so the X-ray
-## toggle can show each side). Sources are freed by the caller.
-func _mount_avatar(master: Skeleton3D, skin: ArrayMesh, cloth: ArrayMesh, skin_srcs: PackedStringArray, cloth_srcs: PackedStringArray) -> void:
-	var avatar := get_node_or_null("Avatar")
-	if avatar == null or master == null:
-		push_error("[Merge] cannot mount (missing avatar/master)")
-		return
-	_clear_holder(avatar)
-	var mp := master.get_parent()
-	if mp != null:
-		mp.remove_child(master)
-	avatar.add_child(master)
-	for entry in [["Skin", skin], ["Cloths", cloth]]:
-		if entry[1] == null or (entry[1] as ArrayMesh).get_surface_count() == 0:
-			continue
-		var mi := MeshInstance3D.new()
-		mi.name = String(entry[0])
-		mi.mesh = entry[1] as ArrayMesh
-		avatar.add_child(mi)
-		mi.skeleton = mi.get_path_to(master)
-	_avatar_skin_src = skin_srcs
-	_avatar_cloth_src = cloth_srcs
-	_apply_xray()
+func _avatar_surf_count() -> int:
+	var n := 0
+	for mi in _avatar_mis():
+		if (mi as MeshInstance3D).mesh != null:
+			n += (mi as MeshInstance3D).mesh.get_surface_count()
+	return n
 
 
-## Full rebuild: cache hit = nude skeleton + cached meshes only (garments are
-## never reloaded); miss = load + FitKit fit + pass-1 volume suppression +
-## fusion. Sources (Nude/slot holders) are freed — the Avatar is the only
-## body left.
-func _rebuild_avatar() -> void:
-	var t0 := Time.get_ticks_msec()
-	_clear_volumes()
-	var key := _avatar_key()
-	var nude_holder := get_node_or_null("Nude")
-	if USE_CACHE and _avatar_cache.has(key):
-		var e: Dictionary = _avatar_cache[key]
-		var master := _slot_skeleton(&"Nude")
-		_mount_avatar(master, e["skin"] as ArrayMesh, e["cloth"] as ArrayMesh, e["skin_srcs"] as PackedStringArray, e["cloth_srcs"] as PackedStringArray)
-		_clear_holder(nude_holder)
-		for slot in SLOTS:
-			_clear_holder(get_node_or_null(String(slot)))
-		_post_build()
-		print("[Merge] cache hit %s (%dms)" % [key, Time.get_ticks_msec() - t0])
-		return
-	_apply_all()
-	var master := _slot_skeleton(&"Nude")
-	if master == null:
-		push_error("[Merge] no nude skeleton, avatar skipped")
-		return
-	var holders := {}
-	for slot in SLOTS:
-		holders[slot] = get_node_or_null(String(slot))
-	var gholders: Array = []
-	for slot in SLOTS:
-		gholders.append(holders[slot])
-	if not no_suppress:
-		var sup := FitKit.suppress_covered(nude_holder, gholders, master)
-		if bool(sup.get("ok", false)):
-			_last_vols = sup.get("vols", {})
-			_last_cdata = sup.get("cdata", {})
-		else:
-			_last_vols = {}
-			_last_cdata = {}
-	var parts: Array = []
-	for mi in FitKit.meshes_under(nude_holder):
-		parts.append({"mi": mi, "skeleton": master, "kind": "skin"})
-	for slot in SLOTS:
-		var sk := _slot_skeleton(slot)
-		if sk == null:
-			continue
-		for mi in FitKit.meshes_under(holders[slot]):
-			parts.append({"mi": mi, "skeleton": sk, "kind": "cloth"})
-	var res := FitKit.fuse_avatar(master, parts)
-	if not res.get("ok", false):
-		push_error("[Merge] fusion failed, sources kept")
-		return
-	_mount_avatar(master, res["skin_mesh"] as ArrayMesh, res["cloth_mesh"] as ArrayMesh, res["skin_srcs"] as PackedStringArray, res["cloth_srcs"] as PackedStringArray)
-	_clear_holder(nude_holder)
-	for slot in SLOTS:
-		_clear_holder(get_node_or_null(String(slot)))
-	_avatar_cache[key] = {"skin": res["skin_mesh"], "cloth": res["cloth_mesh"], "skin_srcs": res["skin_srcs"], "cloth_srcs": res["cloth_srcs"]}
-	if not USE_CACHE:
-		_avatar_cache.clear()
-	_post_build()
-	print("[Merge] built %s (%dms, cached keys=%d, suppress=%s)" % [key, Time.get_ticks_msec() - t0, _avatar_cache.size(), str(not no_suppress)])
+func _avatar_src_has(substr: String) -> bool:
+	return _avatar._avatar_src_has(substr)
 
 
-## Nude base body (Superhero fullbody: skin everywhere but underwear, head
-## included) under every outfit — the depth-push skin side. Garments cover
-## it; bare parts (head, hands, gaps) show through. Reloaded on gender swap.
-func nude_file(gender: String) -> String:
-	return "%sSuperhero_%s_FullBody.gltf" % [NUDE_DIR, gender]
+func _avatar_push(src_substr: String) -> float:
+	return _avatar._avatar_push(src_substr)
+
+
+func _avatar_finger_verts() -> int:
+	return _avatar._avatar_finger_verts()
+
+
+func _avatar_tex() -> Texture2D:
+	return _avatar._avatar_tex()
+
+
+func _slot_mats(slot: StringName) -> Array:
+	return _avatar.slot_mats(slot)
+
+
+func _reapply_colors() -> void:
+	_avatar._reapply_colors()
 
 
 func _apply_nude() -> void:
-	var holder := get_node_or_null("Nude") as Node3D
-	if holder == null:
-		push_error("[Character] missing Nude slot node")
-		return
-	for c in holder.get_children():
-		holder.remove_child(c)
-		c.queue_free()
-	var packed := load(nude_file(GENDERS[_gender])) as PackedScene
-	if packed == null:
-		push_error("[Character] cannot load %s" % nude_file(GENDERS[_gender]))
-		return
-	holder.add_child(packed.instantiate())
-	_dresser.reset_target(holder)
-	# The nude never casts shadows: buried cloth would otherwise sit in the
-	# torso's shadow and render near-black (dark pack textures + filmic).
-	# Ground/body shadows still come from the garments; bare head/hands
-	# lose their cast shadow (editor-preview tradeoff, documented).
-	for mi in ColorEditor._meshes_under(holder):
-		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	# Face meshes keep the push OFF (see FACE_NODES): the hood covers them
-	# by plain depth test, no bias needed.
-	for mi in ColorEditor._meshes_under(holder):
-		var mmi := mi as MeshInstance3D
-		if mmi == null or mmi.mesh == null:
-			continue
-		if not (StringName(mmi.name) in FACE_NODES):
-			continue
-		for s in mmi.mesh.get_surface_count():
-			var mat := mmi.get_surface_override_material(s) as ShaderMaterial
-			if mat != null:
-				ToonKit.set_skin_push(mat, 1.0, 0.0)
-	print("[Character] Nude -> %s" % nude_file(GENDERS[_gender]).get_file())
-	_nude_snap = FitKit.snapshot_nude(holder)
+	_avatar._apply_nude()
 
 
-## Menu verbs (GenericMenu value rows: get = display, adjust(L/R) = cycle,
-## reset(A/E) = default). Adjust ignores its return; the row re-renders.
-func gender_display() -> String:
-	return GENDERS[_gender]
+func _rebuild_avatar() -> void:
+	_clear_volumes()
+	_avatar.rebuild_avatar()
 
 
-func adjust_gender(dir: int) -> void:
-	_gender = posmod(_gender + dir, GENDERS.size())
-	_apply_nude()
-	_rebuild_avatar()
-	print("[Character] gender %s" % GENDERS[_gender])
+func _slot_skeleton(slot: StringName) -> Skeleton3D:
+	return _avatar.slot_skeleton(slot)
 
 
-func reset_gender() -> void:
-	_gender = 0
-	_apply_nude()
-	_rebuild_avatar()
-
-
-func slot_display(slot: StringName) -> String:
-	var opts := _slot_outfits(slot)
-	if part_file(GENDERS[_gender], opts[int(_outfit[slot])], slot).is_empty():
-		return "--"
-	return opts[int(_outfit[slot])]
-
-
-func adjust_slot(slot: StringName, dir: int) -> void:
-	_outfit[slot] = posmod(int(_outfit[slot]) + dir, _slot_outfits(slot).size())
-	_apply_nude()
-	_rebuild_avatar()
-
-
-func reset_slot(slot: StringName) -> void:
-	_outfit[slot] = 0
-	_apply_nude()
-	_rebuild_avatar()
+func _set_push_all(v: float) -> void:
+	_avatar.set_push_all(v)
 
 
 ## Headless self-test (--chartest): table lookups, live swap dressing, gender
@@ -727,7 +482,7 @@ func _run_headless_test() -> void:
 	fails += _expect("body outfit kept", slot_display(&"Body") == "Ranger")
 	fails += _expect("female avatar fused", _avatar_mi() != null and _avatar_src_has("SuperHero"))
 	fails += _expect("female hands kept", _avatar_finger_verts() > 100)
-	_outfit[&"Body"] = 2
+	_avatar._outfit[&"Body"] = 2
 	_apply_nude()
 	_rebuild_avatar()
 	fails += _expect("body B shown", slot_display(&"Body") == "PeasantB")
@@ -739,7 +494,7 @@ func _run_headless_test() -> void:
 	fails += _expect("male avatar fused", _avatar_mi() != null and _avatar_surf_count() > 1)
 	fails += _expect("male hands kept", _avatar_finger_verts() > 100)
 	fails += _expect("skin push on", _avatar_push("SuperHero") > 0.01)
-	fails += _expect("eyes push off", _avatar_push("Eyes") < 0.001)
+	fails += _expect("eyes push uniform", is_equal_approx(_avatar_push("Eyes"), _avatar_push("SuperHero")))
 	fails += _expect("fitkit default on", use_fitkit or "--nofit" in OS.get_cmdline_user_args() or "--nofit" in OS.get_cmdline_args())
 	fails += _expect("stages default on", (not no_suppress) or "--nosuppress" in OS.get_cmdline_user_args() or "--nosuppress" in OS.get_cmdline_args())
 	fails += _expect("fitkit cfg male legs", not FitKit.cfg_for(&"Legs", 0).is_empty())
@@ -747,7 +502,7 @@ func _run_headless_test() -> void:
 	fails += _expect("fitkit cfg female arms", not FitKit.cfg_for(&"Arms", 1).is_empty())
 	fails += _expect("fitkit regular clamp", FitKit.REGULAR_CLAMP < FitKit.MAX_PUSH)
 	fails += _expect("avatar albedo wired", _avatar_tex() != null)
-	fails += _expect("cache bypassed dev", not USE_CACHE and _avatar_cache.is_empty())
+	fails += _expect("cache bypassed dev", not CharacterAvatar.USE_CACHE and _avatar._avatar_cache.is_empty())
 	_xray = 0
 	_apply_xray()
 	_cycle_xray()
@@ -779,10 +534,13 @@ func _run_headless_test() -> void:
 	for e in _menu._entries:
 		root_labels.append(String((e as Dictionary).get("label", "")))
 	fails += _expect("menu root outfits", root_labels.has("Outfits >"))
-	fails += _expect("menu root colors", root_labels.has("Colors >"))
+	fails += _expect("menu root outfit colors", root_labels.has("Outfits Colors >"))
 	fails += _expect("menu root physics", root_labels.has("Physics >"))
+	fails += _expect("menu root hair", root_labels.has("Hair >"))
+	fails += _expect("menu root eyebrows", root_labels.has("Eyebrows >"))
+	fails += _expect("menu root skin", root_labels.has("Skin >"))
 	_menu._push(CharacterMenu.LEVEL_COLORS)
-	fails += _expect("menu colors 7+back", _menu._entries.size() == 8)
+	fails += _expect("menu outfit colors 6+back", _menu._entries.size() == 7)
 	_menu._push(CharacterMenu.LEVEL_PHYSICS)
 	fails += _expect("menu physics 6+back", _menu._entries.size() == 7)
 	_menu._pop()
@@ -798,7 +556,7 @@ func _run_headless_test() -> void:
 	_menu._on_input_action(&"catalog_next")
 	fails += _expect("menu gated while color open", _menu._cursor == cur0)
 	_dresser._confirm()
-	fails += _expect("color stored on OK", _color_params.has(&"Body"))
+	fails += _expect("color stored on OK", _avatar._color_params.has(&"Body"))
 	_menu._on_input_action(&"catalog_next")
 	fails += _expect("menu resumes after close", _menu._cursor != cur0)
 	# 6. Keyboard in editor profile (Right = tab_next, E = place OK).
@@ -835,7 +593,7 @@ func _run_headless_test() -> void:
 	for f in 2:
 		await get_tree().process_frame
 	fails += _expect("color keyboard cancel", not is_color_open())
-	_color_params[&"Body"] = {"hue": 90.0, "sat": 1.5, "val": 1.0}
+	_avatar._color_params[&"Body"] = {"hue": 90.0, "sat": 1.5, "val": 1.0}
 	_reapply_colors()
 	var body_mat := (_slot_mats(&"Body")[0] as ShaderMaterial)
 	fails += _expect("color reapply hue", is_equal_approx(float(body_mat.get_shader_parameter("hue_shift_deg")), 90.0))
@@ -876,6 +634,107 @@ func _run_headless_test() -> void:
 	fails += _expect("phys head reset", sk.get_bone_pose_scale(sk.find_bone(&"Head")).is_equal_approx(Vector3.ONE))
 	var hud := get_node_or_null("MenuLayer/HUD")
 	fails += _expect("phys height shown", hud != null and String(hud.get("_persistent").get(&"height", "")).begins_with("HEIGHT: 1."))
+	# 6. Hair menu (style cycle, master mount, color).
+	fails += _expect("hair none default", hair_display() == "None" and hair_file("Male", &"None").is_empty())
+	fails += _expect("hair buzzed male", hair_file("Male", &"Buzzed").ends_with("Hair_Buzzed.gltf"))
+	fails += _expect("hair buns female", hair_file("Female", &"Buns").ends_with("Hair_Buns.gltf"))
+	adjust_hair(1)
+	fails += _expect("hair style shown", hair_display() == "Buzzed")
+	var hmi := get_node_or_null("Avatar/Hair/Buzzed") as MeshInstance3D
+	fails += _expect("hair mounted", hmi != null and hmi.mesh != null)
+	var hmaster := _avatar_skeleton()
+	fails += _expect("hair on master", hmi != null and hmaster != null and hmi.get_node_or_null(hmi.skeleton) == hmaster)
+	var hidx := hmaster.find_bone(&"Head") if hmaster != null else -1
+	var allhead := true
+	if hmi != null and hmi.mesh != null:
+		for s in hmi.mesh.get_surface_count():
+			var arr := hmi.mesh.surface_get_arrays(s)
+			var bi: PackedInt32Array = arr[Mesh.ARRAY_BONES]
+			var bw: PackedFloat32Array = arr[Mesh.ARRAY_WEIGHTS]
+			for i in bw.size():
+				if bw[i] > 0.0 and bi[i] != hidx:
+					allhead = false
+	fails += _expect("hair 100pct head", hidx != -1 and allhead)
+	open_color(&"Hair")
+	fails += _expect("hair color opens", is_color_open())
+	_dresser._params = {"hue": 30.0, "sat": 0.8, "val": 0.4}
+	_dresser._apply()
+	var hair_mat := (_slot_mats(&"Hair")[0] as ShaderMaterial)
+	var want_hair := Color.from_hsv(30.0 / 360.0, 0.8, 0.4)
+	fails += _expect("hair albedo written", (hair_mat.get_shader_parameter("albedo") as Color).is_equal_approx(want_hair))
+	fails += _expect("hair shift neutral", is_equal_approx(float(hair_mat.get_shader_parameter("hue_shift_deg")), 0.0))
+	fails += _expect("hair texture kept", hair_mat.get_shader_parameter("albedo_texture") != null)
+	_dresser._confirm()
+	fails += _expect("hair albedo stored", _avatar._color_params.has(&"Hair"))
+	adjust_hair(1) # remount (SimpleParted) must reapply the stored albedo
+	var hair_mat2 := (_slot_mats(&"Hair")[0] as ShaderMaterial)
+	fails += _expect("hair albedo survives remount", hair_mat2 != null and (hair_mat2.get_shader_parameter("albedo") as Color).is_equal_approx(want_hair))
+	adjust_hair(-1)
+	_avatar._color_params.erase(&"Hair")
+	adjust_hair(1)
+	adjust_hair(-1) # fresh default mount (sat/val 0.5), nothing stored
+	open_color(&"Hair")
+	fails += _expect("hair defaults mid", is_equal_approx(float(_dresser.current_params()["sat"]), 0.5) and is_equal_approx(float(_dresser.current_params()["val"]), 0.5))
+	fails += _expect("hair mouse visible", Input.mouse_mode == Input.MOUSE_MODE_VISIBLE)
+	_dresser._params = {"hue": 0.0, "sat": 0.0, "val": 1.0}
+	_dresser._apply()
+	_dresser._confirm() # store white...
+	open_color(&"Hair") # ...reopen kicks sat to 1.0 so Color answers at once
+	fails += _expect("hair kick sat up", is_equal_approx(float(_dresser.current_params()["sat"]), 1.0))
+	fails += _expect("hair kick vivid", Color((_slot_mats(&"Hair")[0] as ShaderMaterial).get_shader_parameter("albedo")).s > 0.9)
+	_dresser._cancel()
+	# Restore (CAPTURED) is unprovable headless — the dummy DisplayServer
+	# ignores mouse-mode sets (always reads VISIBLE). Eye recipe in WORKLOG.
+	fails += _expect("hair cancel restores white", Color((_slot_mats(&"Hair")[0] as ShaderMaterial).get_shader_parameter("albedo")).s < 0.1)
+	_avatar._color_params.erase(&"Hair")
+	reset_hair()
+	fails += _expect("hair reset bald", hair_display() == "None" and get_node_or_null("Avatar/Hair/Buzzed") == null)
+	open_color(&"Hair")
+	fails += _expect("hair color empty no-op", not is_color_open())
+	_menu._push(CharacterMenu.LEVEL_HAIR)
+	fails += _expect("menu hair rows", _menu._entries.size() == 3)
+	fails += _expect("face cam on hair", face_active())
+	_menu._pop()
+	fails += _expect("face cam off hair", not face_active())
+	# 7. Eyebrows (single style prepared, own color slot, face cam).
+	fails += _expect("brow style default", eyebrow_display() == "Default")
+	adjust_eyebrow(1)
+	fails += _expect("brow style single", eyebrow_display() == "Default")
+	reset_eyebrow()
+	var brow_mats := _slot_mats(&"Eyebrows")
+	var shared := false
+	for m in brow_mats:
+		if _slot_mats(&"Skin").has(m):
+			shared = true
+	fails += _expect("brow split from skin", not brow_mats.is_empty() and not shared)
+	open_color(&"Eyebrows")
+	fails += _expect("brow color opens", is_color_open())
+	_dresser._params = {"hue": 20.0, "sat": 0.8, "val": 0.6}
+	_dresser._apply()
+	var want_brow := Color.from_hsv(20.0 / 360.0, 0.8, 0.6)
+	fails += _expect("brow albedo written", ((brow_mats[0] as ShaderMaterial).get_shader_parameter("albedo") as Color).is_equal_approx(want_brow))
+	fails += _expect("brow shift neutral", is_equal_approx(float((brow_mats[0] as ShaderMaterial).get_shader_parameter("hue_shift_deg")), 0.0))
+	_dresser._confirm()
+	fails += _expect("brow color stored", _avatar._color_params.has(&"Eyebrows"))
+	_menu._push(CharacterMenu.LEVEL_EYEBROWS)
+	fails += _expect("menu brow rows", _menu._entries.size() == 3)
+	var pivot := get_node_or_null("CamPivot") as Node3D
+	var arm := (pivot.get_node_or_null("SpringArm3D") as SpringArm3D) if pivot != null else null
+	fails += _expect("face cam close", face_active() and arm != null and is_equal_approx(arm.spring_length, FACE_ARM))
+	fails += _expect("face cam at head", pivot != null and pivot.position.y > 1.2)
+	_menu._pop()
+	fails += _expect("face cam restored", not face_active() and arm != null and is_equal_approx(arm.spring_length, 3.2) and is_equal_approx(pivot.position.y, 1.0))
+	# 8. Skin submenu (color only, room for more).
+	_menu._push(CharacterMenu.LEVEL_SKIN)
+	fails += _expect("menu skin rows", _menu._entries.size() == 2)
+	_menu._pop()
+	open_color(&"Skin")
+	fails += _expect("skin color opens", is_color_open())
+	_dresser._params = {"hue": 40.0, "sat": 1.2, "val": 1.0}
+	_dresser._apply()
+	fails += _expect("skin hue written", is_equal_approx(float((_slot_mats(&"Skin")[0] as ShaderMaterial).get_shader_parameter("hue_shift_deg")), 40.0))
+	_dresser._confirm()
+	fails += _expect("skin color stored", _avatar._color_params.has(&"Skin"))
 	print("[CharTest] %d FAIL" % fails)
 	get_tree().quit()
 
@@ -894,8 +753,8 @@ func _apply_xray() -> void:
 		skin.visible = true
 	if cloth != null:
 		cloth.visible = _xray != 1
-	if _xray == 2 and not (_last_vols as Dictionary).is_empty():
-		_draw_volumes(_last_vols, _last_cdata)
+	if _xray == 2 and not _avatar.last_volumes().is_empty():
+		_draw_volumes(_avatar.last_volumes(), _avatar.last_cdata())
 	else:
 		_clear_volumes()
 	var hud := get_node_or_null("MenuLayer/HUD")
@@ -903,108 +762,10 @@ func _apply_xray() -> void:
 		hud.set_persistent(&"xray", "XRAY: %s" % XRAY_NAMES[_xray])
 
 
-## Fused-avatar helpers (sources are freed after the build — measure the
-## Avatar MIs, whose per-surface source node names live in the skin/cloth
-## src lists).
-func _avatar_surf_count() -> int:
-	var n := 0
-	for mi in _avatar_mis():
-		if (mi as MeshInstance3D).mesh != null:
-			n += (mi as MeshInstance3D).mesh.get_surface_count()
-	return n
+## Fused-avatar measurement helpers (delegated, see the delegates block above).
 
 
-func _avatar_src_has(substr: String) -> bool:
-	var low := substr.to_lower()
-	for n in _avatar_skin_src + _avatar_cloth_src:
-		if String(n).to_lower().contains(low):
-			return true
-	return false
-
-
-func _avatar_each_mat() -> Array:
-	var out := []
-	for mi in _avatar_mis():
-		var mmi := mi as MeshInstance3D
-		if mmi == null or mmi.mesh == null:
-			continue
-		for s in mmi.mesh.get_surface_count():
-			var om := mmi.get_surface_override_material(s) as ShaderMaterial
-			if om != null:
-				out.append({"mat": om, "src": _avatar_src_for(mmi, s)})
-				continue
-			var base := mmi.mesh.surface_get_material(s) as ShaderMaterial
-			if base != null:
-				out.append({"mat": base, "src": _avatar_src_for(mmi, s)})
-	return out
-
-
-func _avatar_src_for(mmi: MeshInstance3D, s: int) -> String:
-	var lst := _avatar_skin_src if mmi.name == &"Skin" else _avatar_cloth_src
-	if s < lst.size():
-		return String(lst[s])
-	return ""
-
-
-func _avatar_surf_mat(s: int) -> ShaderMaterial:
-	var all := _avatar_each_mat()
-	if s < all.size():
-		return all[s]["mat"] as ShaderMaterial
-	return null
-
-
-## depth_push on the first fused surface from a given source mesh (-1 when
-## missing, which fails the caller). Materials are carried at fusion, so the
-## nude dress rules (skin push ON, Eyes OFF) survive on the avatar.
-func _avatar_push(src_substr: String) -> float:
-	var low := src_substr.to_lower()
-	for e in _avatar_each_mat():
-		if String(e["src"]).to_lower().contains(low):
-			return float((e["mat"] as ShaderMaterial).get_shader_parameter("depth_push"))
-	return -1.0
-
-
-## Fused verts dominated by finger bones (proves hands exist post-fusion,
-## whether from kept nude skin or garment gloves — guards over-suppression).
-func _avatar_finger_verts() -> int:
-	var sk := _avatar_skeleton()
-	if sk == null or _avatar_mis().is_empty():
-		return -1
-	var fingers := []
-	for b in sk.get_bone_count():
-		var bn := String(sk.get_bone_name(b))
-		for f in ["Thumb", "Index", "Middle", "Ring", "Little"]:
-			if bn.contains(f):
-				fingers.append(b)
-	var n := 0
-	for mi in _avatar_mis():
-		var mmi := mi as MeshInstance3D
-		if mmi == null or mmi.mesh == null:
-			continue
-		for s in mmi.mesh.get_surface_count():
-			var a := mmi.mesh.surface_get_arrays(s)
-			if a[Mesh.ARRAY_BONES] == null or a[Mesh.ARRAY_WEIGHTS] == null:
-				continue
-			var bi: PackedInt32Array = a[Mesh.ARRAY_BONES]
-			var bw: PackedFloat32Array = a[Mesh.ARRAY_WEIGHTS]
-			for i in bw.size() / 4:
-				var bb := -1
-				var ww := 0.0
-				for k in 4:
-					if bw[i * 4 + k] > ww:
-						ww = bw[i * 4 + k]
-						bb = bi[i * 4 + k]
-				if bb != -1 and fingers.has(bb):
-					n += 1
-	return n
-
-
-## albedo_texture on the first fused surface (null when missing/unwired).
-func _avatar_tex() -> Texture2D:
-	var mat := _avatar_surf_mat(0)
-	if mat == null:
-		return null
-	return mat.get_shader_parameter("albedo_texture") as Texture2D
+## Fused finger-verts probe (delegated, see the delegates block above).
 
 
 func _expect(test_name: String, cond: bool) -> int:
@@ -1060,11 +821,7 @@ func _run_capture_test() -> void:
 	get_tree().quit()
 
 
-## Override depth-push on every fused surface (materials are carried at
-## fusion, base or override, both MIs).
-func _set_push_all(v: float) -> void:
-	for e in _avatar_each_mat():
-		(e["mat"] as ShaderMaterial).set_shader_parameter("depth_push", v)
+## Depth-push override (delegated, see the delegates block above).
 
 
 ## Anim-fit probe (--animtest [--animtake=rig/...]): plays a game take on the
@@ -1091,14 +848,7 @@ func _animtest_take() -> String:
 	return ANIM_DEFAULT_TAKE
 
 
-func _slot_skeleton(slot: StringName) -> Skeleton3D:
-	var holder := get_node_or_null(String(slot))
-	if holder == null:
-		return null
-	var found := holder.find_children("*", "Skeleton3D", true, false)
-	if found.is_empty():
-		return null
-	return found[0] as Skeleton3D
+## Nude-holder skeleton lookup (delegated, see the delegates block above).
 
 
 func _animtest_teardown() -> void:
@@ -1143,7 +893,7 @@ func _animtest_setup() -> void:
 		return
 	_anim_master = master
 	var holders: Array[String] = ["Nude"]
-	for slot in SLOTS:
+	for slot in CharacterAvatar.SLOTS:
 		holders.append(String(slot))
 	var mcount := master.get_bone_count()
 	for h in holders:

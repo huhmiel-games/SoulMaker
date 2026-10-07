@@ -8,7 +8,9 @@ class_name ColorEditor
 ## ambient 0.5, validated 29/09) — not exposed per slot. E (interact) = OK
 ## (keep), Space (dodge) = Cancel (restore entry values). Up/Down = select row, Left/Right (hold) = sweep,
 ## mouse drag on a row works too. Emits closed(applied) once; the host
-## suspends its own input while visible and restores the mouse after.
+## suspends its own input while visible. Opens in VISIBLE (rows are mouse-
+## draggable) and restores the prior mode on close — the menu runs CAPTURED,
+## so without this the cursor would stay visible and leave the window.
 ## Owns per-surface ShaderMaterials for its target: created from the
 ## StandardMaterial3D albedo on first edit (ToonKit.white_tex() backs
 ## albedo-less surfaces), reused with adopted values on re-edit. Dressing is
@@ -18,11 +20,17 @@ signal closed(applied: bool)
 
 const ROW_KEYS: Array[StringName] = [&"hue", &"sat", &"val"]
 const DEFAULTS := {"hue": 0.0, "sat": 1.0, "val": 1.0}
+## Albedo mode (Hair, 07/10): vendor hair is quasi-white (nothing to hue-shift),
+## so the same 3 rows drive the material `albedo` (Color.from_hsv) over the
+## untouched source texture. Defaults = mid grey-red starting point (user tune
+## 07/10: sat/val 0.5 so the Color row answers from the first step); sat/val
+## clamp to 0-1.
 const SAT_MAX := 3.0
 const VAL_MAX := 2.5
 const HUE_RATE := 90.0 # deg/sec while Left/Right held
 const SAT_RATE := 1.2 # /sec
 const VAL_RATE := 1.0 # /sec
+const ALBEDO_DEFAULTS := {"hue": 0.0, "sat": 0.5, "val": 0.5}
 ## Typematic repeat (06/10): a tap steps once, holding repeats by steps,
 ## then accelerates to the full sweep rates. Tune by eye.
 const STEP := {&"hue": 1.0, &"sat": 0.05, &"val": 0.05}
@@ -32,6 +40,7 @@ const ACCEL_AFTER := 2.5 # sec held when the full sweep rate is reached
 const BASE_TOON: Shader = preload("res://src/shaders/base_toon.gdshader")
 
 var _mats: Array[ShaderMaterial] = []
+var _albedo := false # albedo mode for the current target (Hair only)
 var _params := DEFAULTS.duplicate()
 var _entry := DEFAULTS.duplicate() # values at open() — cancel restores these
 var _raw := DEFAULTS.duplicate() # precise pre-snap accumulation (07/10:
@@ -41,6 +50,7 @@ var _raw := DEFAULTS.duplicate() # precise pre-snap accumulation (07/10:
 var _row := 0
 var _rows: Array[SliderRow] = []
 var _armed := false
+var _prior_mouse := 0 # Input.mouse_mode before open() — restored on close
 var _title: Label = null
 ## Test-only (--nonormalmap capture flag): dress with vertex normals to
 ## isolate normal-map path issues. Never set by the game.
@@ -50,9 +60,7 @@ var no_normal_map := false
 func _ready() -> void:
 	_title = get_node_or_null("Title") as Label
 	_rows = [get_node("RowColor") as SliderRow, get_node("RowIntensity") as SliderRow, get_node("RowBrightness") as SliderRow]
-	_rows[0].setup("Color", 0.0, 360.0, 0)
-	_rows[1].setup("Intensity", 0.0, SAT_MAX, 2)
-	_rows[2].setup("Brightness", 0.0, VAL_MAX, 2)
+	_setup_rows()
 	for i in _rows.size():
 		_rows[i].value_changed.connect(_on_row_changed.bind(i))
 	_sync_rows(false)
@@ -70,6 +78,8 @@ func edit(slot_name: String, target: Node) -> void:
 	# materials from the CURRENT _params, so reset first — otherwise a new
 	# slot inherits the previous slot's values. Re-edit is unaffected (live
 	# materials are returned as-is, then adopted below).
+	_albedo = false
+	_setup_rows()
 	_params = DEFAULTS.duplicate()
 	_mats = _dress(target)
 	_params = _adopted_params()
@@ -81,19 +91,41 @@ func edit(slot_name: String, target: Node) -> void:
 	if _title != null:
 		_title.text = "Edit color — %s" % slot_name
 	_armed = false
+	_prior_mouse = Input.mouse_mode
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	show()
 	print("[ColorEditor] open '%s' (%d surfaces)" % [slot_name, _mats.size()])
+
+
+## Row ranges follow the mode: Color is always 0-360; Intensity/Brightness
+## drive multipliers (hue-shift mode) or HSV sat/val 0-1 (albedo mode).
+func _setup_rows() -> void:
+	if _rows.is_empty():
+		return # headless fallback (no panel): dress/apply need no rows
+	_rows[0].setup("Color", 0.0, 360.0, 0)
+	if _albedo:
+		_rows[1].setup("Intensity", 0.0, 1.0, 2)
+		_rows[2].setup("Brightness", 0.0, 1.0, 2)
+	else:
+		_rows[1].setup("Intensity", 0.0, SAT_MAX, 2)
+		_rows[2].setup("Brightness", 0.0, VAL_MAX, 2)
 
 
 ## Open the editor on an explicit material list (fused avatar: per-slot
 ## surfaces whose source mesh belongs to the slot). Live values are adopted
 ## as-is (the host reapplies stored params after every rebuild, so there is
 ## no fresh/default distinction here unlike edit()). Same panel, same flow.
-func edit_mats(slot_name: String, mats: Array) -> void:
+## Albedo white kick: near-white hair adopts sat ~0, which makes the Color row
+## look dead (hue of white is invisible). The working copy then starts at sat
+## 1.0 (applied at once, so the panel stays truthful); _entry keeps the true
+## values so Cancel restores the white. Re-open on an already colored style
+## never kicks (sat is already up).
+func edit_mats(slot_name: String, mats: Array, albedo_mode := false) -> void:
 	if visible:
 		push_warning("[ColorEditor] already open, ignoring edit('%s')" % slot_name)
 		return
+	_albedo = albedo_mode
+	_setup_rows()
 	_mats.clear()
 	for m in mats:
 		if m is ShaderMaterial:
@@ -101,21 +133,28 @@ func edit_mats(slot_name: String, mats: Array) -> void:
 	_params = _adopted_params()
 	_raw = (_params as Dictionary).duplicate()
 	_entry = (_params as Dictionary).duplicate()
+	if _albedo and float(_params["sat"]) < 0.05 and float(_params["val"]) > 0.95:
+		_params["sat"] = 1.0
+		_raw["sat"] = 1.0
+		_apply()
 	_row = 0
 	_sync_rows(false)
 	_sync_row_select()
 	if _title != null:
 		_title.text = "Edit color — %s" % slot_name
 	_armed = false
+	_prior_mouse = Input.mouse_mode
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	show()
 	print("[ColorEditor] open '%s' (%d surfaces)" % [slot_name, _mats.size()])
 
 
 ## Dress (if needed) + restore defaults without opening the panel.
-func reset_target(target: Node) -> void:
+func reset_target(target: Node, albedo_mode := false) -> void:
+	_albedo = albedo_mode
+	_setup_rows()
 	_mats = _dress(target)
-	_params = DEFAULTS.duplicate()
+	_params = (ALBEDO_DEFAULTS.duplicate() if albedo_mode else DEFAULTS.duplicate())
 	_raw = DEFAULTS.duplicate()
 	_entry = DEFAULTS.duplicate()
 	_apply()
@@ -188,6 +227,7 @@ static func _held_time(game_action: StringName, editor_action: StringName) -> fl
 ## OK: keep live values. Also called by the headless self-test (--huetest).
 func _confirm() -> void:
 	hide()
+	Input.mouse_mode = _prior_mouse
 	print("[ColorEditor] OK %s" % _fmt())
 	closed.emit(true)
 
@@ -198,6 +238,7 @@ func _cancel() -> void:
 	_raw = (_params as Dictionary).duplicate()
 	_apply()
 	hide()
+	Input.mouse_mode = _prior_mouse
 	print("[ColorEditor] cancel, restored %s" % _fmt())
 	closed.emit(false)
 
@@ -206,12 +247,14 @@ func _nudge(key: StringName, amount: float) -> void:
 	# amount is an absolute parameter delta (rates applied by the caller).
 	# Raw accumulates unwrapped precision; only the published value snaps,
 	# so sub-step phases (repeat) advance instead of freezing.
+	var smax := 1.0 if _albedo else SAT_MAX
+	var vmax := 1.0 if _albedo else VAL_MAX
 	if key == &"hue":
 		_raw[key] = wrapf(float(_raw[key]) + amount, 0.0, 360.0)
 	elif key == &"sat":
-		_raw[key] = clampf(float(_raw[key]) + amount, 0.0, SAT_MAX)
+		_raw[key] = clampf(float(_raw[key]) + amount, 0.0, smax)
 	elif key == &"val":
-		_raw[key] = clampf(float(_raw[key]) + amount, 0.0, VAL_MAX)
+		_raw[key] = clampf(float(_raw[key]) + amount, 0.0, vmax)
 	_params[key] = _snap_in(key, float(_raw[key]))
 	_apply()
 
@@ -224,8 +267,8 @@ func _snap_in(key: StringName, v: float) -> float:
 	if key == &"hue":
 		return wrapf(snappedf(v, st), 0.0, 360.0)
 	if key == &"sat":
-		return clampf(snappedf(v, st), 0.0, SAT_MAX)
-	return clampf(snappedf(v, st), 0.0, VAL_MAX)
+		return clampf(snappedf(v, st), 0.0, 1.0 if _albedo else SAT_MAX)
+	return clampf(snappedf(v, st), 0.0, 1.0 if _albedo else VAL_MAX)
 
 
 ## One discrete step (tap response).
@@ -246,6 +289,14 @@ func _fmt() -> String:
 
 
 func _apply() -> void:
+	if _albedo:
+		var c := Color.from_hsv(float(_params["hue"]) / 360.0, float(_params["sat"]), float(_params["val"]))
+		for m in _mats:
+			m.set_shader_parameter("albedo", c)
+			m.set_shader_parameter("hue_shift_deg", 0.0)
+			m.set_shader_parameter("sat_mult", 1.0)
+			m.set_shader_parameter("val_mult", 1.0)
+		return
 	for m in _mats:
 		m.set_shader_parameter("hue_shift_deg", float(_params["hue"]))
 		m.set_shader_parameter("sat_mult", float(_params["sat"]))
@@ -253,11 +304,15 @@ func _apply() -> void:
 
 
 func _sync_rows(emit_signal := true) -> void:
+	if _rows.is_empty():
+		return
 	for i in _rows.size():
 		_rows[i].set_value(float(_params[ROW_KEYS[i]]), emit_signal)
 
 
 func _sync_row_select() -> void:
+	if _rows.is_empty():
+		return
 	for i in _rows.size():
 		_rows[i].selected = (i == _row)
 		_rows[i].queue_redraw()
@@ -346,7 +401,10 @@ func _dress_surface(mi: MeshInstance3D, s: int) -> ShaderMaterial:
 ## Re-edit starts from the live values (first edit: current _params).
 func _adopted_params() -> Dictionary:
 	if _mats.is_empty():
-		return DEFAULTS.duplicate()
+		return (ALBEDO_DEFAULTS.duplicate() if _albedo else DEFAULTS.duplicate())
+	if _albedo:
+		var c := Color(_mats[0].get_shader_parameter("albedo"))
+		return {"hue": float(c.h) * 360.0, "sat": float(c.s), "val": float(c.v)}
 	var first := _mats[0]
 	return {
 		"hue": float(first.get_shader_parameter("hue_shift_deg")),

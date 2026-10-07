@@ -69,11 +69,12 @@ uniform float normal_scale : hint_range(-16,16) = 1.0;
 // discard, which Forward+'s depth prepass defeats: by color-pass time the
 // depth buffer already holds the nearest surface, so sampling it can never
 // see a buried garment). Skin writes its depth pushed back by depth_push
-// meters (poke 8mm measured 29/09, push 12mm + margin): the garment's true
-// depth wins wherever cloth sits within the band, in prepass AND color
+// meters (worst burial 22mm measured, push 45mm + margin): the garment's
+// true depth wins wherever cloth sits within the band, in prepass AND color
 // pass, regardless of draw order. Geometry untouched (no thinner bare
 // skin): only depth values move. Bare skin vs background unaffected;
-// skin-vs-skin keeps relative order (same push everywhere).
+// skin-vs-skin keeps relative order (same push everywhere — the face is no
+// exception: mixed push let true-depth eyes swallow pushed lids, 07/10).
 uniform float depth_push = 0.0;
 uniform bool use_depth_push = true;
 
