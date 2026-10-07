@@ -38,7 +38,7 @@ const SLOT_SRC_KEYS := {
 ## Physics silhouette pack (v1): slider key -> bones + scaled axes (Standard
 ## bone names). Applied as absolute bone-pose scale on the fused master
 ## skeleton, reapplied after every rebuild (new skeleton each time).
-const PHYS_KEYS: Array[StringName] = [&"Height", &"Legs", &"Shoulders", &"Waist", &"Hips"]
+const PHYS_KEYS: Array[StringName] = [&"Height", &"Legs", &"Shoulders", &"Waist", &"Hips", &"Head"]
 const PHYS_STEP := 0.01
 ## Per-row bounds (Height stays near 1.0: 90-110%, the rest 80-130%).
 ## Bounds per row (07/10, eye-tuned): limbs/height stay near the authored
@@ -46,7 +46,7 @@ const PHYS_STEP := 0.01
 ## 90 puts hands inside the torso, 110+ reads non-human).
 const PHYS_LIMITS := {
 	&"Height": [0.9, 1.1], &"Legs": [0.9, 1.1], &"Shoulders": [0.9, 1.1],
-	&"Waist": [0.95, 1.05], &"Hips": [0.9, 1.1],
+	&"Waist": [0.95, 1.05], &"Hips": [0.9, 1.1], &"Head": [0.9, 1.1],
 }
 const PHYS_BONES := {
 	&"Height": {"bones": [&"Root"], "axes": Vector3(1, 1, 1)},
@@ -54,6 +54,7 @@ const PHYS_BONES := {
 	&"Shoulders": {"bones": [&"LeftShoulder", &"RightShoulder"], "axes": Vector3(1, 0, 0)},
 	&"Waist": {"bones": [&"Spine", &"Chest"], "axes": Vector3(1, 0, 1)},
 	&"Hips": {"bones": [&"Hips"], "axes": Vector3(1, 0, 1)},
+	&"Head": {"bones": [&"Head"], "axes": Vector3(1, 1, 1)},
 }
 ## Idle preview (06/10): the mannequin plays this instead of the T-pose.
 ## Single-take remap (cheap per rebuild) on the fused master skeleton.
@@ -783,7 +784,7 @@ func _run_headless_test() -> void:
 	_menu._push(CharacterMenu.LEVEL_COLORS)
 	fails += _expect("menu colors 7+back", _menu._entries.size() == 8)
 	_menu._push(CharacterMenu.LEVEL_PHYSICS)
-	fails += _expect("menu physics 5+back", _menu._entries.size() == 6)
+	fails += _expect("menu physics 6+back", _menu._entries.size() == 7)
 	_menu._pop()
 	var want_take := _animtest_take() if _animtest_wanted() else IDLE_TAKE
 	fails += _expect("preview anim playing", _anim_player != null and _anim_player.current_animation == want_take)
@@ -869,6 +870,10 @@ func _run_headless_test() -> void:
 	adjust_phys(&"Legs", 50)
 	fails += _expect("phys legs clamped", phys_display(&"Legs") == "110%")
 	reset_phys(&"Legs")
+	adjust_phys(&"Head", 2)
+	fails += _expect("phys head uniform", sk.get_bone_pose_scale(sk.find_bone(&"Head")).is_equal_approx(Vector3(1.02, 1.02, 1.02)))
+	reset_phys(&"Head")
+	fails += _expect("phys head reset", sk.get_bone_pose_scale(sk.find_bone(&"Head")).is_equal_approx(Vector3.ONE))
 	var hud := get_node_or_null("MenuLayer/HUD")
 	fails += _expect("phys height shown", hud != null and String(hud.get("_persistent").get(&"height", "")).begins_with("HEIGHT: 1."))
 	print("[CharTest] %d FAIL" % fails)
