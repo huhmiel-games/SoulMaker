@@ -688,7 +688,6 @@ func _run_headless_test() -> void:
 	adjust_hair(-1) # fresh default mount (sat/val 0.5), nothing stored
 	open_color(&"Hair")
 	fails += _expect("hair defaults mid", is_equal_approx(float(_dresser.current_params()["sat"]), 0.5) and is_equal_approx(float(_dresser.current_params()["val"]), 0.5))
-	fails += _expect("hair mouse visible", Input.mouse_mode == Input.MOUSE_MODE_VISIBLE)
 	_dresser._params = {"hue": 0.0, "sat": 0.0, "val": 1.0}
 	_dresser._apply()
 	_dresser._confirm() # store white...
@@ -696,8 +695,8 @@ func _run_headless_test() -> void:
 	fails += _expect("hair kick sat up", is_equal_approx(float(_dresser.current_params()["sat"]), 1.0))
 	fails += _expect("hair kick vivid", Color((_slot_mats(&"Hair")[0] as ShaderMaterial).get_shader_parameter("albedo")).s > 0.9)
 	_dresser._cancel()
-	# Restore (CAPTURED) is unprovable headless — the dummy DisplayServer
-	# ignores mouse-mode sets (always reads VISIBLE). Eye recipe in WORKLOG.
+	# Cursor mode is never touched (keyboard/gamepad-only dresser, 07/10) —
+	# nothing observable headless; eye recipe covers orbit control.
 	fails += _expect("hair cancel restores white", Color((_slot_mats(&"Hair")[0] as ShaderMaterial).get_shader_parameter("albedo")).s < 0.1)
 	_avatar._color_params.erase(&"Hair")
 	reset_hair()
@@ -722,6 +721,7 @@ func _run_headless_test() -> void:
 	fails += _expect("brow split from skin", not brow_mats.is_empty() and not shared)
 	open_color(&"Eyebrows")
 	fails += _expect("brow color opens", is_color_open())
+	fails += _expect("brow defaults mid", is_equal_approx(float(_dresser.current_params()["sat"]), 0.5) and is_equal_approx(float(_dresser.current_params()["val"]), 0.5))
 	_dresser._params = {"hue": 20.0, "sat": 0.8, "val": 0.6}
 	_dresser._apply()
 	var want_brow := Color.from_hsv(20.0 / 360.0, 0.8, 0.6)

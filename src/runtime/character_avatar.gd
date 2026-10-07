@@ -512,8 +512,10 @@ func slot_mats(slot: StringName) -> Array:
 
 
 ## Stored per-slot colors reapplied to the fresh fused materials. Albedo-mode
-## slots (Hair/Eyebrows): albedo from HSV, shift params neutral. Everything
-## else is hue-shift mode.
+## slots (Hair/Eyebrows): albedo from HSV, shift params neutral. Albedo slots
+## with no stored color get ALBEDO_DEFAULTS (Hair already mounts dressed at
+## defaults; Eyebrows are born inside the hue-shift-dressed nude, so without
+## this they would open white with a dead Color row).
 func _reapply_colors() -> void:
 	for slot in _color_params:
 		var p: Dictionary = _color_params[slot]
@@ -529,6 +531,16 @@ func _reapply_colors() -> void:
 			(m as ShaderMaterial).set_shader_parameter("hue_shift_deg", float(p.get("hue", 0.0)))
 			(m as ShaderMaterial).set_shader_parameter("sat_mult", float(p.get("sat", 1.0)))
 			(m as ShaderMaterial).set_shader_parameter("val_mult", float(p.get("val", 1.0)))
+	for slot in ALBEDO_SLOTS:
+		if _color_params.has(slot):
+			continue
+		var d: Dictionary = ColorEditor.ALBEDO_DEFAULTS
+		var c := Color.from_hsv(float(d.get("hue", 0.0)) / 360.0, float(d.get("sat", 0.5)), float(d.get("val", 0.5)))
+		for m in slot_mats(slot):
+			(m as ShaderMaterial).set_shader_parameter("albedo", c)
+			(m as ShaderMaterial).set_shader_parameter("hue_shift_deg", 0.0)
+			(m as ShaderMaterial).set_shader_parameter("sat_mult", 1.0)
+			(m as ShaderMaterial).set_shader_parameter("val_mult", 1.0)
 
 
 func store_color(slot: StringName, params: Dictionary) -> void:

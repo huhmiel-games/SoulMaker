@@ -8,9 +8,9 @@ class_name ColorEditor
 ## ambient 0.5, validated 29/09) — not exposed per slot. E (interact) = OK
 ## (keep), Space (dodge) = Cancel (restore entry values). Up/Down = select row, Left/Right (hold) = sweep,
 ## mouse drag on a row works too. Emits closed(applied) once; the host
-## suspends its own input while visible. Opens in VISIBLE (rows are mouse-
-## draggable) and restores the prior mode on close — the menu runs CAPTURED,
-## so without this the cursor would stay visible and leave the window.
+## suspends its own input while visible. Keyboard/gamepad only (07/10): rows
+## are display-only (SliderRow ignores the mouse) and the cursor mode is
+## never touched — menu orbit control can't leak through the panel.
 ## Owns per-surface ShaderMaterials for its target: created from the
 ## StandardMaterial3D albedo on first edit (ToonKit.white_tex() backs
 ## albedo-less surfaces), reused with adopted values on re-edit. Dressing is
@@ -20,7 +20,7 @@ signal closed(applied: bool)
 
 const ROW_KEYS: Array[StringName] = [&"hue", &"sat", &"val"]
 const DEFAULTS := {"hue": 0.0, "sat": 1.0, "val": 1.0}
-## Albedo mode (Hair, 07/10): vendor hair is quasi-white (nothing to hue-shift),
+## Albedo mode (Hair/Eyebrows, 07/10): vendor hair is quasi-white (nothing to hue-shift),
 ## so the same 3 rows drive the material `albedo` (Color.from_hsv) over the
 ## untouched source texture. Defaults = mid grey-red starting point (user tune
 ## 07/10: sat/val 0.5 so the Color row answers from the first step); sat/val
@@ -50,7 +50,6 @@ var _raw := DEFAULTS.duplicate() # precise pre-snap accumulation (07/10:
 var _row := 0
 var _rows: Array[SliderRow] = []
 var _armed := false
-var _prior_mouse := 0 # Input.mouse_mode before open() — restored on close
 var _title: Label = null
 ## Test-only (--nonormalmap capture flag): dress with vertex normals to
 ## isolate normal-map path issues. Never set by the game.
@@ -91,8 +90,6 @@ func edit(slot_name: String, target: Node) -> void:
 	if _title != null:
 		_title.text = "Edit color — %s" % slot_name
 	_armed = false
-	_prior_mouse = Input.mouse_mode
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	show()
 	print("[ColorEditor] open '%s' (%d surfaces)" % [slot_name, _mats.size()])
 
@@ -143,8 +140,6 @@ func edit_mats(slot_name: String, mats: Array, albedo_mode := false) -> void:
 	if _title != null:
 		_title.text = "Edit color — %s" % slot_name
 	_armed = false
-	_prior_mouse = Input.mouse_mode
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	show()
 	print("[ColorEditor] open '%s' (%d surfaces)" % [slot_name, _mats.size()])
 
@@ -227,7 +222,6 @@ static func _held_time(game_action: StringName, editor_action: StringName) -> fl
 ## OK: keep live values. Also called by the headless self-test (--huetest).
 func _confirm() -> void:
 	hide()
-	Input.mouse_mode = _prior_mouse
 	print("[ColorEditor] OK %s" % _fmt())
 	closed.emit(true)
 
@@ -238,7 +232,6 @@ func _cancel() -> void:
 	_raw = (_params as Dictionary).duplicate()
 	_apply()
 	hide()
-	Input.mouse_mode = _prior_mouse
 	print("[ColorEditor] cancel, restored %s" % _fmt())
 	closed.emit(false)
 
