@@ -88,6 +88,12 @@ var _beard := 0 # index into beard_styles() (0 = None/clean-shaven)
 var _eyebrow := 0 # index into EYEBROW_STYLES (single Default for now)
 var _eye := 0 # index into EYE_STYLES (single Default for now)
 var _phys := {} # StringName phys key -> float scale (1.0 default)
+## Face shape (Face submenu): global head form, Width = Head XZ, Length =
+## Head Y. Multiplies with the Physics Head size row (uniform): final Head
+## scale = (h*w, h*l, h*w). Independent resets either way.
+var _face := {&"Width": 1.0, &"Length": 1.0}
+const FACE_KEYS: Array[StringName] = [&"Width", &"Length"]
+const FACE_LIMITS := [0.9, 1.1]
 var _color_params := {} # StringName color slot -> {hue, sat, val}
 var _crown_rest := 0.0 # rest crown height (fused mesh AABB, skeleton space)
 var _nude_snap := {"ok": false}
@@ -572,6 +578,22 @@ func reset_phys(key: StringName) -> void:
 	_apply_physics()
 
 
+## Face menu verbs (same value-row contract as physics). Width scales Head
+## XZ, Length scales Head Y; both multiply the Head size row.
+func face_display(key: StringName) -> String:
+	return "%d%%" % int(round(float(_face.get(key, 1.0)) * 100.0))
+
+
+func adjust_face(key: StringName, dir: int) -> void:
+	_face[key] = clampf(float(_face.get(key, 1.0)) + float(dir) * PHYS_STEP, float(FACE_LIMITS[0]), float(FACE_LIMITS[1]))
+	_apply_physics()
+
+
+func reset_face(key: StringName) -> void:
+	_face[key] = 1.0
+	_apply_physics()
+
+
 ## Absolute bone-pose scale on the fused master (single skeleton). Bones
 ## missing from the rig are skipped with one line (chartest pins the v1 set).
 func _apply_physics() -> void:
@@ -597,6 +619,12 @@ func _apply_physics() -> void:
 	if neck != -1:
 		var inv := 1.0 / maxf(torso_xz, 0.01)
 		sk.set_bone_pose_scale(neck, Vector3(inv, 1.0, inv))
+	# Face shape multiplies the Physics Head size (uniform h): final Head =
+	# (h*w, h*l, h*w). Defaults neutral — Head-only asserts unaffected.
+	var head := sk.find_bone(&"Head")
+	if head != -1:
+		var h := float(_phys.get(&"Head", 1.0))
+		sk.set_bone_pose_scale(head, Vector3(h * float(_face.get(&"Width", 1.0)), h * float(_face.get(&"Length", 1.0)), h * float(_face.get(&"Width", 1.0))))
 	# Height readout (host status line): rest crown from the fused
 	# bind-pose AABBs times the Root scale.
 	_crown_rest = 0.0

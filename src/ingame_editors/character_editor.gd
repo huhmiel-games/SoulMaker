@@ -270,7 +270,7 @@ var _face_saved := {} # empty, or {pos: Vector3, arm: float}
 
 
 func on_menu_level(level: int) -> void:
-	if level == CharacterMenu.LEVEL_HAIR or level == CharacterMenu.LEVEL_EYEBROWS or level == CharacterMenu.LEVEL_EYES or level == CharacterMenu.LEVEL_BEARD:
+	if level == CharacterMenu.LEVEL_HAIR or level == CharacterMenu.LEVEL_EYEBROWS or level == CharacterMenu.LEVEL_EYES or level == CharacterMenu.LEVEL_BEARD or level == CharacterMenu.LEVEL_FACE:
 		face_push()
 	else:
 		face_pop()
@@ -394,6 +394,18 @@ func adjust_eye(dir: int) -> void:
 
 func reset_eye() -> void:
 	_avatar.reset_eye()
+
+
+func face_shape_display(key: StringName) -> String:
+	return _avatar.face_display(key)
+
+
+func adjust_face_shape(key: StringName, dir: int) -> void:
+	_avatar.adjust_face(key, dir)
+
+
+func reset_face_shape(key: StringName) -> void:
+	_avatar.reset_face(key)
 
 
 func phys_display(key: StringName) -> String:
@@ -568,6 +580,7 @@ func _run_headless_test() -> void:
 	fails += _expect("menu root eyebrows", root_labels.has("Eyebrows >"))
 	fails += _expect("menu root eyes", root_labels.has("Eyes >"))
 	fails += _expect("menu root beard", root_labels.has("Beard >"))
+	fails += _expect("menu root face", root_labels.has("Face >"))
 	fails += _expect("menu root skin", root_labels.has("Skin >"))
 	_menu._push(CharacterMenu.LEVEL_COLORS)
 	fails += _expect("menu outfit colors 6+back", _menu._entries.size() == 7)
@@ -815,6 +828,31 @@ func _run_headless_test() -> void:
 	fails += _expect("face cam on beard", face_active())
 	_menu._pop()
 	fails += _expect("face cam off beard", not face_active())
+	# 11. Face submenu (global head form over the Head size row).
+	fails += _expect("face width default", face_shape_display(&"Width") == "100%")
+	fails += _expect("face length default", face_shape_display(&"Length") == "100%")
+	adjust_face_shape(&"Width", 2)
+	fails += _expect("face width shown", face_shape_display(&"Width") == "102%")
+	fails += _expect("face width XZ only", sk.get_bone_pose_scale(sk.find_bone(&"Head")).is_equal_approx(Vector3(1.02, 1.0, 1.02)))
+	adjust_face_shape(&"Length", 3)
+	fails += _expect("face length Y only", sk.get_bone_pose_scale(sk.find_bone(&"Head")).is_equal_approx(Vector3(1.02, 1.03, 1.02)))
+	reset_face_shape(&"Length")
+	adjust_phys(&"Head", 2) # size row multiplies: X = 1.02 * 1.02
+	fails += _expect("face over head size", sk.get_bone_pose_scale(sk.find_bone(&"Head")).is_equal_approx(Vector3(1.0404, 1.02, 1.0404)))
+	reset_phys(&"Head")
+	reset_face_shape(&"Width")
+	fails += _expect("face reset neutral", sk.get_bone_pose_scale(sk.find_bone(&"Head")).is_equal_approx(Vector3.ONE))
+	adjust_face_shape(&"Width", 50)
+	fails += _expect("face width clamped", face_shape_display(&"Width") == "110%")
+	reset_face_shape(&"Width")
+	adjust_face_shape(&"Length", -50)
+	fails += _expect("face length clamped", face_shape_display(&"Length") == "90%")
+	reset_face_shape(&"Length")
+	_menu._push(CharacterMenu.LEVEL_FACE)
+	fails += _expect("menu face rows", _menu._entries.size() == 3)
+	fails += _expect("face cam on face", face_active())
+	_menu._pop()
+	fails += _expect("face cam off face", not face_active())
 	print("[CharTest] %d FAIL" % fails)
 	get_tree().quit()
 
