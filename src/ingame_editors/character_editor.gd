@@ -38,12 +38,19 @@ const SLOT_SRC_KEYS := {
 ## Physics silhouette pack (v1): slider key -> bones + scaled axes (Standard
 ## bone names). Applied as absolute bone-pose scale on the fused master
 ## skeleton, reapplied after every rebuild (new skeleton each time).
-const PHYS_KEYS: Array[StringName] = [&"Height", &"Shoulders", &"Waist", &"Hips"]
-const PHYS_MIN := 0.8
-const PHYS_MAX := 1.3
-const PHYS_STEP := 0.05
+const PHYS_KEYS: Array[StringName] = [&"Height", &"Legs", &"Shoulders", &"Waist", &"Hips"]
+const PHYS_STEP := 0.01
+## Per-row bounds (Height stays near 1.0: 90-110%, the rest 80-130%).
+## Bounds per row (07/10, eye-tuned): limbs/height stay near the authored
+## body (90-110); Waist is tighter (95-105, the nude is already muscular —
+## 90 puts hands inside the torso, 110+ reads non-human).
+const PHYS_LIMITS := {
+	&"Height": [0.9, 1.1], &"Legs": [0.9, 1.1], &"Shoulders": [0.9, 1.1],
+	&"Waist": [0.95, 1.05], &"Hips": [0.9, 1.1],
+}
 const PHYS_BONES := {
-	&"Height": {"bones": [&"LeftUpperLeg", &"RightUpperLeg", &"LeftLowerLeg", &"RightLowerLeg"], "axes": Vector3(0, 1, 0)},
+	&"Height": {"bones": [&"Root"], "axes": Vector3(1, 1, 1)},
+	&"Legs": {"bones": [&"LeftUpperLeg", &"RightUpperLeg", &"LeftLowerLeg", &"RightLowerLeg"], "axes": Vector3(1, 0, 1)},
 	&"Shoulders": {"bones": [&"LeftShoulder", &"RightShoulder"], "axes": Vector3(1, 0, 0)},
 	&"Waist": {"bones": [&"Spine", &"Chest"], "axes": Vector3(1, 0, 1)},
 	&"Hips": {"bones": [&"Hips"], "axes": Vector3(1, 0, 1)},
@@ -104,6 +111,7 @@ var _idle_only := false # idle preview mode (vs full animtest probe)
 var _color_params := {} # StringName color slot -> {hue, sat, val}
 var _color_slot := &"" # slot currently open in the dresser
 var _phys := {} # StringName phys key -> float scale (1.0 default)
+var _crown_rest := 0.0 # rest crown height (fused mesh AABB, skeleton space)
 
 
 func _ready() -> void:
@@ -302,7 +310,8 @@ func phys_display(key: StringName) -> String:
 
 
 func adjust_phys(key: StringName, dir: int) -> void:
-	_phys[key] = clampf(float(_phys.get(key, 1.0)) + float(dir) * PHYS_STEP, PHYS_MIN, PHYS_MAX)
+	var lim: Array = PHYS_LIMITS.get(key, [0.8, 1.3])
+	_phys[key] = clampf(float(_phys.get(key, 1.0)) + float(dir) * PHYS_STEP, float(lim[0]), float(lim[1]))
 	_apply_physics()
 
 
@@ -328,6 +337,24 @@ func _apply_physics() -> void:
 				print("[Phys] bone missing: %s" % String(bn))
 				continue
 			sk.set_bone_pose_scale(bi, sc)
+	# Head stays out of Waist/Hips: bone scale inherits down the chain, so
+	# the neck counter-scales the ancestor XZ product (arms still inherit —
+	# known approximation until arm-local rows exist).
+	var torso_xz := float(_phys.get(&"Waist", 1.0)) * float(_phys.get(&"Hips", 1.0))
+	var neck := sk.find_bone(&"Neck")
+	if neck != -1:
+		var inv := 1.0 / maxf(torso_xz, 0.01)
+		sk.set_bone_pose_scale(neck, Vector3(inv, 1.0, inv))
+	# Height readout (top-right status line): rest crown from the fused
+	# bind-pose AABBs times the Root scale.
+	_crown_rest = 0.0
+	for mi in _avatar_mis():
+		var mmi := mi as MeshInstance3D
+		if mmi != null and mmi.mesh != null:
+			_crown_rest = maxf(_crown_rest, mmi.mesh.get_aabb().end.y)
+	var hud := get_node_or_null("MenuLayer/HUD")
+	if hud != null and hud.has_method("set_persistent"):
+		hud.set_persistent(&"height", "HEIGHT: %.2fm" % (_crown_rest * float(_phys.get(&"Height", 1.0))))
 
 
 ## Idle preview: same manual-advance player as the probe but a single take
@@ -756,7 +783,7 @@ func _run_headless_test() -> void:
 	_menu._push(CharacterMenu.LEVEL_COLORS)
 	fails += _expect("menu colors 7+back", _menu._entries.size() == 8)
 	_menu._push(CharacterMenu.LEVEL_PHYSICS)
-	fails += _expect("menu physics 4+back", _menu._entries.size() == 5)
+	fails += _expect("menu physics 5+back", _menu._entries.size() == 6)
 	_menu._pop()
 	var want_take := _animtest_take() if _animtest_wanted() else IDLE_TAKE
 	fails += _expect("preview anim playing", _anim_player != null and _anim_player.current_animation == want_take)
@@ -811,16 +838,39 @@ func _run_headless_test() -> void:
 	_reapply_colors()
 	var body_mat := (_slot_mats(&"Body")[0] as ShaderMaterial)
 	fails += _expect("color reapply hue", is_equal_approx(float(body_mat.get_shader_parameter("hue_shift_deg")), 90.0))
-	adjust_phys(&"Height", 1)
+	adjust_phys(&"Legs", 1)
 	var sk := _avatar_skeleton()
 	var thigh := sk.find_bone(&"LeftUpperLeg")
 	fails += _expect("phys thigh found", thigh != -1)
-	fails += _expect("phys display", phys_display(&"Height") == "105%")
+	fails += _expect("phys display", phys_display(&"Legs") == "101%")
 	for f in 5:
 		await get_tree().process_frame
-	fails += _expect("phys scale survives idle", sk.get_bone_pose_scale(thigh).is_equal_approx(Vector3(1, 1.05, 1)))
-	reset_phys(&"Height")
+	fails += _expect("phys scale survives idle", sk.get_bone_pose_scale(thigh).is_equal_approx(Vector3(1.01, 1.0, 1.01)))
+	reset_phys(&"Legs")
 	fails += _expect("phys reset", sk.get_bone_pose_scale(thigh).is_equal_approx(Vector3.ONE))
+	adjust_phys(&"Height", 5)
+	fails += _expect("phys height uniform", sk.get_bone_pose_scale(sk.find_bone(&"Root")).is_equal_approx(Vector3(1.05, 1.05, 1.05)))
+	adjust_phys(&"Height", 50)
+	fails += _expect("phys height clamped", phys_display(&"Height") == "110%")
+	adjust_phys(&"Height", -50)
+	fails += _expect("phys height clamped low", phys_display(&"Height") == "90%")
+	reset_phys(&"Height")
+	adjust_phys(&"Waist", 2)
+	adjust_phys(&"Hips", 2)
+	var want_inv := 1.0 / 1.0404
+	fails += _expect("phys head untouched", sk.get_bone_pose_scale(sk.find_bone(&"Head")).is_equal_approx(Vector3.ONE))
+	fails += _expect("phys neck counters", sk.get_bone_pose_scale(sk.find_bone(&"Neck")).is_equal_approx(Vector3(want_inv, 1.0, want_inv)))
+	reset_phys(&"Waist")
+	reset_phys(&"Hips")
+	fails += _expect("phys neck reset", sk.get_bone_pose_scale(sk.find_bone(&"Neck")).is_equal_approx(Vector3.ONE))
+	adjust_phys(&"Waist", 50)
+	fails += _expect("phys waist clamped", phys_display(&"Waist") == "105%")
+	reset_phys(&"Waist")
+	adjust_phys(&"Legs", 50)
+	fails += _expect("phys legs clamped", phys_display(&"Legs") == "110%")
+	reset_phys(&"Legs")
+	var hud := get_node_or_null("MenuLayer/HUD")
+	fails += _expect("phys height shown", hud != null and String(hud.get("_persistent").get(&"height", "")).begins_with("HEIGHT: 1."))
 	print("[CharTest] %d FAIL" % fails)
 	get_tree().quit()
 
