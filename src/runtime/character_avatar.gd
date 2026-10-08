@@ -637,7 +637,7 @@ func reset_face(key: StringName) -> void:
 ## center fixed — no bunching, no fold); the X half-extent comes from the
 ## baked points.
 const SCULPT_PATH := "res://data/characters/face_sculpt.json"
-const SCULPT_KEYS: Array[StringName] = [&"NoseL", &"NoseW", &"MouthW", &"Chin", &"NoseBridge", &"NoseTip", &"NostrilFlare", &"NoseLength", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseTipSize", &"NoseTipAngle", &"NoseCurve", &"MouthPout", &"EyelidHeavy", &"EyeDepth", &"EyeHeight", &"BrowHeight", &"BrowThick", &"BrowDepth"]
+const SCULPT_KEYS: Array[StringName] = [&"NoseL", &"NoseW", &"MouthW", &"Chin", &"NoseBridge", &"NoseTip", &"NostrilFlare", &"NoseLength", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseTipSize", &"NoseTipAngle", &"NoseCurve", &"MouthPout", &"EyelidHeavy", &"EyeDepth", &"EyeHeight", &"BrowHeight", &"BrowThick", &"BrowDepth", &"JawWidth", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft"]
 const SCULPT_STEP := 0.1
 const SCULPT_SPEC := {
 	&"NoseL": {"region": "Nose", "menu": "nose", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 1.0},
@@ -664,6 +664,11 @@ const SCULPT_SPEC := {
 	&"BrowHeight": {"region": "Brows", "menu": "eyes", "axis": Vector3(0, 1, 0), "mirror": false, "max_cm": 0.8},
 	&"BrowThick": {"region": "Brows", "menu": "eyes", "mode": "scale", "axis": Vector3(0, 1, 0), "rate": 0.15, "mirror": false, "max_cm": 1.0},
 	&"BrowDepth": {"region": "BrowRidge", "menu": "eyes", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 0.8},
+	&"JawWidth": {"region": "Jaw", "menu": "jaw", "axis": Vector3(1, 0, 0), "mirror": true, "max_cm": 0.8},
+	&"ChinLength": {"region": "Chin", "menu": "jaw", "axis": Vector3(0, -1, 0), "mirror": false, "max_cm": 1.0},
+	&"ChinWidth": {"region": "Chin", "menu": "jaw", "axis": Vector3(1, 0, 0), "mirror": true, "max_cm": 0.8},
+	&"ChinProject": {"region": "Chin", "menu": "jaw", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 1.0},
+	&"ChinCleft": {"region": "ChinCleft", "menu": "jaw", "axis": Vector3(0, 0, -1), "mirror": false, "max_cm": 0.5},
 }
 var _sculpt := {} # StringName sculpt key -> float cm (0.0 default)
 var _sculpt_cache := {} # gender -> regions dict from SCULPT_PATH (lazy)
