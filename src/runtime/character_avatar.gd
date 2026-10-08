@@ -637,7 +637,7 @@ func reset_face(key: StringName) -> void:
 ## center fixed — no bunching, no fold); the X half-extent comes from the
 ## baked points.
 const SCULPT_PATH := "res://data/characters/face_sculpt.json"
-const SCULPT_KEYS: Array[StringName] = [&"NoseL", &"NoseW", &"MouthW", &"Chin", &"NoseBridge", &"NoseTip", &"NostrilFlare"]
+const SCULPT_KEYS: Array[StringName] = [&"NoseL", &"NoseW", &"MouthW", &"Chin", &"NoseBridge", &"NoseTip", &"NostrilFlare", &"NoseLength", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseTipSize", &"NoseTipAngle", &"NoseCurve"]
 const SCULPT_STEP := 0.1
 const SCULPT_SPEC := {
 	&"NoseL": {"region": "Nose", "menu": "nose", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 1.0},
@@ -647,6 +647,16 @@ const SCULPT_SPEC := {
 	&"NoseBridge": {"region": "NoseBridge", "menu": "nose", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 1.0},
 	&"NoseTip": {"region": "NoseTip", "menu": "nose", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 0.8},
 	&"NostrilFlare": {"region": "NostrilFlare", "menu": "nose", "axis": Vector3(1, 0, 0), "mirror": true, "max_cm": 0.8},
+	&"NoseLength": {"region": "NoseTip", "menu": "nose", "axis": Vector3(0, -1, 0), "mirror": false, "max_cm": 1.0},
+	&"NosePosition": {"region": "Nose", "menu": "nose", "axis": Vector3(0, 1, 0), "mirror": false, "max_cm": 0.8},
+	&"LipUpper": {"region": "UpperLip", "menu": "mouth", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 0.8},
+	&"LipLower": {"region": "LowerLip", "menu": "mouth", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 0.8},
+	&"MouthCorners": {"region": "MouthCorners", "menu": "mouth", "axis": Vector3(0, 1, 0), "mirror": false, "max_cm": 0.8},
+	&"MouthPosition": {"region": "Mouth", "menu": "mouth", "axis": Vector3(0, 1, 0), "mirror": false, "max_cm": 0.8},
+	&"MouthForward": {"region": "Mouth", "menu": "mouth", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 0.8},
+	&"NoseTipSize": {"region": "NoseTip", "menu": "nose", "mode": "scale", "rate": 0.15, "mirror": false, "max_cm": 1.0},
+	&"NoseTipAngle": {"region": "NoseTip", "menu": "nose", "mode": "rot", "axis": Vector3(1, 0, 0), "deg": 12.0, "mirror": false, "max_cm": 1.0},
+	&"NoseCurve": {"region": "NoseBridge", "menu": "nose", "mode": "falloff", "axis": Vector3(0, 0, 1), "along": Vector3(0, 1, 0), "mirror": false, "max_cm": 1.0},
 }
 var _sculpt := {} # StringName sculpt key -> float cm (0.0 default)
 var _sculpt_cache := {} # gender -> regions dict from SCULPT_PATH (lazy)
@@ -683,9 +693,9 @@ func _sculpt_regions() -> Dictionary:
 	var sec: Dictionary = (doc.get(GENDERS[_gender], {}) as Dictionary).get("regions", {})
 	for region in sec:
 		var pts := {}
-		var cx := 0.0
-		var mnx := 1e9
-		var mxx := -1e9
+		var c := Vector3.ZERO
+		var mn := Vector3(1e9, 1e9, 1e9)
+		var mx := Vector3(-1e9, -1e9, -1e9)
 		var n := 0
 		for p in ((sec[region] as Dictionary).get("points", []) as Array):
 			var pa: Array = p
@@ -693,12 +703,14 @@ func _sculpt_regions() -> Dictionary:
 			if pts.has(key):
 				continue
 			pts[key] = true
-			cx += float(pa[0])
-			mnx = minf(mnx, float(pa[0]))
-			mxx = maxf(mxx, float(pa[0]))
+			var fp := Vector3(float(pa[0]), float(pa[1]), float(pa[2]))
+			c += fp
+			mn = mn.min(fp)
+			mx = mx.max(fp)
 			n += 1
 		if n > 0:
-			out[String(region)] = {"pts": pts, "cx": cx / float(n), "hx": maxf(mxx - cx / float(n), cx / float(n) - mnx), "n": n}
+			c /= float(n)
+			out[String(region)] = {"pts": pts, "cx": c.x, "hx": maxf(mx.x - c.x, c.x - mn.x), "c": c, "mn": mn, "mx": mx, "n": n}
 	_sculpt_cache[GENDERS[_gender]] = out
 	return out
 
@@ -808,30 +820,101 @@ func _sculpt_fused() -> void:
 			off.resize(n)
 			var wmax := PackedFloat32Array()
 			wmax.resize(n)
+			# Falloff t-field smoothing (coarse-mesh guard, 08/10: a 12mm
+			# edge jumps t by 0.3 -> 8mm cliff, and diffusion can't help a
+			# masked vert). Laplacian passes equilibrate local gaps while
+			# the 40mm profile stands (diffusion length ~3 verts).
+			var fsmart := {} # falloff key -> smoothed t per vert
+			for fkey in active:
+				var fspec: Dictionary = SCULPT_SPEC[fkey]
+				if String(fspec.get("mode", "")) != "falloff":
+					continue
+				var fr: Dictionary = regions.get(String(fspec["region"]), {})
+				if fr.is_empty():
+					continue
+				var fmn: Vector3 = fr["mn"]
+				var fmx: Vector3 = fr["mx"]
+				var fa: Vector3 = (fspec["along"] as Vector3).normalized()
+				var fspan := (fmx - fmn).dot(fa)
+				var adj0 := _sculpt_adj(src_mesh, s, verts, a[Mesh.ARRAY_INDEX])
+				var tt := PackedFloat32Array()
+				tt.resize(n)
+				for i in n:
+					var qq: Vector3 = head_inv * verts[i]
+					var t0 := 0.5
+					if fspan > 1e-9:
+						t0 = clampf((qq - fmn).dot(fa) / fspan, 0.0, 1.0)
+					tt[i] = t0
+				for _p in 6:
+					var nx := tt.duplicate()
+					for i in n:
+						var nb := (adj0[i] as Array)
+						if nb.is_empty():
+							continue
+						var m0 := 0.0
+						for j in nb:
+							m0 += tt[int(j)]
+						nx[i] = (tt[i] + m0 / float(nb.size())) * 0.5
+					tt = nx
+				fsmart[fkey] = tt
 			for i in n:
-				var q: Vector3 = head_inv * verts[i]
-				qs[i] = q
-				var o := Vector3.ZERO
-				for key in active:
-					var spec: Dictionary = SCULPT_SPEC[key]
-					var r: Dictionary = regions.get(String(spec["region"]), {})
-					if r.is_empty():
-						continue
+				qs[i] = head_inv * verts[i]
+			var total := PackedVector3Array()
+			total.resize(n)
+			# Per-key fields (08/10 halo-erasure fix): each row computes its
+			# own off + mask, diffuses through verts masked for NOBODY ELSE,
+			# then adds in. The old shared wmax let any overlapping region
+			# (Nose over the bridge halo) flip halo verts to mask and snap
+			# their diffused offset back to ~0 — one NoseW step visibly
+			# flattened NoseCurve. Rows now superpose without interaction.
+			for key in active:
+				var spec: Dictionary = SCULPT_SPEC[key]
+				var r: Dictionary = regions.get(String(spec["region"]), {})
+				if r.is_empty():
+					continue
+				var kval: float = float(_sculpt.get(key, 0.0))
+				var koff := PackedVector3Array()
+				koff.resize(n)
+				var kwmax := PackedFloat32Array()
+				kwmax.resize(n)
+				for i in n:
+					var q: Vector3 = qs[i]
 					if not (r["pts"] as Dictionary).has(sculpt_key(q)):
 						continue
-					var w := 1.0
-					if w > wmax[i]:
-						wmax[i] = w
-					var v: float = float(_sculpt.get(key, 0.0)) / 100.0 * w
+					kwmax[i] = 1.0
+					var v: float = kval / 100.0
 					if bool(spec["mirror"]):
 						# Proportional widen/narrow about the region centroid
 						# (no bunching, no fold: center fixed, flanks move most).
 						var hx := maxf(float(r["hx"]), 1e-9)
-						o.x += (q.x - float(r["cx"])) / hx * float(_sculpt.get(key, 0.0)) / 100.0 * w
+						koff[i].x += (q.x - float(r["cx"])) / hx * kval / 100.0
 					else:
-						o += (spec["axis"] as Vector3).normalized() * v
-				off[i] = o
-			_sculpt_diffuse(off, wmax, _sculpt_adj(src_mesh, s, verts, a[Mesh.ARRAY_INDEX]))
+						var mode := String(spec.get("mode", "shift"))
+						if mode == "scale":
+							# Centroid scale (TipSize...): the ball grows in
+							# all axes, rate per cm.
+							var c: Vector3 = r["c"]
+							koff[i] += (q - c) * (kval * float(spec.get("rate", 0.15)))
+						elif mode == "rot":
+							# Pivot rotation about the centroid (+ = tip up for
+							# a +X axis on a +Z nose: angle negated below).
+							var c2: Vector3 = r["c"]
+							var ang := -deg_to_rad(float(spec.get("deg", 8.0)) * kval)
+							koff[i] += Basis((spec["axis"] as Vector3).normalized(), ang) * (q - c2) + c2 - q
+						elif mode == "falloff":
+							# Axial falloff bend (Curve, Pout...): sin peak
+							# mid-region along `along`, ends fixed, pushes `axis`.
+							# t comes from the smoothed field (coarse-mesh guard).
+							var t := 0.5
+							if fsmart.has(key):
+								t = (fsmart[key] as PackedFloat32Array)[i]
+							koff[i] += (spec["axis"] as Vector3).normalized() * v * sin(PI * t)
+						else:
+							koff[i] += (spec["axis"] as Vector3).normalized() * v
+				_sculpt_diffuse(koff, kwmax, _sculpt_adj(src_mesh, s, verts, a[Mesh.ARRAY_INDEX]))
+				for i in n:
+					total[i] += koff[i]
+			off = total
 			for i in n:
 				if off[i] != Vector3.ZERO:
 					verts[i] = head_world * (qs[i] + off[i])

@@ -561,6 +561,117 @@ func _core_widths(before: PackedVector3Array, after: PackedVector3Array, region:
 	return [mx0 - mn0, mx1 - mn1]
 
 
+## Lowest model-Y of a region's mask members, before/after paired by index
+## (membership tested on BEFORE Head-frame positions: moved verts would no
+## longer match the pristine mask — same fixed-set rule as _core_widths).
+## Returns [floor_before, floor_after].
+func _region_floors(before: PackedVector3Array, after: PackedVector3Array, region: String) -> Array:
+	var sk := _avatar_skeleton()
+	var bi := sk.find_bone(&"Head") if sk != null else -1
+	if bi == -1 or before.size() != after.size():
+		return []
+	var inv: Transform3D = _avatar._bone_rest_world(sk, bi).affine_inverse()
+	var mn0 := 1e9
+	var mn1 := 1e9
+	for i in before.size():
+		if _avatar.sculpt_in_region(region, inv * before[i]):
+			mn0 = minf(mn0, before[i].y)
+			mn1 = minf(mn1, after[i].y)
+	return [mn0, mn1]
+
+
+## Foremost model-Z of a region's mask members, before/after paired by index
+## (same fixed-set rule: membership on BEFORE positions).
+## Returns [front_before, front_after].
+func _region_fronts(before: PackedVector3Array, after: PackedVector3Array, region: String) -> Array:
+	var sk := _avatar_skeleton()
+	var bi := sk.find_bone(&"Head") if sk != null else -1
+	if bi == -1 or before.size() != after.size():
+		return []
+	var inv: Transform3D = _avatar._bone_rest_world(sk, bi).affine_inverse()
+	var mz0 := -1e9
+	var mz1 := -1e9
+	for i in before.size():
+		if _avatar.sculpt_in_region(region, inv * before[i]):
+			mz0 = maxf(mz0, before[i].z)
+			mz1 = maxf(mz1, after[i].z)
+	return [mz0, mz1]
+
+
+## Mean model-Y of a region's front band (members within 2mm of max-Z,
+## fixed set on BEFORE positions): proves tip rotation lifts/drops the front.
+## Returns [y_before, y_after].
+func _region_front_lift(before: PackedVector3Array, after: PackedVector3Array, region: String) -> Array:
+	var sk := _avatar_skeleton()
+	var bi := sk.find_bone(&"Head") if sk != null else -1
+	if bi == -1 or before.size() != after.size():
+		return []
+	var inv: Transform3D = _avatar._bone_rest_world(sk, bi).affine_inverse()
+	var mz := -1e9
+	for p in before:
+		if _avatar.sculpt_in_region(region, inv * p):
+			mz = maxf(mz, p.z)
+	var y0 := 0.0
+	var y1 := 0.0
+	var n := 0
+	for i in before.size():
+		if _avatar.sculpt_in_region(region, inv * before[i]) and before[i].z > mz - 0.002:
+			y0 += before[i].y
+			y1 += after[i].y
+			n += 1
+	if n == 0:
+		return []
+	return [y0 / float(n), y1 / float(n)]
+
+
+## Max model-Z of a region's MID band (|t-0.5|<0.2 along the region Y span,
+## fixed set on BEFORE positions): the falloff peak readout (the absolute
+## front sits at the pinned ends by design — probing it reads ~0).
+## Returns [z_before, z_after].
+func _region_midfront(before: PackedVector3Array, after: PackedVector3Array, region: String) -> Array:
+	var sk := _avatar_skeleton()
+	var bi := sk.find_bone(&"Head") if sk != null else -1
+	if bi == -1 or before.size() != after.size():
+		return []
+	var r: Dictionary = _avatar._sculpt_regions().get(region, {})
+	if r.is_empty():
+		return []
+	var inv: Transform3D = _avatar._bone_rest_world(sk, bi).affine_inverse()
+	var mn: Vector3 = r["mn"]
+	var span := float((r["mx"] as Vector3).y) - mn.y
+	if span < 1e-9:
+		return []
+	var mz0 := -1e9
+	var mz1 := -1e9
+	for i in before.size():
+		if _avatar.sculpt_in_region(region, inv * before[i]):
+			var t := clampf(((inv * before[i]).y - mn.y) / span, 0.0, 1.0)
+			if absf(t - 0.5) < 0.2:
+				mz0 = maxf(mz0, before[i].z)
+				mz1 = maxf(mz1, after[i].z)
+	if mz0 < -1e8:
+		return []
+	return [mz0, mz1]
+
+
+## Mean displacement length over a region's mask members (fixed set):
+## magnitude readout for rigid motions (rotation moves the ball ~1mm at
+## full although the front band only lifts ~0.4mm).
+func _region_mean_disp(before: PackedVector3Array, after: PackedVector3Array, region: String) -> float:
+	var sk := _avatar_skeleton()
+	var bi := sk.find_bone(&"Head") if sk != null else -1
+	if bi == -1 or before.size() != after.size():
+		return 0.0
+	var inv: Transform3D = _avatar._bone_rest_world(sk, bi).affine_inverse()
+	var acc := 0.0
+	var n := 0
+	for i in before.size():
+		if _avatar.sculpt_in_region(region, inv * before[i]):
+			acc += (after[i] - before[i]).length()
+			n += 1
+	return acc / float(maxi(n, 1))
+
+
 func _head_verts_symmetric() -> bool:
 	var verts := _head_dom_verts()
 	if verts.size() < 100:
@@ -1112,10 +1223,42 @@ func _run_headless_test() -> void:
 	fails += _expect("menu back to hub", _menu._level == CharacterMenu.LEVEL_FACE and _menu._entries.size() == CharacterMenu.FACE_SUBS.size() + 1)
 	fails += _expect("face cam stays on hub", face_active())
 	_menu._push(CharacterMenu.LEVEL_FACE_NOSE)
-	fails += _expect("menu face nose rows", _menu._entries.size() == 5 + 1)
+	fails += _expect("menu face nose rows", _menu._entries.size() == 10 + 1)
+	# 11b. Menu wiring (live report 08/10: a row seemingly driving another).
+	# Drives EVERY nose row through its own entry callables: the row's own
+	# key must read +1mm, all others +0mm, then reset restores.
+	reset_face_sculpt(&"NoseW")
+	reset_face_sculpt(&"NoseCurve")
+	var wrow := {}
+	for e in _menu._entries:
+		if String((e as Dictionary).get("label", "")) == "NoseW":
+			wrow = e
+	if wrow.is_empty():
+		fails += _expect("menu noseW row present", false)
+	else:
+		(wrow["adjust"] as Callable).call(1)
+		fails += _expect("menu noseW drives noseW", face_sculpt_display(&"NoseW") == "+1mm")
+		fails += _expect("menu noseW spares curve", face_sculpt_display(&"NoseCurve") == "+0mm")
+		(wrow["reset"] as Callable).call()
+		fails += _expect("menu noseW reset", face_sculpt_display(&"NoseW") == "+0mm")
+	for e in _menu._entries:
+		var ed := e as Dictionary
+		if String(ed.get("kind", "")) != "value":
+			continue
+		var lbl := String(ed.get("label", ""))
+		for k in CharacterAvatar.SCULPT_KEYS:
+			reset_face_sculpt(k)
+		(ed["adjust"] as Callable).call(1)
+		fails += _expect("menu %s drives itself" % lbl, face_sculpt_display(StringName(lbl)) == "+1mm")
+		var others := 0
+		for k in CharacterAvatar.SCULPT_KEYS:
+			if String(k) != lbl and face_sculpt_display(k) != "+0mm":
+				others += 1
+		fails += _expect("menu %s spares others" % lbl, others == 0)
+		(ed["reset"] as Callable).call()
 	_menu._pop()
 	_menu._push(CharacterMenu.LEVEL_FACE_MOUTH)
-	fails += _expect("menu face mouth rows", _menu._entries.size() == 1 + 1)
+	fails += _expect("menu face mouth rows", _menu._entries.size() == 6 + 1)
 	_menu._pop()
 	_menu._push(CharacterMenu.LEVEL_FACE_JAW)
 	fails += _expect("menu face jaw rows", _menu._entries.size() == 1 + 1)
@@ -1185,24 +1328,78 @@ func _run_headless_test() -> void:
 	fails += _expect("sculpt mouth core widens", mouth_core.size() == 2 and mouth_core[1] > mouth_core[0] + 0.001)
 	# 15. Sculpt diffusion (08/10: crevasses at extremes — the rim must
 	# follow instead of cliffing at the box edge).
-	for ce in [[&"NoseL", -10], [&"NoseW", 8], [&"Chin", -10], [&"MouthW", -8], [&"MouthW", 8]]:
+	for ce in [[&"NoseL", -10], [&"NoseW", 8], [&"Chin", -10], [&"MouthW", -8], [&"MouthW", 8], [&"NoseLength", 10], [&"NosePosition", 8], [&"LipUpper", 8], [&"LipLower", 8], [&"MouthCorners", 8], [&"MouthPosition", 8], [&"MouthForward", 8], [&"NoseTipSize", 10], [&"NoseTipAngle", 10], [&"NoseCurve", 10]]:
 		reset_face_sculpt(ce[0])
 		adjust_face_sculpt(ce[0], ce[1])
-		fails += _expect("sculpt no cliff %s" % String(ce[0]), _avatar.sculpt_max_cliff() < 0.005)
+		var cl := _avatar.sculpt_max_cliff()
+		fails += _expect("sculpt no cliff %s" % String(ce[0]), cl < 0.005)
 		reset_face_sculpt(ce[0])
 	# 16. Mask migration (08/10, regions v2): every baked point resolves on the
 	# live pristine (asset-drift guard — a reimport moving verts fails loud).
 	var cov := _avatar.sculpt_mask_coverage()
-	for region in ["Nose", "Mouth", "Chin", "NoseBridge", "NoseTip", "NostrilFlare"]:
+	for region in ["Nose", "Mouth", "Chin", "NoseBridge", "NoseTip", "NostrilFlare", "UpperLip", "LowerLip", "MouthCorners"]:
 		var cc: Array = cov.get(region, [0, 0])
 		fails += _expect("sculpt mask %s resolves" % region, int(cc[1]) > 0 and float(cc[0]) / float(cc[1]) > 0.9)
 	# 17. Painted detail rows move their mask and restore to zero.
-	for nk in [&"NoseBridge", &"NoseTip", &"NostrilFlare"]:
+	for nk in [&"NoseBridge", &"NoseTip", &"NostrilFlare", &"NoseLength", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseTipSize", &"NoseTipAngle", &"NoseCurve"]:
 		reset_face_sculpt(nk)
 		adjust_face_sculpt(nk, 10)
 		fails += _expect("sculpt %s moves" % String(nk), _avatar.sculpt_max_cliff() > 1e-9)
 		reset_face_sculpt(nk)
 		fails += _expect("sculpt %s restores" % String(nk), _avatar.sculpt_max_cliff() < 1e-9)
+	# 17b. Row superposition (08/10 live bug: one NoseW step visibly
+	# flattened NoseCurve — the shared wmax let the Nose mask flip the
+	# bridge halo verts to mask and snap their 6mm halo back to ~0).
+	# Per-key diffusion: adding an X/Y row must not move any Z.
+	for combo in [[&"NoseW", 1], [&"NosePosition", 1]]:
+		for k in [&"NoseCurve", combo[0]]:
+			reset_face_sculpt(k)
+		adjust_face_sculpt(&"NoseCurve", -10)
+		var lone := _head_dom_verts()
+		adjust_face_sculpt(combo[0], combo[1])
+		var both := _head_dom_verts()
+		var dzmax := 0.0
+		for i in mini(lone.size(), both.size()):
+			dzmax = maxf(dzmax, absf(both[i].z - lone[i].z))
+		fails += _expect("sculpt %s spares curve Z" % String(combo[0]), dzmax < 1e-6)
+		for k in [&"NoseCurve", combo[0]]:
+			reset_face_sculpt(k)
+	# 18. Vertical nose rows (08/10): Length+ drops the tip, Position+ lifts
+	# the nose band; both restore.
+	var len_pair := _sculpt_deltas(&"NoseLength", 10)
+	var len_f := _region_floors(len_pair[0], len_pair[1], "NoseTip")
+	fails += _expect("sculpt length drops tip", len_f.size() == 2 and len_f[1] < len_f[0] - 0.008)
+	var pos_pair := _sculpt_deltas(&"NosePosition", 8)
+	var pos_f := _region_floors(pos_pair[0], pos_pair[1], "Nose")
+	fails += _expect("sculpt position lifts nose", pos_f.size() == 2 and pos_f[1] > pos_f[0] + 0.006)
+	# 19. Mouth rows (08/10): lips push forward, corners/position lift, the
+	# whole mouth advances; all restore (in the moves loop above).
+	var lu_pair := _sculpt_deltas(&"LipUpper", 8)
+	var lu_f := _region_fronts(lu_pair[0], lu_pair[1], "UpperLip")
+	fails += _expect("sculpt lip upper pushes", lu_f.size() == 2 and lu_f[1] > lu_f[0] + 0.006)
+	var ll_pair := _sculpt_deltas(&"LipLower", 8)
+	var ll_f := _region_fronts(ll_pair[0], ll_pair[1], "LowerLip")
+	fails += _expect("sculpt lip lower pushes", ll_f.size() == 2 and ll_f[1] > ll_f[0] + 0.006)
+	var mc_pair := _sculpt_deltas(&"MouthCorners", 8)
+	var mc_f := _region_floors(mc_pair[0], mc_pair[1], "MouthCorners")
+	fails += _expect("sculpt corners lift", mc_f.size() == 2 and mc_f[1] > mc_f[0] + 0.006)
+	var mp_pair := _sculpt_deltas(&"MouthPosition", 8)
+	var mp_f := _region_floors(mp_pair[0], mp_pair[1], "Mouth")
+	fails += _expect("sculpt mouth lifts", mp_f.size() == 2 and mp_f[1] > mp_f[0] + 0.006)
+	var mf_pair := _sculpt_deltas(&"MouthForward", 8)
+	var mf_f := _region_fronts(mf_pair[0], mf_pair[1], "Mouth")
+	fails += _expect("sculpt mouth advances", mf_f.size() == 2 and mf_f[1] > mf_f[0] + 0.006)
+	# 20. New nose mechanics (08/10): centroid scale, pivot rotation, falloff.
+	var ts_pair := _sculpt_deltas(&"NoseTipSize", 10)
+	var ts_w := _core_widths(ts_pair[0], ts_pair[1], "NoseTip")
+	fails += _expect("sculpt tip grows", ts_w.size() == 2 and ts_w[1] > ts_w[0] + 0.001)
+	var ta_pair := _sculpt_deltas(&"NoseTipAngle", 10)
+	var ta_l := _region_front_lift(ta_pair[0], ta_pair[1], "NoseTip")
+	fails += _expect("sculpt tip lifts", ta_l.size() == 2 and ta_l[1] > ta_l[0] + 0.0002)
+	fails += _expect("sculpt tip turns", _region_mean_disp(ta_pair[0], ta_pair[1], "NoseTip") > 0.0008)
+	var cu_pair := _sculpt_deltas(&"NoseCurve", 10)
+	var cu_f := _region_midfront(cu_pair[0], cu_pair[1], "NoseBridge")
+	fails += _expect("sculpt bridge bows", cu_f.size() == 2 and cu_f[1] > cu_f[0] + 0.006)
 	# No stowaway meshes: every visible MI lives directly under Fused
 	# (Skin/Cloths) or a Hair/Beard holder — never under a skeleton (the
 	# 08/10 ghost: nude MIs dragged along with the reparented master).

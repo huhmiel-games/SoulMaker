@@ -223,13 +223,15 @@ func _load_entries() -> Array:
 func _face_rows(group: String) -> Array:
 	var fout := []
 	if group == "global":
-		for k in CharacterAvatar.FACE_KEYS:
+		for key in CharacterAvatar.FACE_KEYS:
+			var k := key
 			fout.append({"label": String(k), "kind": "value",
 				"get": _host.face_shape_display.bind(k),
 				"adjust": func(dir: int) -> void: _host.adjust_face_shape(k, dir),
 				"reset": _host.reset_face_shape.bind(k)})
 	else:
-		for k in CharacterAvatar.SCULPT_KEYS:
+		for key in CharacterAvatar.SCULPT_KEYS:
+			var k := key
 			if String((CharacterAvatar.SCULPT_SPEC.get(k, {}) as Dictionary).get("menu", "")) == group:
 				fout.append({"label": String(k), "kind": "value",
 					"get": _host.face_sculpt_display.bind(k),
