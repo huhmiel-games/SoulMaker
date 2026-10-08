@@ -637,7 +637,7 @@ func reset_face(key: StringName) -> void:
 ## center fixed — no bunching, no fold); the X half-extent comes from the
 ## baked points.
 const SCULPT_PATH := "res://data/characters/face_sculpt.json"
-const SCULPT_KEYS: Array[StringName] = [&"NoseL", &"NoseW", &"MouthW", &"Chin", &"NoseBridge", &"NoseTip", &"NostrilFlare", &"NoseLength", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseTipSize", &"NoseTipAngle", &"NoseCurve", &"MouthPout", &"EyelidHeavy", &"EyeDepth", &"EyeHeight", &"BrowHeight", &"BrowThick", &"BrowDepth", &"JawWidth", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft"]
+const SCULPT_KEYS: Array[StringName] = [&"NoseL", &"NoseW", &"MouthW", &"Chin", &"NoseBridge", &"NoseTip", &"NostrilFlare", &"NoseLength", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseTipSize", &"NoseTipAngle", &"NoseCurve", &"MouthPout", &"EyelidHeavy", &"EyeDepth", &"EyeHeight", &"BrowHeight", &"BrowThick", &"BrowDepth", &"JawWidth", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft", &"CheekboneWidth", &"CheekboneHeight", &"CheekFullness", &"FaceFullness"]
 const SCULPT_STEP := 0.1
 const SCULPT_SPEC := {
 	&"NoseL": {"region": "Nose", "menu": "nose", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 1.0},
@@ -669,6 +669,10 @@ const SCULPT_SPEC := {
 	&"ChinWidth": {"region": "Chin", "menu": "jaw", "axis": Vector3(1, 0, 0), "mirror": true, "max_cm": 0.8},
 	&"ChinProject": {"region": "Chin", "menu": "jaw", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 1.0},
 	&"ChinCleft": {"region": "ChinCleft", "menu": "jaw", "axis": Vector3(0, 0, -1), "mirror": false, "max_cm": 0.5},
+	&"CheekboneWidth": {"region": "Cheekbones", "menu": "cheeks", "axis": Vector3(1, 0, 0), "mirror": true, "max_cm": 0.8},
+	&"CheekboneHeight": {"region": "Cheekbones", "menu": "cheeks", "axis": Vector3(0, 1, 0), "mirror": false, "max_cm": 0.8},
+	&"CheekFullness": {"region": "Cheeks", "menu": "cheeks", "mode": "scale", "rate": 0.15, "mirror": false, "max_cm": 0.8},
+	&"FaceFullness": {"region": "LowerFace", "menu": "cheeks", "mode": "scale", "rate": 0.15, "mirror": false, "max_cm": 0.8},
 }
 var _sculpt := {} # StringName sculpt key -> float cm (0.0 default)
 var _sculpt_cache := {} # gender -> regions dict from SCULPT_PATH (lazy)
@@ -930,6 +934,28 @@ func _sculpt_fused() -> void:
 				for i in n:
 					total[i] += koff[i]
 			off = total
+			# Twin equalization (seam guard): bit-identical verts share the
+			# strongest offset — a section seam can never crack open even
+			# when twin neighborhoods differ (weld shares neighbors, this
+			# shares the result).
+			var tgroups := {}
+			for i in n:
+				if not tgroups.has(verts[i]):
+					tgroups[verts[i]] = []
+				(tgroups[verts[i]] as Array).append(i)
+			for pos in tgroups:
+				var ml: Array = tgroups[pos]
+				if ml.size() < 2:
+					continue
+				var best := Vector3.ZERO
+				var bestl := -1.0
+				for m in ml:
+					var l: float = off[int(m)].length_squared()
+					if l > bestl:
+						bestl = l
+						best = off[int(m)]
+				for m in ml:
+					off[int(m)] = best
 			for i in n:
 				if off[i] != Vector3.ZERO:
 					verts[i] = head_world * (qs[i] + off[i])
@@ -965,6 +991,21 @@ func _sculpt_adj(mesh: ArrayMesh, s: int, verts: PackedVector3Array, idx: Packed
 			link.call(idx[t * 3], idx[t * 3 + 1])
 			link.call(idx[t * 3 + 1], idx[t * 3 + 2])
 			link.call(idx[t * 3 + 2], idx[t * 3])
+		# Weld splits back together (08/10 cheek slit: bit-identical twins
+		# on either side of a section seam share no triangle, so diffusion
+		# gave each its own halo and the seam cracked open). Exact match
+		# only — near-twins (lips) stay independent. Full clique per position
+		# (chaining is not enough: twins must share ALL neighbors).
+		var twins := {}
+		for i in n:
+			if not twins.has(verts[i]):
+				twins[verts[i]] = []
+			(twins[verts[i]] as Array).append(i)
+		for pos in twins:
+			var ml: Array = twins[pos]
+			for a in ml.size():
+				for b in range(a + 1, ml.size()):
+					link.call(int(ml[a]), int(ml[b]))
 	else:
 		var vid := {}
 		var vids := PackedInt32Array()
