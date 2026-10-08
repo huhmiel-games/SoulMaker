@@ -1325,12 +1325,11 @@ func _run_headless_test() -> void:
 	_menu._push(CharacterMenu.LEVEL_FACE_CHEEKS)
 	fails += _expect("menu face cheeks rows", _menu._entries.size() == 4 + 1)
 	_menu._pop()
-	for empty_sub in [CharacterMenu.LEVEL_FACE_FOREHEAD]:
-		_menu._push(empty_sub)
-		fails += _expect("menu face sub back-only %d" % empty_sub, _menu._entries.size() == 1)
-		fails += _expect("face cam on empty sub", face_active())
-		_menu._pop()
-		fails += _expect("menu back to hub %d" % empty_sub, _menu._level == CharacterMenu.LEVEL_FACE)
+	_menu._push(CharacterMenu.LEVEL_FACE_FOREHEAD)
+	fails += _expect("menu face forehead rows", _menu._entries.size() == 4 + 1)
+	fails += _expect("face cam on forehead", face_active())
+	_menu._pop()
+	fails += _expect("menu back to hub forehead", _menu._level == CharacterMenu.LEVEL_FACE)
 	_menu._pop()
 	fails += _expect("face cam off face", not face_active())
 	fails += _expect("face resumes", not _anim_paused)
@@ -1390,7 +1389,7 @@ func _run_headless_test() -> void:
 	fails += _expect("sculpt mouth core widens", mouth_core.size() == 2 and mouth_core[1] > mouth_core[0] + 0.001)
 	# 15. Sculpt diffusion (08/10: crevasses at extremes — the rim must
 	# follow instead of cliffing at the box edge).
-	for ce in [[&"NoseL", -10], [&"NoseW", 8], [&"Chin", -10], [&"MouthW", -8], [&"MouthW", 8], [&"NoseLength", 10], [&"NosePosition", 8], [&"LipUpper", 8], [&"LipLower", 8], [&"MouthCorners", 8], [&"MouthPosition", 8], [&"MouthForward", 8], [&"NoseTipSize", 10], [&"NoseTipAngle", 10], [&"NoseCurve", 10], [&"MouthPout", 8], [&"EyelidHeavy", 8], [&"EyeDepth", 8], [&"EyeHeight", 8], [&"BrowDepth", 8], [&"JawWidth", 8], [&"ChinLength", 10], [&"ChinWidth", 8], [&"ChinProject", 10], [&"ChinCleft", 5], [&"CheekboneWidth", 8], [&"CheekboneHeight", 8], [&"CheekFullness", 8], [&"FaceFullness", 8]]:
+	for ce in [[&"NoseL", -10], [&"NoseW", 8], [&"Chin", -10], [&"MouthW", -8], [&"MouthW", 8], [&"NoseLength", 10], [&"NosePosition", 8], [&"LipUpper", 8], [&"LipLower", 8], [&"MouthCorners", 8], [&"MouthPosition", 8], [&"MouthForward", 8], [&"NoseTipSize", 10], [&"NoseTipAngle", 10], [&"NoseCurve", 10], [&"MouthPout", 8], [&"EyelidHeavy", 8], [&"EyeDepth", 8], [&"EyeHeight", 8], [&"BrowDepth", 8], [&"JawWidth", 8], [&"ChinLength", 10], [&"ChinWidth", 8], [&"ChinProject", 10], [&"ChinCleft", 5], [&"CheekboneWidth", 8], [&"CheekboneHeight", 8], [&"CheekFullness", 8], [&"FaceFullness", 8], [&"ForeheadHeight", 8], [&"ForeheadWidth", 8], [&"BrowRidgeDepth", 8], [&"EarSize", 8]]:
 		reset_face_sculpt(ce[0])
 		adjust_face_sculpt(ce[0], ce[1])
 		var cl := _avatar.sculpt_max_cliff()
@@ -1399,7 +1398,7 @@ func _run_headless_test() -> void:
 	# 16. Mask migration (08/10, regions v2): every baked point resolves on the
 	# live pristine (asset-drift guard — a reimport moving verts fails loud).
 	var cov := _avatar.sculpt_mask_coverage()
-	for region in ["Nose", "Mouth", "Chin", "NoseBridge", "NoseTip", "NostrilFlare", "UpperLip", "LowerLip", "MouthCorners", "Eyelids", "UpperEyelid", "BrowRidge", "Jaw", "ChinCleft", "Cheekbones", "Cheeks", "LowerFace"]:
+	for region in ["Nose", "Mouth", "Chin", "NoseBridge", "NoseTip", "NostrilFlare", "UpperLip", "LowerLip", "MouthCorners", "Eyelids", "UpperEyelid", "BrowRidge", "Jaw", "ChinCleft", "Cheekbones", "Cheeks", "LowerFace", "Forehead", "Ears"]:
 		var cc: Array = cov.get(region, [0, 0])
 		fails += _expect("sculpt mask %s resolves" % region, int(cc[1]) > 0 and float(cc[0]) / float(cc[1]) > 0.9)
 	# Brows paint pending (region absent from shipped JSON): Brow rows are
@@ -1410,7 +1409,7 @@ func _run_headless_test() -> void:
 		fails += _expect("sculpt %s inert unpainted" % String(bk), _avatar.sculpt_max_cliff() < 1e-9)
 		reset_face_sculpt(bk)
 	# 17. Painted detail rows move their mask and restore to zero.
-	for nk in [&"NoseBridge", &"NoseTip", &"NostrilFlare", &"NoseLength", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseTipSize", &"NoseTipAngle", &"NoseCurve", &"MouthPout", &"EyelidHeavy", &"EyeDepth", &"EyeHeight", &"BrowDepth", &"JawWidth", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft", &"CheekboneWidth", &"CheekboneHeight", &"CheekFullness", &"FaceFullness"]:
+	for nk in [&"NoseBridge", &"NoseTip", &"NostrilFlare", &"NoseLength", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseTipSize", &"NoseTipAngle", &"NoseCurve", &"MouthPout", &"EyelidHeavy", &"EyeDepth", &"EyeHeight", &"BrowDepth", &"JawWidth", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft", &"CheekboneWidth", &"CheekboneHeight", &"CheekFullness", &"FaceFullness", &"ForeheadHeight", &"ForeheadWidth", &"BrowRidgeDepth", &"EarSize"]:
 		reset_face_sculpt(nk)
 		adjust_face_sculpt(nk, 10)
 		fails += _expect("sculpt %s moves" % String(nk), _avatar.sculpt_max_cliff() > 1e-9)
@@ -1547,6 +1546,21 @@ func _run_headless_test() -> void:
 	var ff_pair := _sculpt_deltas(&"FaceFullness", 8)
 	var ff_h := _region_yextent(ff_pair[0], ff_pair[1], "LowerFace")
 	fails += _expect("sculpt face fills", ff_h.size() == 2 and ff_h[1] > ff_h[0] + 0.0008)
+	# 24. Forehead & ears (08/10): forehead lifts/widens, ridge pushes,
+	# ears grow (uniform centroid scale).
+	var fh_pair := _sculpt_deltas(&"ForeheadHeight", 8)
+	var fh_f := _region_floors(fh_pair[0], fh_pair[1], "Forehead")
+	fails += _expect("sculpt forehead lifts", fh_f.size() == 2 and fh_f[1] > fh_f[0] + 0.006)
+	var fw_pair := _sculpt_deltas(&"ForeheadWidth", 8)
+	var fw_w := _core_widths(fw_pair[0], fw_pair[1], "Forehead")
+	fails += _expect("sculpt forehead widens", fw_w.size() == 2 and fw_w[1] > fw_w[0] + 0.001)
+	fails += _expect("sculpt forehead no cross", _no_center_cross(fw_pair[0], fw_pair[1]))
+	var br_pair := _sculpt_deltas(&"BrowRidgeDepth", 8)
+	var br_f := _region_fronts(br_pair[0], br_pair[1], "BrowRidge")
+	fails += _expect("sculpt ridge juts", br_f.size() == 2 and br_f[1] > br_f[0] + 0.006)
+	var es_pair := _sculpt_deltas(&"EarSize", 8)
+	var es_h := _region_yextent(es_pair[0], es_pair[1], "Ears")
+	fails += _expect("sculpt ears grow", es_h.size() == 2 and es_h[1] > es_h[0] + 0.0008)
 	# 20. New nose mechanics (08/10): centroid scale, pivot rotation, falloff.
 	var ts_pair := _sculpt_deltas(&"NoseTipSize", 10)
 	var ts_w := _core_widths(ts_pair[0], ts_pair[1], "NoseTip")
