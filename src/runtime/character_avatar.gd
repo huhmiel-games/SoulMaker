@@ -637,7 +637,7 @@ func reset_face(key: StringName) -> void:
 ## center fixed — no bunching, no fold); the X half-extent comes from the
 ## baked points.
 const SCULPT_PATH := "res://data/characters/face_sculpt.json"
-const SCULPT_KEYS: Array[StringName] = [&"NoseL", &"NoseW", &"MouthW", &"Chin", &"NoseBridge", &"NoseTip", &"NostrilFlare", &"NoseLength", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseTipSize", &"NoseTipAngle", &"NoseCurve", &"MouthPout"]
+const SCULPT_KEYS: Array[StringName] = [&"NoseL", &"NoseW", &"MouthW", &"Chin", &"NoseBridge", &"NoseTip", &"NostrilFlare", &"NoseLength", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseTipSize", &"NoseTipAngle", &"NoseCurve", &"MouthPout", &"EyelidHeavy", &"EyeDepth", &"EyeHeight", &"BrowHeight", &"BrowThick", &"BrowDepth"]
 const SCULPT_STEP := 0.1
 const SCULPT_SPEC := {
 	&"NoseL": {"region": "Nose", "menu": "nose", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 1.0},
@@ -658,6 +658,12 @@ const SCULPT_SPEC := {
 	&"NoseTipAngle": {"region": "NoseTip", "menu": "nose", "mode": "rot", "axis": Vector3(1, 0, 0), "deg": 12.0, "mirror": false, "max_cm": 1.0},
 	&"NoseCurve": {"region": "NoseBridge", "menu": "nose", "mode": "falloff", "axis": Vector3(0, 0, 1), "along": Vector3(0, 1, 0), "mirror": false, "max_cm": 1.0},
 	&"MouthPout": {"region": "UpperLip", "menu": "mouth", "mode": "falloff", "axis": Vector3(0, 0, 1), "along": Vector3(1, 0, 0), "mirror": false, "max_cm": 0.8},
+	&"EyelidHeavy": {"region": "UpperEyelid", "menu": "eyes", "axis": Vector3(0, -1, 0), "mirror": false, "max_cm": 0.8},
+	&"EyeDepth": {"region": "Eyelids", "menu": "eyes", "axis": Vector3(0, 0, -1), "mirror": false, "max_cm": 0.8},
+	&"EyeHeight": {"region": "Eyelids", "menu": "eyes", "axis": Vector3(0, 1, 0), "mirror": false, "max_cm": 0.8},
+	&"BrowHeight": {"region": "Brows", "menu": "eyes", "axis": Vector3(0, 1, 0), "mirror": false, "max_cm": 0.8},
+	&"BrowThick": {"region": "Brows", "menu": "eyes", "mode": "scale", "axis": Vector3(0, 1, 0), "rate": 0.15, "mirror": false, "max_cm": 1.0},
+	&"BrowDepth": {"region": "BrowRidge", "menu": "eyes", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 0.8},
 }
 var _sculpt := {} # StringName sculpt key -> float cm (0.0 default)
 var _sculpt_cache := {} # gender -> regions dict from SCULPT_PATH (lazy)
@@ -892,10 +898,13 @@ func _sculpt_fused() -> void:
 					else:
 						var mode := String(spec.get("mode", "shift"))
 						if mode == "scale":
-							# Centroid scale (TipSize...): the ball grows in
-							# all axes, rate per cm.
+							# Centroid scale (TipSize...): the ball grows,
+							# rate per cm, optionally masked to `axis`
+							# (BrowThick = Y only).
 							var c: Vector3 = r["c"]
-							koff[i] += (q - c) * (kval * float(spec.get("rate", 0.15)))
+							var sax: Vector3 = spec.get("axis", Vector3.ONE)
+							var dd: Vector3 = (q - c) * (kval * float(spec.get("rate", 0.15)))
+							koff[i] += Vector3(dd.x * sax.x, dd.y * sax.y, dd.z * sax.z)
 						elif mode == "rot":
 							# Pivot rotation about the centroid (+ = tip up for
 							# a +X axis on a +Z nose: angle negated below).
