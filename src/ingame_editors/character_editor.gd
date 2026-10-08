@@ -672,6 +672,38 @@ func _region_mean_disp(before: PackedVector3Array, after: PackedVector3Array, re
 	return acc / float(maxi(n, 1))
 
 
+## Pout differential: max-Z advance of the region CENTER band vs the EDGE
+## band (fixed set). A pout pushes the middle forward and holds the
+## corners; a uniform push advances both equally.
+## Returns [center_dz, edge_dz].
+func _region_pout(before: PackedVector3Array, after: PackedVector3Array, region: String) -> Array:
+	var sk := _avatar_skeleton()
+	var bi := sk.find_bone(&"Head") if sk != null else -1
+	if bi == -1 or before.size() != after.size():
+		return []
+	var r: Dictionary = _avatar._sculpt_regions().get(region, {})
+	if r.is_empty():
+		return []
+	var inv: Transform3D = _avatar._bone_rest_world(sk, bi).affine_inverse()
+	var cx := float(r["cx"])
+	var hx := maxf(float(r["hx"]), 1e-9)
+	var c0 := -1e9
+	var c1 := -1e9
+	var e0 := -1e9
+	var e1 := -1e9
+	for i in before.size():
+		if _avatar.sculpt_in_region(region, inv * before[i]):
+			if absf((inv * before[i]).x - cx) < hx * 0.4:
+				c0 = maxf(c0, before[i].z)
+				c1 = maxf(c1, after[i].z)
+			else:
+				e0 = maxf(e0, before[i].z)
+				e1 = maxf(e1, after[i].z)
+	if c0 < -1e8 or e0 < -1e8:
+		return []
+	return [c1 - c0, e1 - e0]
+
+
 func _head_verts_symmetric() -> bool:
 	var verts := _head_dom_verts()
 	if verts.size() < 100:
@@ -1258,7 +1290,7 @@ func _run_headless_test() -> void:
 		(ed["reset"] as Callable).call()
 	_menu._pop()
 	_menu._push(CharacterMenu.LEVEL_FACE_MOUTH)
-	fails += _expect("menu face mouth rows", _menu._entries.size() == 6 + 1)
+	fails += _expect("menu face mouth rows", _menu._entries.size() == 7 + 1)
 	_menu._pop()
 	_menu._push(CharacterMenu.LEVEL_FACE_JAW)
 	fails += _expect("menu face jaw rows", _menu._entries.size() == 1 + 1)
@@ -1328,7 +1360,7 @@ func _run_headless_test() -> void:
 	fails += _expect("sculpt mouth core widens", mouth_core.size() == 2 and mouth_core[1] > mouth_core[0] + 0.001)
 	# 15. Sculpt diffusion (08/10: crevasses at extremes — the rim must
 	# follow instead of cliffing at the box edge).
-	for ce in [[&"NoseL", -10], [&"NoseW", 8], [&"Chin", -10], [&"MouthW", -8], [&"MouthW", 8], [&"NoseLength", 10], [&"NosePosition", 8], [&"LipUpper", 8], [&"LipLower", 8], [&"MouthCorners", 8], [&"MouthPosition", 8], [&"MouthForward", 8], [&"NoseTipSize", 10], [&"NoseTipAngle", 10], [&"NoseCurve", 10]]:
+	for ce in [[&"NoseL", -10], [&"NoseW", 8], [&"Chin", -10], [&"MouthW", -8], [&"MouthW", 8], [&"NoseLength", 10], [&"NosePosition", 8], [&"LipUpper", 8], [&"LipLower", 8], [&"MouthCorners", 8], [&"MouthPosition", 8], [&"MouthForward", 8], [&"NoseTipSize", 10], [&"NoseTipAngle", 10], [&"NoseCurve", 10], [&"MouthPout", 8]]:
 		reset_face_sculpt(ce[0])
 		adjust_face_sculpt(ce[0], ce[1])
 		var cl := _avatar.sculpt_max_cliff()
@@ -1341,7 +1373,7 @@ func _run_headless_test() -> void:
 		var cc: Array = cov.get(region, [0, 0])
 		fails += _expect("sculpt mask %s resolves" % region, int(cc[1]) > 0 and float(cc[0]) / float(cc[1]) > 0.9)
 	# 17. Painted detail rows move their mask and restore to zero.
-	for nk in [&"NoseBridge", &"NoseTip", &"NostrilFlare", &"NoseLength", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseTipSize", &"NoseTipAngle", &"NoseCurve"]:
+	for nk in [&"NoseBridge", &"NoseTip", &"NostrilFlare", &"NoseLength", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseTipSize", &"NoseTipAngle", &"NoseCurve", &"MouthPout"]:
 		reset_face_sculpt(nk)
 		adjust_face_sculpt(nk, 10)
 		fails += _expect("sculpt %s moves" % String(nk), _avatar.sculpt_max_cliff() > 1e-9)
@@ -1389,6 +1421,12 @@ func _run_headless_test() -> void:
 	var mf_pair := _sculpt_deltas(&"MouthForward", 8)
 	var mf_f := _region_fronts(mf_pair[0], mf_pair[1], "Mouth")
 	fails += _expect("sculpt mouth advances", mf_f.size() == 2 and mf_f[1] > mf_f[0] + 0.006)
+	# 19b. MouthPout (falloff across the lip): center pushes ~full, edges
+	# hold — unlike LipUpper which advances both equally.
+	var mpout_pair := _sculpt_deltas(&"MouthPout", 8)
+	var mpout := _region_pout(mpout_pair[0], mpout_pair[1], "UpperLip")
+	fails += _expect("sculpt pout pushes center", mpout.size() == 2 and mpout[0] > 0.005)
+	fails += _expect("sculpt pout holds edges", mpout.size() == 2 and mpout[0] > mpout[1] + 0.002)
 	# 20. New nose mechanics (08/10): centroid scale, pivot rotation, falloff.
 	var ts_pair := _sculpt_deltas(&"NoseTipSize", 10)
 	var ts_w := _core_widths(ts_pair[0], ts_pair[1], "NoseTip")

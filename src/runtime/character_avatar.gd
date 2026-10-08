@@ -637,7 +637,7 @@ func reset_face(key: StringName) -> void:
 ## center fixed — no bunching, no fold); the X half-extent comes from the
 ## baked points.
 const SCULPT_PATH := "res://data/characters/face_sculpt.json"
-const SCULPT_KEYS: Array[StringName] = [&"NoseL", &"NoseW", &"MouthW", &"Chin", &"NoseBridge", &"NoseTip", &"NostrilFlare", &"NoseLength", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseTipSize", &"NoseTipAngle", &"NoseCurve"]
+const SCULPT_KEYS: Array[StringName] = [&"NoseL", &"NoseW", &"MouthW", &"Chin", &"NoseBridge", &"NoseTip", &"NostrilFlare", &"NoseLength", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseTipSize", &"NoseTipAngle", &"NoseCurve", &"MouthPout"]
 const SCULPT_STEP := 0.1
 const SCULPT_SPEC := {
 	&"NoseL": {"region": "Nose", "menu": "nose", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 1.0},
@@ -657,6 +657,7 @@ const SCULPT_SPEC := {
 	&"NoseTipSize": {"region": "NoseTip", "menu": "nose", "mode": "scale", "rate": 0.15, "mirror": false, "max_cm": 1.0},
 	&"NoseTipAngle": {"region": "NoseTip", "menu": "nose", "mode": "rot", "axis": Vector3(1, 0, 0), "deg": 12.0, "mirror": false, "max_cm": 1.0},
 	&"NoseCurve": {"region": "NoseBridge", "menu": "nose", "mode": "falloff", "axis": Vector3(0, 0, 1), "along": Vector3(0, 1, 0), "mirror": false, "max_cm": 1.0},
+	&"MouthPout": {"region": "UpperLip", "menu": "mouth", "mode": "falloff", "axis": Vector3(0, 0, 1), "along": Vector3(1, 0, 0), "mirror": false, "max_cm": 0.8},
 }
 var _sculpt := {} # StringName sculpt key -> float cm (0.0 default)
 var _sculpt_cache := {} # gender -> regions dict from SCULPT_PATH (lazy)
