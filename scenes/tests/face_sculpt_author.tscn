@@ -1,0 +1,41 @@
+[gd_scene format=3 uid="uid://cs6r1v7nh0hjr"]
+
+[ext_resource type="PackedScene" uid="uid://uedsfngbxgvc" path="res://assets/meshes/characters/Superhero_Male_FullBody.gltf" id="1"]
+
+[sub_resource type="StandardMaterial3D" id="sculpt_mat"]
+transparency = 1
+shading_mode = 0
+albedo_color = Color(1, 0.54901963, 0.14901961, 0.27058825)
+
+[sub_resource type="BoxMesh" id="nose_box"]
+material = SubResource("sculpt_mat")
+size = Vector3(0.045, 0.05284375, 0.036)
+
+[sub_resource type="BoxMesh" id="mouth_box"]
+material = SubResource("sculpt_mat")
+size = Vector3(0.065, 0.025, 0.03)
+
+[sub_resource type="BoxMesh" id="chin_box"]
+material = SubResource("sculpt_mat")
+size = Vector3(0.09, 0.029321289, 0.036845703)
+
+[node name="FaceSculptAuthor" type="Node3D" unique_id=1564760260]
+
+[node name="MalePreview" parent="." unique_id=102357712 instance=ExtResource("1")]
+
+[node name="SculptBoxes" type="Node3D" parent="." unique_id=1684475172]
+
+[node name="Nose" type="MeshInstance3D" parent="SculptBoxes" unique_id=1121635817]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.6670781, 0.099)
+cast_shadow = 0
+mesh = SubResource("nose_box")
+
+[node name="Mouth" type="MeshInstance3D" parent="SculptBoxes" unique_id=1066924341]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.623, 0.08506754)
+cast_shadow = 0
+mesh = SubResource("mouth_box")
+
+[node name="Chin" type="MeshInstance3D" parent="SculptBoxes" unique_id=1026099146]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5902653, 0.06940918)
+cast_shadow = 0
+mesh = SubResource("chin_box")

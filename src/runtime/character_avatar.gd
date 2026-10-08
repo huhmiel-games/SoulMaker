@@ -152,7 +152,34 @@ func _post_build() -> void:
 	_apply_beard()
 	_reapply_colors()
 	_apply_physics()
+	_snap_pristine()
+	_sculpt_fused()
 	rebuilt.emit()
+
+
+## Rest-pose world transform of a bone (pose-independent: identical at build
+## and mid-animation, and identical to the exporter frame — live poses from
+## the preview animation or physics scales must never move the sculpt boxes).
+func _bone_rest_world(sk: Skeleton3D, bi: int) -> Transform3D:
+	var t := Transform3D.IDENTITY
+	var cur := bi
+	while cur != -1:
+		t = sk.get_bone_rest(cur) * t
+		cur = sk.get_bone_parent(cur)
+	return sk.global_transform * t
+
+
+## Pristine fused Skin mesh (sculpt source of truth: every sculpt pass starts
+## from here, so repeated adjusts never accumulate). Refreshed each build.
+var _skin_pristine: ArrayMesh = null
+
+
+func _snap_pristine() -> void:
+	_skin_pristine = null
+	for mi in _avatar_mis():
+		var mmi := mi as MeshInstance3D
+		if mmi != null and mmi.name == &"Skin" and mmi.mesh != null:
+			_skin_pristine = mmi.mesh as ArrayMesh
 
 
 ## Menu verbs (GenericMenu value rows: get = display, adjust(L/R) = cycle,
@@ -405,6 +432,14 @@ func _mount_avatar(master: Skeleton3D, skin: ArrayMesh, cloth: ArrayMesh, skin_s
 	if mp != null:
 		mp.remove_child(master)
 	fused.add_child(master)
+	# Stowaways (ghost found 08/10 via wireframe): the nude MeshInstance3Ds
+	# are children of the master skeleton node, so reparenting it drags the
+	# authored body along — rendered over the fused copy, masking every
+	# recession (protrusions poke past it, recessions sink behind it, per the
+	# depth test). All nude surfaces are baked into Skin/Cloths (eyes and
+	# brows included — their slots read fused materials), so free them here.
+	for stow in master.find_children("*", "MeshInstance3D", true, false):
+		(stow as Node).queue_free()
 	for entry in [["Skin", skin], ["Cloths", cloth]]:
 		if entry[1] == null or (entry[1] as ArrayMesh).get_surface_count() == 0:
 			continue
@@ -592,6 +627,169 @@ func adjust_face(key: StringName, dir: int) -> void:
 func reset_face(key: StringName) -> void:
 	_face[key] = 1.0
 	_apply_physics()
+
+
+## Face-sculpt rows (nose/mouth/chin): key -> driving box (face_sculpt.json,
+## head-local meters), head-local axis, symmetric widen or direct push, range.
+## Values are cm (displayed mm); defaults 0 = authored mesh untouched.
+const SCULPT_PATH := "res://data/characters/face_sculpt.json"
+const SCULPT_KEYS: Array[StringName] = [&"NoseL", &"NoseW", &"MouthW", &"Chin"]
+const SCULPT_STEP := 0.1
+const SCULPT_SPEC := {
+	&"NoseL": {"box": "Nose", "axis": Vector3(0, 0, 1), "mirror": false, "drive": 2, "max_cm": 1.0},
+	&"NoseW": {"box": "Nose", "axis": Vector3(1, 0, 0), "mirror": true, "drive": -1, "max_cm": 0.8},
+	&"MouthW": {"box": "Mouth", "axis": Vector3(1, 0, 0), "mirror": true, "drive": -1, "max_cm": 0.8},
+	&"Chin": {"box": "Chin", "axis": Vector3(0, -0.55, 1), "mirror": false, "drive": 2, "max_cm": 1.0},
+}
+## Open-front overhang (normalized units): the pushed tip sits ON the box
+## face (or 1mm ahead), so negatives need influence past it. Full weight in
+## the pad — past the tip there is only air, nothing to crease.
+const DRIVE_PAD := 0.5
+var _sculpt := {} # StringName sculpt key -> float cm (0.0 default)
+var _sculpt_cache := {} # gender -> boxes dict from SCULPT_PATH (lazy)
+
+
+func sculpt_display(key: StringName) -> String:
+	return "%+dmm" % int(round(float(_sculpt.get(key, 0.0)) * 10.0))
+
+
+func adjust_sculpt(key: StringName, dir: int) -> void:
+	var spec: Dictionary = SCULPT_SPEC.get(key, {})
+	_sculpt[key] = clampf(float(_sculpt.get(key, 0.0)) + float(dir) * SCULPT_STEP, -float(spec.get("max_cm", 1.0)), float(spec.get("max_cm", 1.0)))
+	_sculpt_fused() # live on the fused mesh, no rebuild (reapplied in _post_build)
+
+
+func reset_sculpt(key: StringName) -> void:
+	_sculpt[key] = 0.0
+	_sculpt_fused()
+
+
+## Sculpt boxes for a gender (head-local, from SCULPT_PATH). Missing file or
+## gender section = no sculpt (Female until its authoring pass). Lazy cache.
+func _sculpt_boxes() -> Dictionary:
+	if _sculpt_cache.has(GENDERS[_gender]):
+		return _sculpt_cache[GENDERS[_gender]]
+	var doc: Dictionary = JsonFile.load_object(SCULPT_PATH)
+	var sec: Dictionary = (doc.get(GENDERS[_gender], {}) as Dictionary).get("boxes", {})
+	_sculpt_cache[GENDERS[_gender]] = sec
+	return sec
+
+
+## Box membership with smooth edges + top taper (nose bridge spares the eyes:
+## the XZ cross-section shrinks from 1.0 at box bottom to taper_top at top).
+## drive = axis index (0/1/2) whose FRONT side stays open at full weight (the
+## pushed tip sits on the box face and must move, not fade), extended by
+## DRIVE_PAD past the face; -1 = mirror box (X ramp in the displacement, Y
+## falloff, Z clipped only — lips sit on the Z face and must not fade).
+## Falloff start (normalized): the pinned frame that freezes negative outlines
+## lives in the 0.6-1.0 band — thinning it to 0.85 puts feature edges at full
+## weight so the contour follows both ways. Still continuous (0 at the rim).
+const SMOOTH_LO := 0.85
+
+
+func _sculpt_weight(q: Vector3, c: Vector3, half: Vector3, taper: float, drive: int) -> float:
+	if half.x <= 0.0 or half.y <= 0.0 or half.z <= 0.0:
+		return 0.0
+	var uy := (q.y - c.y) / half.y
+	if absf(uy) > 1.0:
+		return 0.0
+	var shrink := lerpf(1.0, taper, clampf((uy + 1.0) * 0.5, 0.0, 1.0))
+	var ux := (q.x - c.x) / (half.x * shrink)
+	var uz := (q.z - c.z) / (half.z * shrink)
+	if absf(ux) > 1.0 or absf(uy) > 1.0:
+		return 0.0
+	var fx := 1.0 - smoothstep(SMOOTH_LO, 1.0, absf(ux))
+	var fy := 1.0 - smoothstep(SMOOTH_LO, 1.0, absf(uy))
+	if drive == -1:
+		if absf(uz) > 1.0:
+			return 0.0
+		return fx * fy
+	var fz: float
+	if uz > 0.0:
+		if uz > 1.0 + DRIVE_PAD:
+			return 0.0
+		fz = 1.0 # open front (+pad): full weight, nothing to crease out there
+	elif uz < -1.0:
+		return 0.0
+	else:
+		fz = 1.0 - smoothstep(SMOOTH_LO, 1.0, absf(uz))
+	return fx * fy * fz
+
+
+## Applies stored sculpt values to the FUSED Skin MI (model space via the live
+## Head frame, so physics scales compose). Skin side only, eyeball surfaces
+## skipped by src name. Normals untouched (mm-scale offsets; v1 — a weld-smooth
+## recompute was tried 07/10 and reverted: it fought the authored stylized
+## normals and blotched the toon bands on advance). Tangents untouched.
+## All-zero = early-out, authored mesh byte-identical.
+func _sculpt_fused() -> void:
+	var boxes := _sculpt_boxes()
+	if boxes.is_empty():
+		return
+	var active := []
+	for key in SCULPT_KEYS:
+		if not is_zero_approx(float(_sculpt.get(key, 0.0))):
+			active.append(key)
+	if active.is_empty():
+		for mi in _avatar_mis(): # all-zero = authored mesh: restore pristine
+			var mmi := mi as MeshInstance3D
+			if mmi != null and mmi.name == &"Skin" and _skin_pristine != null and mmi.mesh != _skin_pristine:
+				mmi.mesh = _skin_pristine
+		return
+	var sk := master_skeleton()
+	if sk == null:
+		return
+	var bi := sk.find_bone(&"Head")
+	if bi == -1:
+		return
+	var head_world: Transform3D = _bone_rest_world(sk, bi)
+	var head_inv: Transform3D = head_world.affine_inverse()
+	for mi in _avatar_mis():
+		var mmi := mi as MeshInstance3D
+		if mmi == null or mmi.name != &"Skin":
+			continue
+		var src_mesh: ArrayMesh = _skin_pristine
+		if src_mesh == null:
+			src_mesh = mmi.mesh as ArrayMesh
+		if src_mesh == null:
+			continue
+		var out := ArrayMesh.new()
+		for s in src_mesh.get_surface_count():
+			var src := String(_avatar_src_for(mmi, s)).to_lower()
+			var a := src_mesh.surface_get_arrays(s)
+			if src.contains("eye") and not src.contains("brow"):
+				out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, a)
+				out.surface_set_material(s, src_mesh.surface_get_material(s))
+				continue
+			var verts: PackedVector3Array = a[Mesh.ARRAY_VERTEX]
+			for i in verts.size():
+				var q: Vector3 = head_inv * verts[i]
+				var o := Vector3.ZERO
+				for key in active:
+					var spec: Dictionary = SCULPT_SPEC[key]
+					var b: Dictionary = boxes.get(String(spec["box"]), {})
+					if b.is_empty():
+						continue
+					var bca: Array = b["center"]
+					var bsa: Array = b["size"]
+					var bc := Vector3(float(bca[0]), float(bca[1]), float(bca[2]))
+					var bs := Vector3(float(bsa[0]), float(bsa[1]), float(bsa[2]))
+					var w := _sculpt_weight(q, bc, bs * 0.5, float(b.get("taper_top", 1.0)), int(spec.get("drive", -1)))
+					if w <= 0.0:
+						continue
+					var v: float = float(_sculpt.get(key, 0.0)) / 100.0 * w
+					if bool(spec["mirror"]):
+						# Proportional widen/narrow about the center plane (no
+						# bunching, no fold: center fixed, flanks move most).
+						o.x += (q.x - bc.x) / bs.x * float(_sculpt.get(key, 0.0)) / 100.0 * 2.0 * w
+					else:
+						o += (spec["axis"] as Vector3).normalized() * v
+				if o != Vector3.ZERO:
+					verts[i] = head_world * (q + o)
+			a[Mesh.ARRAY_VERTEX] = verts
+			out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, a)
+			out.surface_set_material(s, src_mesh.surface_get_material(s))
+		mmi.mesh = out
 
 
 ## Absolute bone-pose scale on the fused master (single skeleton). Bones

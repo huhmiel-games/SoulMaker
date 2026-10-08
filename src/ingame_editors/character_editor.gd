@@ -43,6 +43,7 @@ var _dresser: ColorEditor = null
 var _menu: CharacterMenu = null
 var _anim_active := false
 var _anim_player: AnimationPlayer = null
+var _anim_paused := false # still preview on the Face submenu (sculpt judging)
 var _anim_master: Skeleton3D = null
 var _anim_targets: Array[Skeleton3D] = []
 var _anim_pairs: Array = [] # per target: Array of [master_idx, target_idx]
@@ -274,6 +275,14 @@ func on_menu_level(level: int) -> void:
 		face_push()
 	else:
 		face_pop()
+	# Sculpt judging needs a still face: pause the preview advance on the Face
+	# level (idle preview only — the animtest probe keeps running), snap to
+	# take start on entry, resume on leave. The flag survives rebuilds
+	# (_restart_preview_anim only replays; _anim_paused still gates advance).
+	var want_pause := level == CharacterMenu.LEVEL_FACE and _idle_only
+	if want_pause and not _anim_paused and _anim_player != null:
+		_anim_player.seek(0.0, true)
+	_anim_paused = want_pause
 
 
 func face_active() -> bool:
@@ -408,6 +417,18 @@ func reset_face_shape(key: StringName) -> void:
 	_avatar.reset_face(key)
 
 
+func face_sculpt_display(key: StringName) -> String:
+	return _avatar.sculpt_display(key)
+
+
+func adjust_face_sculpt(key: StringName, dir: int) -> void:
+	_avatar.adjust_sculpt(key, dir)
+
+
+func reset_face_sculpt(key: StringName) -> void:
+	_avatar.reset_sculpt(key)
+
+
 func phys_display(key: StringName) -> String:
 	return _avatar.phys_display(key)
 
@@ -459,6 +480,250 @@ func _avatar_push(src_substr: String) -> float:
 
 func _avatar_finger_verts() -> int:
 	return _avatar._avatar_finger_verts()
+
+
+## Head-dominated verts of the fused Skin MI (model space): sculpt probe
+## (nose tip = max z, symmetry = min/max x mirror).
+func _head_dom_verts() -> PackedVector3Array:
+	var out := PackedVector3Array()
+	var sk := _avatar_skeleton()
+	if sk == null:
+		return out
+	var head := sk.find_bone(&"Head")
+	for mi in _avatar_mis():
+		var mmi := mi as MeshInstance3D
+		if mmi == null or mmi.mesh == null or mmi.name != &"Skin":
+			continue
+		for s in mmi.mesh.get_surface_count():
+			var a := mmi.mesh.surface_get_arrays(s)
+			if a[Mesh.ARRAY_BONES] == null or a[Mesh.ARRAY_WEIGHTS] == null:
+				continue
+			var bv: PackedVector3Array = a[Mesh.ARRAY_VERTEX]
+			var bi: PackedInt32Array = a[Mesh.ARRAY_BONES]
+			var bw: PackedFloat32Array = a[Mesh.ARRAY_WEIGHTS]
+			for i in bv.size():
+				var bb := -1
+				var ww := 0.0
+				for k in 4:
+					if bw[i * 4 + k] > ww:
+						ww = bw[i * 4 + k]
+						bb = bi[i * 4 + k]
+				if bb == head:
+					out.append(bv[i])
+	return out
+
+
+func _nose_tip_z() -> float:
+	var mz := -1e9
+	for p in _head_dom_verts():
+		mz = maxf(mz, p.z)
+	return mz
+
+
+## Foremost vert in the chin band (model y 1.565-1.605: lower lip above is
+## excluded — the outline the eye reads, not the interior mean).
+func _chin_front_z() -> float:
+	var mz := -1e9
+	for p in _head_dom_verts():
+		if p.y > 1.565 and p.y < 1.605:
+			mz = maxf(mz, p.z)
+	return mz
+
+
+## Core width on a FIXED set (gated from before-positions, weight > 0.5):
+## proves the outline-adjacent verts follow, not just the interior mean.
+func _core_widths(before: PackedVector3Array, after: PackedVector3Array, boxname: String) -> Array:
+	var boxes: Dictionary = _avatar._sculpt_boxes()
+	var b: Dictionary = boxes.get(boxname, {})
+	if b.is_empty() or before.size() != after.size():
+		return []
+	var sk := _avatar_skeleton()
+	var bi := sk.find_bone(&"Head") if sk != null else -1
+	if bi == -1:
+		return []
+	var inv: Transform3D = _avatar._bone_rest_world(sk, bi).affine_inverse()
+	var bca: Array = b["center"]
+	var bsa: Array = b["size"]
+	var bc := Vector3(float(bca[0]), float(bca[1]), float(bca[2]))
+	var bs := Vector3(float(bsa[0]), float(bsa[1]), float(bsa[2]))
+	var mn0 := 1e9
+	var mx0 := -1e9
+	var mn1 := 1e9
+	var mx1 := -1e9
+	var n := 0
+	for i in before.size():
+		if _avatar._sculpt_weight(inv * before[i], bc, bs * 0.5, float(b.get("taper_top", 1.0)), -1) > 0.5:
+			mn0 = minf(mn0, before[i].x)
+			mx0 = maxf(mx0, before[i].x)
+			mn1 = minf(mn1, after[i].x)
+			mx1 = maxf(mx1, after[i].x)
+			n += 1
+	if n == 0:
+		return []
+	return [mx0 - mn0, mx1 - mn1]
+
+
+func _head_verts_symmetric() -> bool:
+	var verts := _head_dom_verts()
+	if verts.size() < 100:
+		return false
+	return absf(_width_min(verts) + _width_max(verts)) < 0.002
+
+
+func _width_min(verts: PackedVector3Array) -> float:
+	var mn := 1e9
+	for p in verts:
+		mn = minf(mn, p.x)
+	return mn
+
+
+func _width_max(verts: PackedVector3Array) -> float:
+	var mx := -1e9
+	for p in verts:
+		mx = maxf(mx, p.x)
+	return mx
+
+
+## Sculpt deltas for one row: reset (pristine), capture, adjust, capture,
+## reset. Same topology throughout, so before/after pair up per index.
+func _sculpt_deltas(key: StringName, steps: int) -> Array:
+	reset_face_sculpt(key)
+	var before := _head_dom_verts()
+	adjust_face_sculpt(key, steps)
+	var after := _head_dom_verts()
+	reset_face_sculpt(key)
+	return [before, after]
+
+
+## No vert crosses the center plane (mirror rows must scale, never fold).
+func _no_center_cross(before: PackedVector3Array, after: PackedVector3Array) -> bool:
+	if before.size() != after.size() or before.is_empty():
+		return false
+	for i in before.size():
+		if absf(before[i].x) > 0.0005 and signf(after[i].x) != signf(before[i].x):
+			return false
+	return true
+
+
+## Flanks (shrunk |ux| in 0.6-1.0, gate weight > 0.05) move more on average
+## than the center strip (|ux| < 0.3) — widening must read at the base, not
+## the bridge.
+func _flank_moves_most(boxname: String, before: PackedVector3Array, after: PackedVector3Array) -> bool:
+	var boxes: Dictionary = _avatar._sculpt_boxes()
+	var b: Dictionary = boxes.get(boxname, {})
+	if b.is_empty() or before.size() != after.size():
+		return false
+	var sk := _avatar_skeleton()
+	var bi := sk.find_bone(&"Head") if sk != null else -1
+	if bi == -1:
+		return false
+	var inv: Transform3D = _avatar._bone_rest_world(sk, bi).affine_inverse()
+	var bca: Array = b["center"]
+	var bsa: Array = b["size"]
+	var bc := Vector3(float(bca[0]), float(bca[1]), float(bca[2]))
+	var bs := Vector3(float(bsa[0]), float(bsa[1]), float(bsa[2]))
+	var taper := float(b.get("taper_top", 1.0))
+	var flank_sum := 0.0
+	var flank_n := 0
+	var center_sum := 0.0
+	var center_n := 0
+	for i in before.size():
+		var q: Vector3 = inv * before[i]
+		var uy := (q.y - bc.y) / (float(bsa[1]) * 0.5)
+		var shrink := lerpf(1.0, taper, clampf((uy + 1.0) * 0.5, 0.0, 1.0))
+		var ux: float = absf((q.x - bc.x) / (float(bsa[0]) * 0.5 * shrink))
+		var w: float = _avatar._sculpt_weight(q, bc, bs * 0.5, taper, -1)
+		if w < 0.05:
+			continue
+		var d: float = absf(after[i].x - before[i].x)
+		if ux > 0.6:
+			flank_sum += d
+			flank_n += 1
+		elif ux < 0.3:
+			center_sum += d
+			center_n += 1
+	if flank_n == 0 or center_n == 0:
+		return false
+	return flank_sum / flank_n > center_sum / center_n + 0.0005
+
+
+## Mouth narrowing check: mean |x| over the BEFORE-gated set (fixed verts, so
+## the fringe cannot swap in/out). Core verts carry full weight and move mm.
+func _gated_narrow(before: PackedVector3Array, after: PackedVector3Array, boxname: String, thresh: float) -> bool:
+	var boxes: Dictionary = _avatar._sculpt_boxes()
+	var b: Dictionary = boxes.get(boxname, {})
+	if b.is_empty() or before.size() != after.size() or before.is_empty():
+		return false
+	var sk := _avatar_skeleton()
+	var bi := sk.find_bone(&"Head") if sk != null else -1
+	if bi == -1:
+		return false
+	var inv: Transform3D = _avatar._bone_rest_world(sk, bi).affine_inverse()
+	var bca: Array = b["center"]
+	var bsa: Array = b["size"]
+	var bc := Vector3(float(bca[0]), float(bca[1]), float(bca[2]))
+	var bs := Vector3(float(bsa[0]), float(bsa[1]), float(bsa[2]))
+	var sum := 0.0
+	var n := 0
+	for i in before.size():
+		if _avatar._sculpt_weight(inv * before[i], bc, bs * 0.5, float(b.get("taper_top", 1.0)), -1) > thresh:
+			sum += absf(after[i].x) - absf(before[i].x)
+			n += 1
+	if n == 0:
+		return false
+	return sum / n < -0.0008
+
+
+## Chin-region verts (weight > 0.5) must drop AND project on Chin+ (dir=+1),
+## rise AND recede on Chin- (dir=-1).
+func _chin_moved(before: PackedVector3Array, after: PackedVector3Array, dir: float) -> bool:
+	var boxes: Dictionary = _avatar._sculpt_boxes()
+	var b: Dictionary = boxes.get("Chin", {})
+	if b.is_empty() or before.size() != after.size():
+		return false
+	var sk := _avatar_skeleton()
+	var bi := sk.find_bone(&"Head") if sk != null else -1
+	if bi == -1:
+		return false
+	var inv: Transform3D = _avatar._bone_rest_world(sk, bi).affine_inverse()
+	var bca: Array = b["center"]
+	var bsa: Array = b["size"]
+	var bc := Vector3(float(bca[0]), float(bca[1]), float(bca[2]))
+	var bs := Vector3(float(bsa[0]), float(bsa[1]), float(bsa[2]))
+	var dy := 0.0
+	var dz := 0.0
+	var n := 0
+	for i in before.size():
+		if _avatar._sculpt_weight(inv * before[i], bc, bs * 0.5, float(b.get("taper_top", 1.0)), 2) > 0.5:
+			dy += after[i].y - before[i].y
+			dz += after[i].z - before[i].z
+			n += 1
+	if n == 0:
+		return false
+	return dy / n * dir < -0.001 and dz / n * dir > 0.002
+
+
+## Permanent guard: no visible MeshInstance3D may hide under a Skeleton3D.
+## All rendered avatar meshes hang directly under Fused or the Hair/Beard
+## holders; anything parented under a skeleton is an unbaked stowaway double
+## (masks sculpt recessions while letting protrusions through).
+func _no_stowaway_mis() -> bool:
+	var stack: Array = [_avatar]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		if n == null:
+			continue
+		for c in n.get_children():
+			stack.push_back(c)
+		var mmi := n as MeshInstance3D
+		if mmi == null or not mmi.visible:
+			continue
+		var p := mmi.get_parent()
+		while p != null and p != _avatar:
+			if p is Skeleton3D:
+				return false
+			p = p.get_parent()
+	return true
 
 
 func _avatar_tex() -> Texture2D:
@@ -849,10 +1114,69 @@ func _run_headless_test() -> void:
 	fails += _expect("face length clamped", face_shape_display(&"Length") == "90%")
 	reset_face_shape(&"Length")
 	_menu._push(CharacterMenu.LEVEL_FACE)
-	fails += _expect("menu face rows", _menu._entries.size() == 3)
+	fails += _expect("menu face rows", _menu._entries.size() == 7)
 	fails += _expect("face cam on face", face_active())
+	fails += _expect("face pauses idle", _anim_paused == _idle_only)
 	_menu._pop()
 	fails += _expect("face cam off face", not face_active())
+	fails += _expect("face resumes", not _anim_paused)
+	# 12. Face sculpt (JSON boxes, live on fused Skin, defaults no-op).
+	fails += _expect("sculpt json male", not (_avatar._sculpt_boxes() as Dictionary).is_empty())
+	fails += _expect("sculpt nose taper", is_equal_approx(float(((_avatar._sculpt_boxes() as Dictionary).get("Nose", {}) as Dictionary).get("taper_top", 1.0)), 0.45))
+	fails += _expect("sculpt defaults zero", face_sculpt_display(&"NoseL") == "+0mm" and face_sculpt_display(&"Chin") == "+0mm")
+	var tip0 := _nose_tip_z()
+	adjust_face_sculpt(&"NoseL", 5) # +5mm forward, tip rides at full weight
+	fails += _expect("sculpt nose shown", face_sculpt_display(&"NoseL") == "+5mm")
+	fails += _expect("sculpt nose grows", _nose_tip_z() > tip0 + 0.003 and _nose_tip_z() < tip0 + 0.007)
+	adjust_face_sculpt(&"NoseL", 3) # total +8mm from pristine (no accumulation)
+	fails += _expect("sculpt no accumulate", _nose_tip_z() > tip0 + 0.006 and _nose_tip_z() < tip0 + 0.010)
+	adjust_face_sculpt(&"NoseW", 5)
+	fails += _expect("sculpt width symmetric", _head_verts_symmetric())
+	reset_face_sculpt(&"NoseL")
+	reset_face_sculpt(&"NoseW")
+	fails += _expect("sculpt reset restores", is_equal_approx(_nose_tip_z(), tip0))
+	adjust_face_sculpt(&"Chin", 200) # clamp to +10mm
+	fails += _expect("sculpt chin clamped", face_sculpt_display(&"Chin") == "+10mm")
+	reset_face_sculpt(&"Chin")
+	adjust_face_sculpt(&"MouthW", -200) # clamp to -8mm
+	fails += _expect("sculpt mouth clamped", face_sculpt_display(&"MouthW") == "-8mm")
+	reset_face_sculpt(&"MouthW")
+	# 13. Sculpt round 2 (user eye-tune 07/10: negatives, base-vs-bridge, chin drop).
+	adjust_face_sculpt(&"NoseL", -5) # front pad catches the tip: retracts
+	fails += _expect("sculpt nose back", _nose_tip_z() < tip0 - 0.002)
+	reset_face_sculpt(&"NoseL")
+	var nose_pair := _sculpt_deltas(&"NoseW", 8)
+	fails += _expect("sculpt nose base most", _flank_moves_most("Nose", nose_pair[0], nose_pair[1]))
+	fails += _expect("sculpt nose no cross", _no_center_cross(nose_pair[0], nose_pair[1]))
+	var mouth_pair := _sculpt_deltas(&"MouthW", -5)
+	fails += _expect("sculpt mouth narrows", _gated_narrow(mouth_pair[0], mouth_pair[1], "Mouth", 0.3))
+	fails += _expect("sculpt mouth no cross", _no_center_cross(mouth_pair[0], mouth_pair[1]))
+	var chin_back_pair := _sculpt_deltas(&"Chin", -5) # weak chin recedes+rises
+	fails += _expect("sculpt chin back", _chin_moved(chin_back_pair[0], chin_back_pair[1], -1.0))
+	var chin_pair := _sculpt_deltas(&"Chin", 10)
+	fails += _expect("sculpt chin drops", _chin_moved(chin_pair[0], chin_pair[1], 1.0))
+	# 14. Sculpt round 3: outline follows (live Chin plateau 07/10 — the old
+	# mean-based asserts passed while the contour froze at -2).
+	var chin_f0 := _chin_front_z()
+	adjust_face_sculpt(&"Chin", -2)
+	var chin_f2 := _chin_front_z()
+	adjust_face_sculpt(&"Chin", -3) # total -5 from pristine (single pass, no path)
+	var chin_f5 := _chin_front_z()
+	reset_face_sculpt(&"Chin")
+	fails += _expect("sculpt chin no plateau", chin_f5 < chin_f2 - 0.001 and chin_f2 < chin_f0 - 0.0005)
+	var nose_f0 := _nose_tip_z()
+	adjust_face_sculpt(&"NoseL", -8)
+	fails += _expect("sculpt nose follows neg", _nose_tip_z() < nose_f0 - 0.006)
+	reset_face_sculpt(&"NoseL")
+	var nose_w_neg := _sculpt_deltas(&"NoseW", -8)
+	var nose_core := _core_widths(nose_w_neg[0], nose_w_neg[1], "Nose")
+	fails += _expect("sculpt nose core narrows", nose_core.size() == 2 and nose_core[1] < nose_core[0] - 0.001)
+	var mouth_w_pos := _sculpt_deltas(&"MouthW", 5)
+	var mouth_core := _core_widths(mouth_w_pos[0], mouth_w_pos[1], "Mouth")
+	# No stowaway meshes: every visible MI lives directly under Fused
+	# (Skin/Cloths) or a Hair/Beard holder — never under a skeleton (the
+	# 08/10 ghost: nude MIs dragged along with the reparented master).
+	fails += _expect("no stowaway mis", _no_stowaway_mis())
 	print("[CharTest] %d FAIL" % fails)
 	get_tree().quit()
 
@@ -1092,7 +1416,7 @@ func _process(delta: float) -> void:
 		return
 	if not is_instance_valid(_anim_master):
 		return
-	if _anim_player.is_playing():
+	if _anim_player.is_playing() and not _anim_paused:
 		_anim_player.advance(delta)
 	_anim_frame += 1
 	if _anim_frame == 60:

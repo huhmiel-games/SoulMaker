@@ -6,9 +6,8 @@ extends GenericMenu
 ## Physics/Hair/Eyebrows/Eyes/Beard/Face/Skin submenus + Back to hub; outfit level = one value
 ## row per slot; outfit-colors level = one color entry per outfit slot;
 ## physics level = one value row per morph slider; hair/eyebrows/eyes/beard
-## levels = style + color; face level = one value row per form slider (Head
-## XZ/Y multipliers over the Physics Head size); skin level = color only
-## (room for more later).
+## levels = style + color; face level = Width/Length (Head multipliers) +
+## sculpt rows (Nose/Mouth/Chin, mm); skin level = color only (room for more).
 ## (menu grammar, no B). Value rows cycle live on L/R (tab_prev/tab_next)
 ## and reset on A/E; navigation is explicit rows only (B is inert in menus,
 ## same as MapMenu). The menu's own HUD is hidden (it would squash into the
@@ -158,6 +157,11 @@ func _load_entries() -> Array:
 				"get": _host.face_shape_display.bind(k),
 				"adjust": func(dir: int) -> void: _host.adjust_face_shape(k, dir),
 				"reset": _host.reset_face_shape.bind(k)})
+		for k in CharacterAvatar.SCULPT_KEYS:
+			fout.append({"label": String(k), "kind": "value",
+				"get": _host.face_sculpt_display.bind(k),
+				"adjust": func(dir: int) -> void: _host.adjust_face_sculpt(k, dir),
+				"reset": _host.reset_face_sculpt.bind(k)})
 		fout.append({"label": "[ ← Back ]", "call": _pop})
 		return fout
 	return [
