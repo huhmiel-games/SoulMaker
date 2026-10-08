@@ -38,7 +38,8 @@ const ANIM_DEFAULT_TAKE := "rig/ual1__Walk"
 @export var show_volumes := false
 ## X-ray debug (TEMP, N key / L3 pad): 0 fused, 1 skin only, 2 volumes.
 var _xray := 0
-const XRAY_NAMES := ["Fused", "Skin", "Volumes"]
+const XRAY_NAMES := ["Fused", "Skin", "Volumes", "Wire"]
+var _wire := false # wireframe requested (dummy viewport drops debug_draw headless)
 var _dresser: ColorEditor = null
 var _menu: CharacterMenu = null
 var _anim_active := false
@@ -263,10 +264,13 @@ func _draw_volumes(vols: Dictionary, cdata: Dictionary) -> void:
 
 
 ## Face close-up (Hair/Eyebrows submenus): the orbit pivot + arm are saved,
-## the pivot moves to the Head bone and the arm shortens; leaving the submenu
-## restores both. Yaw/pitch untouched — the user keeps orbiting the face.
-## Re-anchored after every rebuild while active (height/gender move the head).
+## the pivot moves to the face (Head bone + FACE_AIM_UP: the bone origin sits
+## at the skull base, aiming there frames the neck) and the arm shortens;
+## leaving the submenu restores both. Yaw/pitch untouched — the user keeps
+## orbiting the face. Re-anchored after every rebuild while active
+## (height/gender move the head).
 const FACE_ARM := 0.9
+const FACE_AIM_UP := 0.10 # Head origin -> mid-face (nose/eyes zone)
 var _face_saved := {} # empty, or {pos: Vector3, arm: float}
 
 
@@ -306,7 +310,7 @@ func face_push() -> void:
 		return
 	if _face_saved.is_empty():
 		_face_saved = {"pos": pivot.position, "arm": arm.spring_length}
-	pivot.position = _head_world()
+	pivot.position = _head_world() + Vector3.UP * FACE_AIM_UP
 	arm.spring_length = FACE_ARM
 
 
@@ -530,29 +534,23 @@ func _chin_front_z() -> float:
 	return mz
 
 
-## Core width on a FIXED set (gated from before-positions, weight > 0.5):
-## proves the outline-adjacent verts follow, not just the interior mean.
-func _core_widths(before: PackedVector3Array, after: PackedVector3Array, boxname: String) -> Array:
-	var boxes: Dictionary = _avatar._sculpt_boxes()
-	var b: Dictionary = boxes.get(boxname, {})
-	if b.is_empty() or before.size() != after.size():
+## Core width on a FIXED set (mask members from before-positions): proves the
+## outline-adjacent verts follow, not just the interior mean.
+func _core_widths(before: PackedVector3Array, after: PackedVector3Array, region: String) -> Array:
+	if before.size() != after.size():
 		return []
 	var sk := _avatar_skeleton()
 	var bi := sk.find_bone(&"Head") if sk != null else -1
 	if bi == -1:
 		return []
 	var inv: Transform3D = _avatar._bone_rest_world(sk, bi).affine_inverse()
-	var bca: Array = b["center"]
-	var bsa: Array = b["size"]
-	var bc := Vector3(float(bca[0]), float(bca[1]), float(bca[2]))
-	var bs := Vector3(float(bsa[0]), float(bsa[1]), float(bsa[2]))
 	var mn0 := 1e9
 	var mx0 := -1e9
 	var mn1 := 1e9
 	var mx1 := -1e9
 	var n := 0
 	for i in before.size():
-		if _avatar._sculpt_weight(inv * before[i], bc, bs * 0.5, float(b.get("taper_top", 1.0)), -1) > 0.5:
+		if _avatar.sculpt_in_region(region, inv * before[i]):
 			mn0 = minf(mn0, before[i].x)
 			mx0 = maxf(mx0, before[i].x)
 			mn1 = minf(mn1, after[i].x)
@@ -605,36 +603,31 @@ func _no_center_cross(before: PackedVector3Array, after: PackedVector3Array) -> 
 	return true
 
 
-## Flanks (shrunk |ux| in 0.6-1.0, gate weight > 0.05) move more on average
+## Flanks (|ux| in 0.6-1.0 about the region centroid) move more on average
 ## than the center strip (|ux| < 0.3) — widening must read at the base, not
 ## the bridge.
-func _flank_moves_most(boxname: String, before: PackedVector3Array, after: PackedVector3Array) -> bool:
-	var boxes: Dictionary = _avatar._sculpt_boxes()
-	var b: Dictionary = boxes.get(boxname, {})
-	if b.is_empty() or before.size() != after.size():
+func _flank_moves_most(region: String, before: PackedVector3Array, after: PackedVector3Array) -> bool:
+	if before.size() != after.size():
+		return false
+	var st: Dictionary = _avatar.sculpt_region_stats(region)
+	if st.is_empty():
 		return false
 	var sk := _avatar_skeleton()
 	var bi := sk.find_bone(&"Head") if sk != null else -1
 	if bi == -1:
 		return false
 	var inv: Transform3D = _avatar._bone_rest_world(sk, bi).affine_inverse()
-	var bca: Array = b["center"]
-	var bsa: Array = b["size"]
-	var bc := Vector3(float(bca[0]), float(bca[1]), float(bca[2]))
-	var bs := Vector3(float(bsa[0]), float(bsa[1]), float(bsa[2]))
-	var taper := float(b.get("taper_top", 1.0))
+	var cx := float(st["cx"])
+	var hx := maxf(float(st["hx"]), 1e-9)
 	var flank_sum := 0.0
 	var flank_n := 0
 	var center_sum := 0.0
 	var center_n := 0
 	for i in before.size():
 		var q: Vector3 = inv * before[i]
-		var uy := (q.y - bc.y) / (float(bsa[1]) * 0.5)
-		var shrink := lerpf(1.0, taper, clampf((uy + 1.0) * 0.5, 0.0, 1.0))
-		var ux: float = absf((q.x - bc.x) / (float(bsa[0]) * 0.5 * shrink))
-		var w: float = _avatar._sculpt_weight(q, bc, bs * 0.5, taper, -1)
-		if w < 0.05:
+		if not _avatar.sculpt_in_region(region, q):
 			continue
+		var ux: float = absf((q.x - cx) / hx)
 		var d: float = absf(after[i].x - before[i].x)
 		if ux > 0.6:
 			flank_sum += d
@@ -647,26 +640,22 @@ func _flank_moves_most(boxname: String, before: PackedVector3Array, after: Packe
 	return flank_sum / flank_n > center_sum / center_n + 0.0005
 
 
-## Mouth narrowing check: mean |x| over the BEFORE-gated set (fixed verts, so
+## Mouth narrowing check: mean |x| over the BEFORE mask set (fixed verts, so
 ## the fringe cannot swap in/out). Core verts carry full weight and move mm.
-func _gated_narrow(before: PackedVector3Array, after: PackedVector3Array, boxname: String, thresh: float) -> bool:
-	var boxes: Dictionary = _avatar._sculpt_boxes()
-	var b: Dictionary = boxes.get(boxname, {})
-	if b.is_empty() or before.size() != after.size() or before.is_empty():
+func _gated_narrow(before: PackedVector3Array, after: PackedVector3Array, region: String) -> bool:
+	if before.size() != after.size() or before.is_empty():
+		return false
+	if _avatar.sculpt_region_stats(region).is_empty():
 		return false
 	var sk := _avatar_skeleton()
 	var bi := sk.find_bone(&"Head") if sk != null else -1
 	if bi == -1:
 		return false
 	var inv: Transform3D = _avatar._bone_rest_world(sk, bi).affine_inverse()
-	var bca: Array = b["center"]
-	var bsa: Array = b["size"]
-	var bc := Vector3(float(bca[0]), float(bca[1]), float(bca[2]))
-	var bs := Vector3(float(bsa[0]), float(bsa[1]), float(bsa[2]))
 	var sum := 0.0
 	var n := 0
 	for i in before.size():
-		if _avatar._sculpt_weight(inv * before[i], bc, bs * 0.5, float(b.get("taper_top", 1.0)), -1) > thresh:
+		if _avatar.sculpt_in_region(region, inv * before[i]):
 			sum += absf(after[i].x) - absf(before[i].x)
 			n += 1
 	if n == 0:
@@ -674,27 +663,23 @@ func _gated_narrow(before: PackedVector3Array, after: PackedVector3Array, boxnam
 	return sum / n < -0.0008
 
 
-## Chin-region verts (weight > 0.5) must drop AND project on Chin+ (dir=+1),
+## Chin-region mask verts must drop AND project on Chin+ (dir=+1),
 ## rise AND recede on Chin- (dir=-1).
 func _chin_moved(before: PackedVector3Array, after: PackedVector3Array, dir: float) -> bool:
-	var boxes: Dictionary = _avatar._sculpt_boxes()
-	var b: Dictionary = boxes.get("Chin", {})
-	if b.is_empty() or before.size() != after.size():
+	if before.size() != after.size():
+		return false
+	if _avatar.sculpt_region_stats("Chin").is_empty():
 		return false
 	var sk := _avatar_skeleton()
 	var bi := sk.find_bone(&"Head") if sk != null else -1
 	if bi == -1:
 		return false
 	var inv: Transform3D = _avatar._bone_rest_world(sk, bi).affine_inverse()
-	var bca: Array = b["center"]
-	var bsa: Array = b["size"]
-	var bc := Vector3(float(bca[0]), float(bca[1]), float(bca[2]))
-	var bs := Vector3(float(bsa[0]), float(bsa[1]), float(bsa[2]))
 	var dy := 0.0
 	var dz := 0.0
 	var n := 0
 	for i in before.size():
-		if _avatar._sculpt_weight(inv * before[i], bc, bs * 0.5, float(b.get("taper_top", 1.0)), 2) > 0.5:
+		if _avatar.sculpt_in_region("Chin", inv * before[i]):
 			dy += after[i].y - before[i].y
 			dz += after[i].z - before[i].z
 			n += 1
@@ -815,7 +800,9 @@ func _run_headless_test() -> void:
 	_cycle_xray()
 	fails += _expect("xray volumes", _avatar_skin_mi().visible and _avatar_cloth_mi().visible and get_node_or_null("Volumes") != null)
 	_cycle_xray()
-	fails += _expect("xray back to fused", _avatar_skin_mi().visible and _avatar_cloth_mi().visible and get_node_or_null("Volumes") == null)
+	fails += _expect("xray wire", _wire and XRAY_NAMES[_xray] == "Wire" and _avatar_skin_mi().visible and _avatar_cloth_mi().visible)
+	_cycle_xray()
+	fails += _expect("xray back to fused", not _wire and _xray == 0 and _avatar_skin_mi().visible and _avatar_cloth_mi().visible and get_node_or_null("Volumes") == null)
 	adjust_slot(&"Head", 1)
 	fails += _expect("hood shown", slot_display(&"Head") == "Ranger")
 	fails += _expect("hood fused", _avatar_mi() != null and _avatar_surf_count() > 1)
@@ -1029,7 +1016,7 @@ func _run_headless_test() -> void:
 	var pivot := get_node_or_null("CamPivot") as Node3D
 	var arm := (pivot.get_node_or_null("SpringArm3D") as SpringArm3D) if pivot != null else null
 	fails += _expect("face cam close", face_active() and arm != null and is_equal_approx(arm.spring_length, FACE_ARM))
-	fails += _expect("face cam at head", pivot != null and pivot.position.y > 1.2)
+	fails += _expect("face cam at head", pivot != null and pivot.position.y > _head_world().y)
 	_menu._pop()
 	fails += _expect("face cam restored", not face_active() and arm != null and is_equal_approx(arm.spring_length, 3.2) and is_equal_approx(pivot.position.y, 1.0))
 	# 8. Skin submenu (color only, room for more).
@@ -1114,15 +1101,15 @@ func _run_headless_test() -> void:
 	fails += _expect("face length clamped", face_shape_display(&"Length") == "90%")
 	reset_face_shape(&"Length")
 	_menu._push(CharacterMenu.LEVEL_FACE)
-	fails += _expect("menu face rows", _menu._entries.size() == 7)
+	fails += _expect("menu face rows", _menu._entries.size() == CharacterAvatar.FACE_KEYS.size() + CharacterAvatar.SCULPT_KEYS.size() + 1)
 	fails += _expect("face cam on face", face_active())
 	fails += _expect("face pauses idle", _anim_paused == _idle_only)
 	_menu._pop()
 	fails += _expect("face cam off face", not face_active())
 	fails += _expect("face resumes", not _anim_paused)
-	# 12. Face sculpt (JSON boxes, live on fused Skin, defaults no-op).
-	fails += _expect("sculpt json male", not (_avatar._sculpt_boxes() as Dictionary).is_empty())
-	fails += _expect("sculpt nose taper", is_equal_approx(float(((_avatar._sculpt_boxes() as Dictionary).get("Nose", {}) as Dictionary).get("taper_top", 1.0)), 0.45))
+	# 12. Face sculpt (JSON regions, live on fused Skin, defaults no-op).
+	fails += _expect("sculpt json male", not (_avatar._sculpt_regions() as Dictionary).is_empty())
+	fails += _expect("sculpt nose mask", int(((_avatar._sculpt_regions() as Dictionary).get("Nose", {}) as Dictionary).get("n", 0)) > 0)
 	fails += _expect("sculpt defaults zero", face_sculpt_display(&"NoseL") == "+0mm" and face_sculpt_display(&"Chin") == "+0mm")
 	var tip0 := _nose_tip_z()
 	adjust_face_sculpt(&"NoseL", 5) # +5mm forward, tip rides at full weight
@@ -1149,7 +1136,7 @@ func _run_headless_test() -> void:
 	fails += _expect("sculpt nose base most", _flank_moves_most("Nose", nose_pair[0], nose_pair[1]))
 	fails += _expect("sculpt nose no cross", _no_center_cross(nose_pair[0], nose_pair[1]))
 	var mouth_pair := _sculpt_deltas(&"MouthW", -5)
-	fails += _expect("sculpt mouth narrows", _gated_narrow(mouth_pair[0], mouth_pair[1], "Mouth", 0.3))
+	fails += _expect("sculpt mouth narrows", _gated_narrow(mouth_pair[0], mouth_pair[1], "Mouth"))
 	fails += _expect("sculpt mouth no cross", _no_center_cross(mouth_pair[0], mouth_pair[1]))
 	var chin_back_pair := _sculpt_deltas(&"Chin", -5) # weak chin recedes+rises
 	fails += _expect("sculpt chin back", _chin_moved(chin_back_pair[0], chin_back_pair[1], -1.0))
@@ -1173,6 +1160,27 @@ func _run_headless_test() -> void:
 	fails += _expect("sculpt nose core narrows", nose_core.size() == 2 and nose_core[1] < nose_core[0] - 0.001)
 	var mouth_w_pos := _sculpt_deltas(&"MouthW", 5)
 	var mouth_core := _core_widths(mouth_w_pos[0], mouth_w_pos[1], "Mouth")
+	fails += _expect("sculpt mouth core widens", mouth_core.size() == 2 and mouth_core[1] > mouth_core[0] + 0.001)
+	# 15. Sculpt diffusion (08/10: crevasses at extremes — the rim must
+	# follow instead of cliffing at the box edge).
+	for ce in [[&"NoseL", -10], [&"NoseW", 8], [&"Chin", -10], [&"MouthW", -8], [&"MouthW", 8]]:
+		reset_face_sculpt(ce[0])
+		adjust_face_sculpt(ce[0], ce[1])
+		fails += _expect("sculpt no cliff %s" % String(ce[0]), _avatar.sculpt_max_cliff() < 0.005)
+		reset_face_sculpt(ce[0])
+	# 16. Mask migration (08/10, regions v2): every baked point resolves on the
+	# live pristine (asset-drift guard — a reimport moving verts fails loud).
+	var cov := _avatar.sculpt_mask_coverage()
+	for region in ["Nose", "Mouth", "Chin"]:
+		var cc: Array = cov.get(region, [0, 0])
+		fails += _expect("sculpt mask %s resolves" % region, int(cc[1]) > 0 and float(cc[0]) / float(cc[1]) > 0.9)
+	# 17. Unpainted rows (NoseBridge/NoseTip/NostrilFlare masks pending) are
+	# inert: adjust moves nothing, reset restores.
+	for nk in [&"NoseBridge", &"NoseTip", &"NostrilFlare"]:
+		reset_face_sculpt(nk)
+		adjust_face_sculpt(nk, 10)
+		fails += _expect("sculpt %s inert" % String(nk), _avatar.sculpt_max_cliff() < 1e-9)
+		reset_face_sculpt(nk)
 	# No stowaway meshes: every visible MI lives directly under Fused
 	# (Skin/Cloths) or a Hair/Beard holder — never under a skeleton (the
 	# 08/10 ghost: nude MIs dragged along with the reparented master).
@@ -1181,9 +1189,10 @@ func _run_headless_test() -> void:
 	get_tree().quit()
 
 
-## X-ray debug (TEMP, N / L3): 0 fused, 1 skin only, 2 fused + volumes.
+## X-ray debug (TEMP, N / L3): 0 fused, 1 skin only, 2 fused + volumes,
+## 3 wireframe (bare geometry — sculpt troubleshooting).
 func _cycle_xray() -> void:
-	_xray = posmod(_xray + 1, 3)
+	_xray = posmod(_xray + 1, 4)
 	_apply_xray()
 	print("[XRay] %s" % XRAY_NAMES[_xray])
 
@@ -1199,6 +1208,10 @@ func _apply_xray() -> void:
 		_draw_volumes(_avatar.last_volumes(), _avatar.last_cdata())
 	else:
 		_clear_volumes()
+	var vp := get_viewport()
+	_wire = _xray == 3
+	if vp != null:
+		vp.debug_draw = Viewport.DEBUG_DRAW_WIREFRAME if _wire else Viewport.DEBUG_DRAW_DISABLED
 	var hud := get_node_or_null("MenuLayer/HUD")
 	if hud != null and hud.has_method("set_persistent"):
 		hud.set_persistent(&"xray", "XRAY: %s" % XRAY_NAMES[_xray])

@@ -116,4 +116,5 @@ see below.
 - **Class API**: answer from `reference/godot47_docs/` (Read/Grep), never webfetch. Add a class to the cache on demand (see `concepts_and_docs/godot47_api_notes.md`).
 - Do not add files inside `.godot/` (editor cache).
 - **No `#` comments in `.tscn` files** (2026-09-25: silently breaks parsing — the following instanced node loads empty, e.g. RigRoot without Skeleton3D + `skeleton not resolved`, character gone with no parse error). Keep notes in colocated `.gd` or docs.
+- **Never append to a `Packed*Array` read out of a container** (2026-10-08: appending to a packed array retrieved from a Dictionary/Array mutates a CoW copy — size stays 0, no error. Proven headless: dict/array-packed stay 0, plain `Array` sticks. Use plain Arrays for accumulators/adjacency lists. This silently disabled sculpt diffusion + its metric + paint grow: all green, all hollow).
 - **godotty** (terminal inside the editor, to run opencode) is an editor-only personal tool: it lives in `addons/godotty/`, is gitignored, and never appears in the game or the build (its `*.editor.*` GDExtension tags only load in the editor binary). Install manually; a fresh clone does not have it.

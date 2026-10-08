@@ -176,6 +176,7 @@ var _skin_pristine: ArrayMesh = null
 
 func _snap_pristine() -> void:
 	_skin_pristine = null
+	_adj_cache.clear() # keys are mesh rids: rebuild = new meshes
 	for mi in _avatar_mis():
 		var mmi := mi as MeshInstance3D
 		if mmi != null and mmi.name == &"Skin" and mmi.mesh != null:
@@ -629,24 +630,26 @@ func reset_face(key: StringName) -> void:
 	_apply_physics()
 
 
-## Face-sculpt rows (nose/mouth/chin): key -> driving box (face_sculpt.json,
-## head-local meters), head-local axis, symmetric widen or direct push, range.
-## Values are cm (displayed mm); defaults 0 = authored mesh untouched.
+## Face-sculpt rows (nose/mouth/chin): key -> painted REGION (face_sculpt.json
+## v2, Head-local meter points), head-local axis, symmetric widen or direct
+## push, range. Values are cm (displayed mm); defaults 0 = authored mesh
+## untouched. Mirror rows scale about the region centroid (flanks move most,
+## center fixed — no bunching, no fold); the X half-extent comes from the
+## baked points.
 const SCULPT_PATH := "res://data/characters/face_sculpt.json"
-const SCULPT_KEYS: Array[StringName] = [&"NoseL", &"NoseW", &"MouthW", &"Chin"]
+const SCULPT_KEYS: Array[StringName] = [&"NoseL", &"NoseW", &"MouthW", &"Chin", &"NoseBridge", &"NoseTip", &"NostrilFlare"]
 const SCULPT_STEP := 0.1
 const SCULPT_SPEC := {
-	&"NoseL": {"box": "Nose", "axis": Vector3(0, 0, 1), "mirror": false, "drive": 2, "max_cm": 1.0},
-	&"NoseW": {"box": "Nose", "axis": Vector3(1, 0, 0), "mirror": true, "drive": -1, "max_cm": 0.8},
-	&"MouthW": {"box": "Mouth", "axis": Vector3(1, 0, 0), "mirror": true, "drive": -1, "max_cm": 0.8},
-	&"Chin": {"box": "Chin", "axis": Vector3(0, -0.55, 1), "mirror": false, "drive": 2, "max_cm": 1.0},
+	&"NoseL": {"region": "Nose", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 1.0},
+	&"NoseW": {"region": "Nose", "axis": Vector3(1, 0, 0), "mirror": true, "max_cm": 0.8},
+	&"MouthW": {"region": "Mouth", "axis": Vector3(1, 0, 0), "mirror": true, "max_cm": 0.8},
+	&"Chin": {"region": "Chin", "axis": Vector3(0, -0.55, 1), "mirror": false, "max_cm": 1.0},
+	&"NoseBridge": {"region": "NoseBridge", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 1.0},
+	&"NoseTip": {"region": "NoseTip", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 0.8},
+	&"NostrilFlare": {"region": "NostrilFlare", "axis": Vector3(1, 0, 0), "mirror": true, "max_cm": 0.8},
 }
-## Open-front overhang (normalized units): the pushed tip sits ON the box
-## face (or 1mm ahead), so negatives need influence past it. Full weight in
-## the pad — past the tip there is only air, nothing to crease.
-const DRIVE_PAD := 0.5
 var _sculpt := {} # StringName sculpt key -> float cm (0.0 default)
-var _sculpt_cache := {} # gender -> boxes dict from SCULPT_PATH (lazy)
+var _sculpt_cache := {} # gender -> regions dict from SCULPT_PATH (lazy)
 
 
 func sculpt_display(key: StringName) -> String:
@@ -664,67 +667,103 @@ func reset_sculpt(key: StringName) -> void:
 	_sculpt_fused()
 
 
-## Sculpt boxes for a gender (head-local, from SCULPT_PATH). Missing file or
+## Sculpt regions for a gender (face_sculpt.json v2): region -> {pts (0.01mm
+## Vector3i set), cx (centroid x), hx (x half-extent), n}. Missing file or
 ## gender section = no sculpt (Female until its authoring pass). Lazy cache.
-func _sculpt_boxes() -> Dictionary:
+## Positions are nude-asset Head-frame meters: the fused Skin keeps them
+## bit-exact (suppression deletes, never moves; push is shader-depth only),
+## so exact quantized keys match. Deleted (suppressed) mask points simply
+## never match — coverage asserts pin the hit rate instead of failing silent.
+const SCULPT_QUANT := 100000.0
+func _sculpt_regions() -> Dictionary:
 	if _sculpt_cache.has(GENDERS[_gender]):
 		return _sculpt_cache[GENDERS[_gender]]
+	var out := {}
 	var doc: Dictionary = JsonFile.load_object(SCULPT_PATH)
-	var sec: Dictionary = (doc.get(GENDERS[_gender], {}) as Dictionary).get("boxes", {})
-	_sculpt_cache[GENDERS[_gender]] = sec
-	return sec
+	var sec: Dictionary = (doc.get(GENDERS[_gender], {}) as Dictionary).get("regions", {})
+	for region in sec:
+		var pts := {}
+		var cx := 0.0
+		var mnx := 1e9
+		var mxx := -1e9
+		var n := 0
+		for p in ((sec[region] as Dictionary).get("points", []) as Array):
+			var pa: Array = p
+			var key := Vector3i(int(round(float(pa[0]) * SCULPT_QUANT)), int(round(float(pa[1]) * SCULPT_QUANT)), int(round(float(pa[2]) * SCULPT_QUANT)))
+			if pts.has(key):
+				continue
+			pts[key] = true
+			cx += float(pa[0])
+			mnx = minf(mnx, float(pa[0]))
+			mxx = maxf(mxx, float(pa[0]))
+			n += 1
+		if n > 0:
+			out[String(region)] = {"pts": pts, "cx": cx / float(n), "hx": maxf(mxx - cx / float(n), cx / float(n) - mnx), "n": n}
+	_sculpt_cache[GENDERS[_gender]] = out
+	return out
 
 
-## Box membership with smooth edges + top taper (nose bridge spares the eyes:
-## the XZ cross-section shrinks from 1.0 at box bottom to taper_top at top).
-## drive = axis index (0/1/2) whose FRONT side stays open at full weight (the
-## pushed tip sits on the box face and must move, not fade), extended by
-## DRIVE_PAD past the face; -1 = mirror box (X ramp in the displacement, Y
-## falloff, Z clipped only — lips sit on the Z face and must not fade).
-## Falloff start (normalized): the pinned frame that freezes negative outlines
-## lives in the 0.6-1.0 band — thinning it to 0.85 puts feature edges at full
-## weight so the contour follows both ways. Still continuous (0 at the rim).
-const SMOOTH_LO := 0.85
+## Mask membership of a Head-local point (chartest gating + paint validation).
+static func sculpt_key(q: Vector3) -> Vector3i:
+	return Vector3i(int(round(q.x * SCULPT_QUANT)), int(round(q.y * SCULPT_QUANT)), int(round(q.z * SCULPT_QUANT)))
 
 
-func _sculpt_weight(q: Vector3, c: Vector3, half: Vector3, taper: float, drive: int) -> float:
-	if half.x <= 0.0 or half.y <= 0.0 or half.z <= 0.0:
-		return 0.0
-	var uy := (q.y - c.y) / half.y
-	if absf(uy) > 1.0:
-		return 0.0
-	var shrink := lerpf(1.0, taper, clampf((uy + 1.0) * 0.5, 0.0, 1.0))
-	var ux := (q.x - c.x) / (half.x * shrink)
-	var uz := (q.z - c.z) / (half.z * shrink)
-	if absf(ux) > 1.0 or absf(uy) > 1.0:
-		return 0.0
-	var fx := 1.0 - smoothstep(SMOOTH_LO, 1.0, absf(ux))
-	var fy := 1.0 - smoothstep(SMOOTH_LO, 1.0, absf(uy))
-	if drive == -1:
-		if absf(uz) > 1.0:
-			return 0.0
-		return fx * fy
-	var fz: float
-	if uz > 0.0:
-		if uz > 1.0 + DRIVE_PAD:
-			return 0.0
-		fz = 1.0 # open front (+pad): full weight, nothing to crease out there
-	elif uz < -1.0:
-		return 0.0
-	else:
-		fz = 1.0 - smoothstep(SMOOTH_LO, 1.0, absf(uz))
-	return fx * fy * fz
+func sculpt_in_region(region: String, q: Vector3) -> bool:
+	var r: Dictionary = _sculpt_regions().get(region, {})
+	if r.is_empty():
+		return false
+	return (r["pts"] as Dictionary).has(sculpt_key(q))
+
+
+## Region centroid x + x half-extent (mirror/flank math), {} when missing.
+func sculpt_region_stats(region: String) -> Dictionary:
+	var r: Dictionary = _sculpt_regions().get(region, {})
+	if r.is_empty():
+		return {}
+	return {"cx": float(r["cx"]), "hx": float(r["hx"])}
+
+
+## Mask point hit rate vs the live pristine Skin: [matched, total] per region.
+## Guards asset drift (reimport moving verts kills matches — loud, not silent).
+func sculpt_mask_coverage() -> Dictionary:
+	var out := {}
+	if _skin_pristine == null:
+		return out
+	var live := {}
+	var sk := master_skeleton()
+	var bi := sk.find_bone(&"Head") if sk != null else -1
+	if bi == -1:
+		return out
+	var inv: Transform3D = _bone_rest_world(sk, bi).affine_inverse()
+	for s in _skin_pristine.get_surface_count():
+		var pa: Array = _skin_pristine.surface_get_arrays(s)
+		for v in (pa[Mesh.ARRAY_VERTEX] as PackedVector3Array):
+			live[sculpt_key(inv * v)] = true
+	for region in _sculpt_regions():
+		var r: Dictionary = _sculpt_regions()[region]
+		var m := 0
+		for key in (r["pts"] as Dictionary):
+			if live.has(key):
+				m += 1
+		out[region] = [m, int(r["n"])]
+	return out
 
 
 ## Applies stored sculpt values to the FUSED Skin MI (model space via the live
 ## Head frame, so physics scales compose). Skin side only, eyeball surfaces
-## skipped by src name. Normals untouched (mm-scale offsets; v1 — a weld-smooth
-## recompute was tried 07/10 and reverted: it fought the authored stylized
-## normals and blotched the toon bands on advance). Tangents untouched.
-## All-zero = early-out, authored mesh byte-identical.
+## skipped by src name. Membership is mask-binary (baked Head-frame points),
+## then DIFFUSED outward over RINGS neighbor rings (x0.6 each) on EVERY
+## computed surface (brows included: a mask edge on an undiffused surface is
+## a hard cliff; diffusion only spreads in-surface displacement, it never
+## drags brows along the nose — with no brow verts in-mask, brows stay put).
+## untouched (authored stylized — 07/10 revert). All-zero = early-out,
+## authored mesh byte-identical.
+const SCULPT_RINGS := 3
+const SCULPT_DECAY := 0.6
+var _adj_cache := {} # pristine mesh rid -> Array per surface of neighbor index Arrays
 func _sculpt_fused() -> void:
-	var boxes := _sculpt_boxes()
-	if boxes.is_empty():
+	var regions := _sculpt_regions()
+	if regions.is_empty():
 		return
 	var active := []
 	for key in SCULPT_KEYS:
@@ -762,34 +801,154 @@ func _sculpt_fused() -> void:
 				out.surface_set_material(s, src_mesh.surface_get_material(s))
 				continue
 			var verts: PackedVector3Array = a[Mesh.ARRAY_VERTEX]
-			for i in verts.size():
+			var n := verts.size()
+			var qs := PackedVector3Array()
+			qs.resize(n)
+			var off := PackedVector3Array()
+			off.resize(n)
+			var wmax := PackedFloat32Array()
+			wmax.resize(n)
+			for i in n:
 				var q: Vector3 = head_inv * verts[i]
+				qs[i] = q
 				var o := Vector3.ZERO
 				for key in active:
 					var spec: Dictionary = SCULPT_SPEC[key]
-					var b: Dictionary = boxes.get(String(spec["box"]), {})
-					if b.is_empty():
+					var r: Dictionary = regions.get(String(spec["region"]), {})
+					if r.is_empty():
 						continue
-					var bca: Array = b["center"]
-					var bsa: Array = b["size"]
-					var bc := Vector3(float(bca[0]), float(bca[1]), float(bca[2]))
-					var bs := Vector3(float(bsa[0]), float(bsa[1]), float(bsa[2]))
-					var w := _sculpt_weight(q, bc, bs * 0.5, float(b.get("taper_top", 1.0)), int(spec.get("drive", -1)))
-					if w <= 0.0:
+					if not (r["pts"] as Dictionary).has(sculpt_key(q)):
 						continue
+					var w := 1.0
+					if w > wmax[i]:
+						wmax[i] = w
 					var v: float = float(_sculpt.get(key, 0.0)) / 100.0 * w
 					if bool(spec["mirror"]):
-						# Proportional widen/narrow about the center plane (no
-						# bunching, no fold: center fixed, flanks move most).
-						o.x += (q.x - bc.x) / bs.x * float(_sculpt.get(key, 0.0)) / 100.0 * 2.0 * w
+						# Proportional widen/narrow about the region centroid
+						# (no bunching, no fold: center fixed, flanks move most).
+						var hx := maxf(float(r["hx"]), 1e-9)
+						o.x += (q.x - float(r["cx"])) / hx * float(_sculpt.get(key, 0.0)) / 100.0 * w
 					else:
 						o += (spec["axis"] as Vector3).normalized() * v
-				if o != Vector3.ZERO:
-					verts[i] = head_world * (q + o)
+				off[i] = o
+			_sculpt_diffuse(off, wmax, _sculpt_adj(src_mesh, s, verts, a[Mesh.ARRAY_INDEX]))
+			for i in n:
+				if off[i] != Vector3.ZERO:
+					verts[i] = head_world * (qs[i] + off[i])
 			a[Mesh.ARRAY_VERTEX] = verts
 			out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, a)
 			out.surface_set_material(s, src_mesh.surface_get_material(s))
 		mmi.mesh = out
+
+
+## Neighbor lists per vert (shared triangles; position-welded when the
+## surface is not indexed). Built once per pristine mesh (topology never
+## changes under sculpt) and cached by mesh rid + surface. Plain Arrays, NOT
+## Packed*Array: appending to a packed array read out of a container mutates
+## a CoW copy (proven 08/10: dict/array-packed size stays 0, plain Array sticks).
+func _sculpt_adj(mesh: ArrayMesh, s: int, verts: PackedVector3Array, idx: PackedInt32Array) -> Array:
+	var key := "%d:%d" % [mesh.get_rid().get_id(), s]
+	if _adj_cache.has(key):
+		return _adj_cache[key]
+	var n := verts.size()
+	var adj := []
+	adj.resize(n)
+	for i in n:
+		adj[i] = []
+	var link := func(a: int, b: int) -> void:
+		if a == b or a < 0 or b < 0 or a >= n or b >= n:
+			return
+		if not (adj[a] as Array).has(b):
+			(adj[a] as Array).append(b)
+		if not (adj[b] as Array).has(a):
+			(adj[b] as Array).append(a)
+	if idx != null and idx.size() >= 3:
+		for t in idx.size() / 3:
+			link.call(idx[t * 3], idx[t * 3 + 1])
+			link.call(idx[t * 3 + 1], idx[t * 3 + 2])
+			link.call(idx[t * 3 + 2], idx[t * 3])
+	else:
+		var vid := {}
+		var vids := PackedInt32Array()
+		vids.resize(n)
+		for i in n:
+			if not vid.has(verts[i]):
+				vid[verts[i]] = vid.size()
+			vids[i] = int(vid[verts[i]])
+		for t in n / 3:
+			link.call(vids[t * 3], vids[t * 3 + 1])
+			link.call(vids[t * 3 + 1], vids[t * 3 + 2])
+			link.call(vids[t * 3 + 2], vids[t * 3])
+		# Weld splits back together: verts sharing a weld id are neighbors.
+		var members := {}
+		for i in n:
+			if not members.has(vids[i]):
+				members[vids[i]] = []
+			(members[vids[i]] as Array).append(i)
+		for i in n:
+			for j in (members[vids[i]] as Array):
+				link.call(i, j)
+	_adj_cache[key] = adj
+	return adj
+
+
+## Diffuses the offset field outward over SCULPT_RINGS topology rings
+## (xSCULPT_DECAY each): mask verts keep their exact offset (boundary
+## condition), others take the STRONGEST neighbor offset x decay. Max (not
+## mean): a lone core neighbor among k still verts would dilute to ~1/k and
+## leave a 9mm spike step; max follows the slope (4/2.4/1.4/2.2mm steps at
+## 10mm core — under the 5mm anti-cliff bar). Jacobi, deterministic.
+func _sculpt_diffuse(off: PackedVector3Array, wmax: PackedFloat32Array, adj: Array) -> void:
+	var n := off.size()
+	if adj.size() != n:
+		return
+	var cur := off.duplicate()
+	var nxt := off.duplicate()
+	for _r in SCULPT_RINGS:
+		nxt = cur.duplicate()
+		for i in n:
+			if wmax[i] > 0.0:
+				continue
+			var best := Vector3.ZERO
+			var best_l := 0.0
+			for j in (adj[i] as Array):
+				var l: float = cur[int(j)].length_squared()
+				if l > best_l:
+					best_l = l
+					best = cur[int(j)]
+			nxt[i] = best * SCULPT_DECAY
+		cur = nxt
+	for i in n:
+		off[i] = cur[i]
+
+
+## Max displacement step between topology neighbors on the current fused
+## Skin (vs pristine, same topology): the anti-crevasse metric. Small =
+## the rim follows instead of cliffing at the box edge.
+func sculpt_max_cliff() -> float:
+	var pris := _skin_pristine
+	if pris == null:
+		return 0.0
+	var m := 0.0
+	for mi in _avatar_mis():
+		var mmi := mi as MeshInstance3D
+		if mmi == null or mmi.mesh == null or mmi.name != &"Skin":
+			continue
+		for s in mini(mmi.mesh.get_surface_count(), pris.get_surface_count()):
+			var ca: Array = mmi.mesh.surface_get_arrays(s)
+			var pa: Array = pris.surface_get_arrays(s)
+			var cv: PackedVector3Array = ca[Mesh.ARRAY_VERTEX]
+			var pv: PackedVector3Array = pa[Mesh.ARRAY_VERTEX]
+			if cv.size() != pv.size() or cv.is_empty():
+				continue
+			var adj := _sculpt_adj(pris, s, pv, pa[Mesh.ARRAY_INDEX])
+			if adj.size() != cv.size():
+				continue
+			for i in cv.size():
+				var di: Vector3 = cv[i] - pv[i]
+				for j in (adj[i] as Array):
+					m = maxf(m, (di - (cv[j] - pv[j])).length())
+	return m
 
 
 ## Absolute bone-pose scale on the fused master (single skeleton). Bones
