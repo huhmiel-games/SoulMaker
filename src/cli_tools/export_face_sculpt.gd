@@ -46,20 +46,30 @@ func _run() -> Error:
 		regions[String(region)] = psec[region]
 	var work: Dictionary = JsonFile.load_object(WORK_PATH)
 	var wsec: Dictionary = work.get(gender, {})
+	_check_work_fingerprint(work.get("fingerprint", {}), surfs, head_inv)
 	var n_new := 0
 	for region in wsec:
-		var tris: Array = []
-		for t in ((wsec[region] as Dictionary).get("tris", []) as Array):
-			tris.append(t)
-		if tris.is_empty():
-			continue
-		var pts := resolve_points(surfs, head_inv, tris)
-		if pts.is_empty():
-			push_error("[FaceSculpt] %s resolved 0 points" % String(region))
-			return ERR_INVALID_DATA
-		regions[String(region)] = {"points": pts}
+		var rsec: Dictionary = wsec[region]
+		if (rsec.get("points", []) as Array).is_empty():
+			var tris: Array = [] # v1 fallback (tri indices, pre-migration)
+			for t in (rsec.get("tris", []) as Array):
+				tris.append(t)
+			if tris.is_empty():
+				continue
+			print("[FaceSculpt] %s: legacy tris (press P to migrate v2)" % String(region))
+			var pts := resolve_points(surfs, head_inv, tris)
+			if pts.is_empty():
+				push_error("[FaceSculpt] %s resolved 0 points" % String(region))
+				return ERR_INVALID_DATA
+			regions[String(region)] = {"points": pts}
+		else:
+			var pts := []
+			for p in (rsec["points"] as Array):
+				var pa: Array = p
+				pts.append([float(pa[0]), float(pa[1]), float(pa[2])])
+			regions[String(region)] = {"points": pts}
 		n_new += 1
-		print("[FaceSculpt] %s: %d points (painted)" % [String(region), pts.size()])
+		print("[FaceSculpt] %s: %d points (painted)" % [String(region), ((regions[String(region)] as Dictionary)["points"] as Array).size()])
 	if regions.is_empty():
 		push_error("[FaceSculpt] nothing to write")
 		return ERR_INVALID_DATA
@@ -75,6 +85,46 @@ static func nude_inst(gender: String) -> Node:
 	if packed == null:
 		return null
 	return packed.instantiate()
+
+
+## Work-file fingerprint check (export side): count drift = renumber (positions
+## still resolve — info only); bbox move > 0.5mm = verts really moved (warn,
+## painted points may float off-surface).
+static func _check_work_fingerprint(fp: Dictionary, surfs: Array, head_inv: Transform3D) -> void:
+	if fp.is_empty():
+		return
+	var told: Array = fp.get("counts", [])
+	if told.size() != surfs.size():
+		print("[FaceSculpt] fingerprint: surf count changed")
+		return
+	for si in surfs.size():
+		var e: Dictionary = surfs[si]
+		var verts: PackedVector3Array = e["verts"]
+		var want_n := int((told[si] as Array)[0])
+		var want_t := int((told[si] as Array)[1])
+		var idx: PackedInt32Array = e["idx"]
+		var have_t := idx.size() / 3 if not idx.is_empty() else verts.size() / 3
+		if want_n != verts.size() or want_t != have_t:
+			print("[FaceSculpt] fingerprint: surf %d renumbered (positions still match)" % si)
+	var tb: Array = fp.get("bbox", [])
+	if tb.size() == 2:
+		var mn := Vector3(1e9, 1e9, 1e9)
+		var mx := Vector3(-1e9, -1e9, -1e9)
+		for si in surfs.size():
+			var e2: Dictionary = surfs[si]
+			var mi := e2["mi"] as Node3D
+			for v in (e2["verts"] as PackedVector3Array):
+				var q: Vector3 = head_inv * (world_of(mi) * v)
+				mn = mn.min(q)
+				mx = mx.max(q)
+		var d := 0.0
+		for k in 3:
+			d = maxf(d, absf(float((tb[0] as Array)[k]) - [mn.x, mn.y, mn.z][k]))
+			d = maxf(d, absf(float((tb[1] as Array)[k]) - [mx.x, mx.y, mx.z][k]))
+		if d > 0.0005:
+			print("[FaceSculpt] WARNING: verts moved %.2fmm since paint — verify masks!" % (d * 1000.0))
+		else:
+			print("[FaceSculpt] fingerprint ok")
 
 
 ## Paintable surfaces in STABLE order (ancestor name path, then surface index):

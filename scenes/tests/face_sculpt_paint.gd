@@ -8,11 +8,11 @@ extends Node3D
 ## authoring-local work file.
 ## Controls:
 ##   L-click / L-drag = add triangle, R-click = delete triangle under cursor
-##   Ctrl+Z = undo (add or delete), Middle-drag = orbit,
-##   Shift+middle-drag = pan, wheel = dolly (x0.93 / x1.08)
+##   Ctrl+Z = undo (add or delete), X = symmetry on/off (mirror pick/delete),
+##   Middle-drag = orbit, Shift+middle-drag = pan, wheel = dolly (x0.93 / x1.08)
 ##   1..9 = jump to region (first nine), Tab / Shift+Tab = cycle all regions
 ##   G = grow 1 topology ring, T = shrink (drop outer ring)
-##   C = clear region, P = save work file
+##   C = clear region, P = save work file AND export shipped JSON (merge)
 ##   V = wireframe on/off, F = reframe camera on the head
 ## Diag: every click prints hit/miss + surf/tri; the HUD shows the camera
 ## target, the last pick result and the wireframe state.
@@ -23,6 +23,7 @@ extends Node3D
 const BakeLib = preload("res://src/cli_tools/export_face_sculpt.gd")
 
 const WORK_PATH := "res://scenes/tests/face_sculpt_work.json"
+const SHIPPED_PATH := "res://data/characters/face_sculpt.json"
 const REGIONS: Array[String] = [
 	"Nose", "NoseLength", "NoseBridge", "NoseTip", "NostrilFlare",
 	"Mouth", "UpperLip", "LowerLip", "MouthCorners", "MouthPout",
@@ -96,11 +97,20 @@ var _r_down := Vector2.ZERO
 var _r_moved := false
 var _wire := false
 var _wire_mode := 0 # 0 off, 1 edge overlay on skin, 2 full-viewport wireframe
+var _sym := false # mirror picks across the Head-frame x=0 plane
+var _hcen := [] # per surf: Head-frame tri centroids (mirror lookup)
 var _wire_mat: StandardMaterial3D = null
 var _wire_overlays := {} # surf index -> MeshInstance3D (all topology edges)
 var _last_pick := "no click yet"
 var _ui: CanvasLayer = null
 var _region_btns := {} # region -> Button (side panel, radio behavior)
+var _sym_btn: Button = null
+var _show_eyes := true
+var _show_brows := true
+var _eyes_btn: Button = null
+var _brows_btn: Button = null
+var _eye_mis := [] # eyeball MeshInstances (hidden to paint skin behind)
+var _brow_mis := [] # brow MeshInstances (ditto; picking follows visibility)
 
 
 func _ready() -> void:
@@ -109,7 +119,6 @@ func _ready() -> void:
 		return
 	for r in REGIONS:
 		_sel[r] = {"set": {}, "order": []}
-	_load_work()
 	var preview := get_node_or_null("MalePreview")
 	if preview == null:
 		push_error("[Paint] MalePreview missing")
@@ -118,10 +127,17 @@ func _ready() -> void:
 	if _surfs.is_empty():
 		push_error("[Paint] no paintable surfaces")
 		return
+	for e in _surfs:
+		var ed: Dictionary = e
+		var ev: PackedVector3Array = ed["verts"]
+		var ei: PackedInt32Array = ed["idx"]
+		ed["ntris"] = ei.size() / 3 if not ei.is_empty() else ev.size() / 3
 	_head_inv = _live_head_inv(preview)
+	_load_work() # after surfs + head frame (point matching needs both)
 	_build_rig()
 	_build_panel()
 	_build_pick()
+	_build_hcen()
 	_build_overlays()
 	_build_wire_overlays()
 	_refresh_all_overlays()
@@ -198,6 +214,48 @@ func _run_painttest() -> void:
 	var wseg := wire_segments(v0, i0, n0)
 	print("[PaintTest] wiresegs=%d (ntris=%d)" % [wseg.size() / 2, n0])
 	if wseg.size() % 2 != 0 or wseg.size() / 2 > 3 * n0 or wseg.size() == 0:
+		fails += 1
+	# Symmetry: mirror of an off-center tri lands across the x=0 plane.
+	_build_hcen()
+	_collect_face_mis()
+	print("[PaintTest] eyes=%d brows=%d" % [_eye_mis.size(), _brow_mis.size()])
+	if _eye_mis.is_empty() or _brow_mis.is_empty():
+		fails += 1
+	var sym_ok := false
+	var hc: PackedVector3Array = _hcen[0]
+	for ti in hc.size():
+		if absf(hc[ti].x) > 0.005:
+			var mj := _mirror_tri(0, ti)
+			if mj != ti and signf(hc[mj].x) == -signf(hc[ti].x):
+				sym_ok = true
+			break
+	print("[PaintTest] symmirror=%s" % ("ok" if sym_ok else "FAIL"))
+	if not sym_ok:
+		fails += 1
+	# Work v2 round-trip: tris -> Head points -> match -> same tris (re-export-proof).
+	_head_inv = _live_head_inv(preview)
+	var rt_pts := []
+	for ti in [5, 6, 7]:
+		for kk in _tri_keys(0, ti):
+			var qk: Vector3i = kk
+			rt_pts.append([float(qk.x) / WQUANT, float(qk.y) / WQUANT, float(qk.z) / WQUANT])
+	_match_points("NoseTip", rt_pts)
+	var rt: Array = (_sel["NoseTip"] as Dictionary)["order"]
+	var rtset := {}
+	for t in rt:
+		rtset["%d:%d" % [int(t[0]), int(t[1])]] = true
+	# Superset allowed: degenerate twin tris (same 3 verts) legitimately join.
+	var rt_ok := rtset.has("0:5") and rtset.has("0:6") and rtset.has("0:7")
+	print("[PaintTest] roundtrip=%s" % ("ok" if rt_ok else "FAIL " + str(rtset)))
+	if not rt_ok:
+		fails += 1
+	# Save+Export merge on a temp path: painted regions land, others kept.
+	_export_shipped("/tmp/opencode/painttest_shipped.json")
+	var merged: Dictionary = JsonFile.load_object("/tmp/opencode/painttest_shipped.json")
+	var bsec: Dictionary = (merged.get(GENDER, {}) as Dictionary).get("regions", {})
+	var ex_ok := (bsec.get("NoseTip", {}) as Dictionary).has("points")
+	print("[PaintTest] exportmerge=%s" % ("ok" if ex_ok else "FAIL"))
+	if not ex_ok:
 		fails += 1
 	print("[PaintTest] %d FAIL" % fails)
 	get_tree().quit(fails)
@@ -307,11 +365,17 @@ func _build_panel() -> void:
 		_region_btns[REGIONS[i]] = b
 	var sep := HSeparator.new()
 	col.add_child(sep)
-	for a in [["+ Grow", _grow], ["- Shrink", _shrink], ["Clear", _clear], ["Undo", _undo_pop], ["Save work", _save_work], ["Wireframe", _toggle_wire], ["Reframe", _reframe]]:
+	for a in [["+ Grow", _grow], ["- Shrink", _shrink], ["Clear", _clear], ["Undo", _undo_pop], ["Symmetry", _toggle_sym], ["Eyes", _toggle_eyes], ["Brows", _toggle_brows], ["Save + Export", _save_work], ["Wireframe", _toggle_wire], ["Reframe", _reframe]]:
 		var ab := Button.new()
 		ab.text = String(a[0])
 		ab.pressed.connect(a[1] as Callable)
 		col.add_child(ab)
+		if String(a[0]) == "Symmetry":
+			_sym_btn = ab
+		elif String(a[0]) == "Eyes":
+			_eyes_btn = ab
+		elif String(a[0]) == "Brows":
+			_brows_btn = ab
 	_refresh_region_btns()
 
 
@@ -390,6 +454,12 @@ func _refresh_region_btns() -> void:
 			continue
 		b.text = "%s (%d)" % [r, _tri_count_of(r)]
 		b.button_pressed = (REGIONS[_region] == r)
+	if _sym_btn != null:
+		_sym_btn.text = "Symmetry: %s" % ("ON" if _sym else "OFF")
+	if _eyes_btn != null:
+		_eyes_btn.text = "Eyes: %s" % ("ON" if _show_eyes else "OFF")
+	if _brows_btn != null:
+		_brows_btn.text = "Brows: %s" % ("ON" if _show_brows else "OFF")
 
 
 func _update_cam() -> void:
@@ -402,7 +472,50 @@ func _update_cam() -> void:
 	_cam.look_at(_target)
 
 
+## Eyeball + brow MeshInstances under the preview (masqueraders over the skin
+## behind: eyeballs swallow lid clicks visually, brow hair covers brow skin).
+func _collect_face_mis() -> void:
+	_eye_mis.clear()
+	_brow_mis.clear()
+	var preview := get_node_or_null("MalePreview")
+	if preview == null:
+		return
+	for mi in preview.find_children("*", "MeshInstance3D", true, false):
+		var nm := String((mi as Node).name).to_lower()
+		if nm.contains("brow"):
+			_brow_mis.append(mi)
+		elif nm.contains("eye"):
+			_eye_mis.append(mi)
+	print("[Paint] eyes=%d brows=%d" % [_eye_mis.size(), _brow_mis.size()])
+
+
+func _apply_mi_vis() -> void:
+	for mi in _eye_mis:
+		(mi as MeshInstance3D).visible = _show_eyes
+	for mi in _brow_mis:
+		(mi as MeshInstance3D).visible = _show_brows
+	# Brows are paintable: hidden brows must not stay clickable.
+	for si in _surfs.size():
+		var e: Dictionary = _surfs[si]
+		var mi := e["mi"] as MeshInstance3D
+		if String(mi.name).to_lower().contains("brow"):
+			(e["cs"] as CollisionShape3D).set_deferred("disabled", not _show_brows)
+
+
+func _toggle_eyes() -> void:
+	_show_eyes = not _show_eyes
+	_apply_mi_vis()
+	_update_hud()
+
+
+func _toggle_brows() -> void:
+	_show_brows = not _show_brows
+	_apply_mi_vis()
+	_update_hud()
+
+
 func _build_pick() -> void:
+	_collect_face_mis()
 	var body := StaticBody3D.new()
 	body.name = "PickBody"
 	add_child(body)
@@ -428,8 +541,10 @@ func _build_pick() -> void:
 		cs.global_transform = (e["mi"] as Node3D).global_transform
 		e["rid"] = shape.get_rid()
 		e["ntris"] = ntris
+		e["cs"] = cs
 		e["centroids"] = centroids_of(verts, idx, ntris)
 		print("[Paint] pick surf=%d tris=%d" % [si, ntris])
+	_apply_mi_vis()
 	_build_adj()
 
 
@@ -445,6 +560,48 @@ static func centroids_of(verts: PackedVector3Array, idx: PackedInt32Array, ntris
 			c += verts[vi]
 		cen.append(c / 3.0)
 	return cen
+
+
+func _build_hcen() -> void:
+	_hcen.clear()
+	for si in _surfs.size():
+		var e: Dictionary = _surfs[si]
+		var verts: PackedVector3Array = e["verts"]
+		var idx: PackedInt32Array = e["idx"]
+		var mi := e["mi"] as Node3D
+		var cen := PackedVector3Array()
+		for ti in int(e["ntris"]):
+			var c := Vector3.ZERO
+			for k in 3:
+				var vi := ti * 3 + k
+				if not idx.is_empty():
+					vi = idx[ti * 3 + k]
+				c += verts[vi]
+			cen.append(_head_inv * (mi.global_transform * (c / 3.0)))
+		_hcen.append(cen)
+
+
+## Mirror tri across the Head-frame sagittal plane (nearest centroid to the
+## mirrored point, same surface). Returns ti itself when central/isolated.
+func _mirror_tri(si: int, ti: int) -> int:
+	var cen: PackedVector3Array = _hcen[si]
+	var m := Vector3(-cen[ti].x, cen[ti].y, cen[ti].z)
+	var best := ti
+	var best_d := 0.000025 # 5mm guard: no jump across the face
+	for cj in cen.size():
+		if cj == ti:
+			continue
+		var d: float = (cen[cj] - m).length_squared()
+		if d < best_d:
+			best_d = d
+			best = cj
+	return best
+
+
+func _toggle_sym() -> void:
+	_sym = not _sym
+	_update_hud()
+	print("[Paint] symmetry %s" % ("ON" if _sym else "off"))
 
 
 func _build_adj() -> void:
@@ -494,6 +651,19 @@ func _add_tri(si: int, ti: int, ring: int) -> bool:
 	(st["order"] as Array).append([si, ti])
 	_refresh_overlay(si)
 	return true
+
+
+## Adds a tri (+ its sagittal mirror when symmetry is on). Returns added
+## pairs (for single-entry undo).
+func _add_symmetric(si: int, ti: int, ring: int) -> Array:
+	var added := []
+	if _add_tri(si, ti, ring):
+		added.append([si, ti])
+	if _sym:
+		var mj := _mirror_tri(si, ti)
+		if mj != ti and _add_tri(si, mj, ring):
+			added.append([si, mj])
+	return added
 
 
 func _push_undo(e: Dictionary) -> void:
@@ -548,14 +718,25 @@ func _delete_at(mp: Vector2) -> void:
 		print("[Paint] R-click on unselected tri")
 		return
 	var ring := int((st["set"] as Dictionary)[k])
+	var gone := [[int(h[0]), int(h[1]), ring]]
 	(st["set"] as Dictionary).erase(k)
+	if _sym:
+		var mj := _mirror_tri(int(h[0]), int(h[1]))
+		var mk := _key(int(h[0]), mj)
+		if mj != int(h[1]) and (st["set"] as Dictionary).has(mk):
+			gone.append([int(h[0]), mj, int((st["set"] as Dictionary)[mk])])
+			(st["set"] as Dictionary).erase(mk)
 	var order: Array = st["order"]
-	for i in order.size():
-		var ta: Array = order[i]
-		if _key(int(ta[0]), int(ta[1])) == k:
-			order.remove_at(i)
-			break
-	_push_undo({"del": [[int(h[0]), int(h[1]), ring]]})
+	var gone_keys := {}
+	for g in gone:
+		gone_keys[_key(int(g[0]), int(g[1]))] = true
+	var kept := []
+	for t in order:
+		var ta: Array = t
+		if not gone_keys.has(_key(int(ta[0]), int(ta[1]))):
+			kept.append(t)
+	st["order"] = kept
+	_push_undo({"del": gone})
 	_refresh_overlay(int(h[0]))
 	_update_hud()
 
@@ -587,8 +768,8 @@ func _grow() -> void:
 			if not idx.is_empty():
 				key = vi
 			for nb in ((_adj[int(ta[0])] as Dictionary).get(key, []) as Array):
-				if _add_tri(int(ta[0]), nb, ring):
-					added.append([int(ta[0]), nb])
+				for pair in _add_symmetric(int(ta[0]), nb, ring):
+					added.append(pair)
 	if not added.is_empty():
 		_push_undo({"add": added})
 		print("[Paint] grew +%d tris" % added.size())
@@ -678,7 +859,7 @@ func _update_hud() -> void:
 	_refresh_region_btns()
 	if _label == null:
 		return
-	_label.text = "region %d/%d %s (%d tris) | target %s | last: %s | wire %s\nL add R del-at-cursor Ctrl+Z undo | Mid orbit Shift+Mid pan wheel zoom | G/T grow/shrink C clear P save | V wire F reframe" % [_region + 1, REGIONS.size(), REGIONS[_region], _tri_count(), str(_target), _last_pick, (["OFF", "WIRE", "FULL"] as Array)[_wire_mode]]
+	_label.text = "region %d/%d %s (%d tris) | target %s | last: %s | wire %s sym %s\nL add R del-at-cursor Ctrl+Z undo | Mid orbit Shift+Mid pan wheel zoom | G/T grow/shrink X sym C clear P save+export | V wire F reframe" % [_region + 1, REGIONS.size(), REGIONS[_region], _tri_count(), str(_target), _last_pick, (["OFF", "WIRE", "FULL"] as Array)[_wire_mode], ("ON" if _sym else "off")]
 
 
 func _pick(mp: Vector2) -> Array:
@@ -798,8 +979,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			if mb.pressed:
 				var h := _pick(mb.position)
 				if not h.is_empty():
-					if _add_tri(int(h[0]), int(h[1]), 0):
-						_push_undo({"add": [[int(h[0]), int(h[1])]]})
+					var added := _add_symmetric(int(h[0]), int(h[1]), 0)
+					if not added.is_empty():
+						_push_undo({"add": added})
 		elif mb.button_index == MOUSE_BUTTON_RIGHT:
 			if mb.pressed:
 				_r_down = mb.position
@@ -818,8 +1000,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		if _l_held:
 			var h := _pick(mm.position)
 			if not h.is_empty():
-				if _add_tri(int(h[0]), int(h[1]), 0):
-					_push_undo({"add": [[int(h[0]), int(h[1])]]})
+				var added := _add_symmetric(int(h[0]), int(h[1]), 0)
+				if not added.is_empty():
+					_push_undo({"add": added})
 		elif Input.is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE):
 			if Input.is_key_pressed(KEY_SHIFT):
 				var right := _cam.global_transform.basis.x
@@ -856,6 +1039,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_G:
 				_grow()
 				_update_hud()
+			KEY_X:
+				_toggle_sym()
 			KEY_T:
 				_shrink()
 				_update_hud()
@@ -885,19 +1070,162 @@ func _reframe() -> void:
 func _load_work() -> void:
 	var work: Dictionary = JsonFile.load_object(WORK_PATH)
 	var wsec: Dictionary = work.get(GENDER, {})
+	var ver := int(work.get("version", 1))
+	_check_fingerprint(work.get("fingerprint", {}))
 	for region in REGIONS:
-		var tris: Array = (wsec.get(region, {}) as Dictionary).get("tris", [])
-		for t in tris:
-			var ta: Array = t
-			((_sel[region] as Dictionary)["order"] as Array).append([int(ta[0]), int(ta[1])])
-			((_sel[region] as Dictionary)["set"] as Dictionary)[_key(int(ta[0]), int(ta[1]))] = 0
+		var rsec: Dictionary = wsec.get(region, {})
+		if ver >= 2 and rsec.has("points"):
+			_match_points(region, rsec["points"])
+		else:
+			var tris: Array = rsec.get("tris", [])
+			if not tris.is_empty():
+				print("[Paint] %s: legacy tri indices (press P to migrate v2)" % region)
+			for t in tris:
+				var ta: Array = t
+				var si := int(ta[0])
+				var ti := int(ta[1])
+				if si < 0 or si >= _surfs.size():
+					continue
+				var ev: PackedVector3Array = (_surfs[si] as Dictionary)["verts"]
+				var ei: PackedInt32Array = (_surfs[si] as Dictionary)["idx"]
+				var ntris := ei.size() / 3 if not ei.is_empty() else ev.size() / 3
+				if ti < 0 or ti >= ntris:
+					continue
+				((_sel[region] as Dictionary)["order"] as Array).append([si, ti])
+				((_sel[region] as Dictionary)["set"] as Dictionary)[_key(si, ti)] = 0
+
+
+## Work-file quant grid (matches the exporter: 0.01mm, re-export-proof).
+const WQUANT := 100000.0
+
+
+static func _qkey(q: Vector3) -> Vector3i:
+	return Vector3i(int(round(q.x * WQUANT)), int(round(q.y * WQUANT)), int(round(q.z * WQUANT)))
+
+
+## Head-frame quantized keys of a tri's 3 verts (save + match share this).
+func _tri_keys(si: int, ti: int) -> Array:
+	var e: Dictionary = _surfs[si]
+	var verts: PackedVector3Array = e["verts"]
+	var idx: PackedInt32Array = e["idx"]
+	var mi := e["mi"] as Node3D
+	var out := []
+	for k in 3:
+		var vi := ti * 3 + k
+		if not idx.is_empty():
+			vi = idx[ti * 3 + k]
+		out.append(_qkey(_head_inv * (mi.global_transform * verts[vi])))
+	return out
+
+
+## Rebuilds a region selection from Head-frame points: a tri joins iff all 3
+## verts match (exact painted tri, no straddlers). Renumber-proof: only
+## positions matter, never indices.
+func _match_points(region: String, points: Array) -> void:
+	var want := {}
+	for p in points:
+		var pa: Array = p
+		want[Vector3i(int(round(float(pa[0]) * WQUANT)), int(round(float(pa[1]) * WQUANT)), int(round(float(pa[2]) * WQUANT)))] = true
+	var n := 0
+	for si in _surfs.size():
+		var e: Dictionary = _surfs[si]
+		var ntris := int(e["ntris"])
+		for ti in ntris:
+			var keys := _tri_keys(si, ti)
+			if want.has(keys[0]) and want.has(keys[1]) and want.has(keys[2]):
+				((_sel[region] as Dictionary)["order"] as Array).append([si, ti])
+				((_sel[region] as Dictionary)["set"] as Dictionary)[_key(si, ti)] = 0
+				n += 1
+	print("[Paint] %s matched %d tris from points" % [region, n])
+
+
+## Mesh fingerprint (surf vert/tri counts + Head-frame bbox): renumbering keeps
+## it (counts identical, bbox identical) while moved verts trip the bbox term.
+func _fingerprint() -> Dictionary:
+	var counts := []
+	var mn := Vector3(1e9, 1e9, 1e9)
+	var mx := Vector3(-1e9, -1e9, -1e9)
+	for si in _surfs.size():
+		var e: Dictionary = _surfs[si]
+		var verts: PackedVector3Array = e["verts"]
+		var mi := e["mi"] as Node3D
+		counts.append([verts.size(), int(e["ntris"])])
+		for v in verts:
+			var q: Vector3 = _head_inv * (mi.global_transform * v)
+			mn = mn.min(q)
+			mx = mx.max(q)
+	return {"counts": counts, "bbox": [[mn.x, mn.y, mn.z], [mx.x, mx.y, mx.z]]}
+
+
+## Compares the stored fingerprint: count drift = renumber (auto, silent);
+## bbox move > 0.5mm = verts really moved (loud warn, verify paint).
+func _check_fingerprint(fp: Dictionary) -> void:
+	if fp.is_empty():
+		return
+	var now := _fingerprint()
+	var told: Array = fp.get("counts", [])
+	var cur: Array = now["counts"]
+	if told.size() != cur.size():
+		print("[Paint] fingerprint: surf count changed (re-export?)")
+		return
+	for i in told.size():
+		if (told[i] as Array) != (cur[i] as Array):
+			print("[Paint] fingerprint: surf %d renumbered %s -> %s (positions still match)" % [i, str(told[i]), str(cur[i])])
+	var tb: Array = fp.get("bbox", [])
+	var cb: Array = now["bbox"]
+	if tb.size() == 2:
+		var d := 0.0
+		for k in 3:
+			d = maxf(d, absf(float((tb[0] as Array)[k]) - float((cb[0] as Array)[k])))
+			d = maxf(d, absf(float((tb[1] as Array)[k]) - float((cb[1] as Array)[k])))
+		if d > 0.0005:
+			print("[Paint] WARNING: verts moved %.2fmm since save — verify paint!" % (d * 1000.0))
+		else:
+			print("[Paint] fingerprint ok (renumber-proof)")
+
+
+## Head-frame meter points of a region's selected tris (deduped). Single
+## resolve used by work save AND shipped export (never diverge).
+func _region_points(region: String) -> Array:
+	var seen := {}
+	var pts := []
+	for t in ((_sel[region] as Dictionary)["order"] as Array):
+		for key in _tri_keys(int(t[0]), int(t[1])):
+			var kk: Vector3i = key
+			if seen.has(kk):
+				continue
+			seen[kk] = true
+			pts.append([float(kk.x) / WQUANT, float(kk.y) / WQUANT, float(kk.z) / WQUANT])
+	return pts
 
 
 func _save_work() -> void:
 	var wsec := {}
 	for region in REGIONS:
-		var order: Array = ((_sel[region] as Dictionary)["order"] as Array).duplicate()
-		order.sort()
-		wsec[region] = {"tris": order}
-	var err := JsonFile.save_atomic(WORK_PATH, {"version": 1, GENDER: wsec})
-	print("[Paint] work saved (%s)" % ("OK" if err == OK else ("ERR %d" % err)))
+		var pts := _region_points(region)
+		if not pts.is_empty():
+			wsec[region] = {"points": pts}
+	var err := JsonFile.save_atomic(WORK_PATH, {"version": 2, GENDER: wsec, "fingerprint": _fingerprint()})
+	print("[Paint] work saved v2 (%s)" % ("OK" if err == OK else ("ERR %d" % err)))
+	if err == OK:
+		_export_shipped()
+
+
+## Save+Export: work regions merge into the shipped artifact (unpainted regions
+## kept — never wipes a hand mask). Same resolve as _save_work, so P needs no
+## CLI step; the headless exporter stays for CI/automation.
+func _export_shipped(path: String = SHIPPED_PATH) -> void:
+	var prev: Dictionary = JsonFile.load_object(path)
+	var psec: Dictionary = (prev.get(GENDER, {}) as Dictionary).get("regions", {})
+	var regions := {}
+	for region in psec:
+		regions[String(region)] = psec[region]
+	var n_new := 0
+	for region in REGIONS:
+		var pts := _region_points(region)
+		if pts.is_empty():
+			continue
+		regions[region] = {"points": pts}
+		n_new += 1
+	var err := JsonFile.save_atomic(path, {"version": 2, GENDER: {"regions": regions}})
+	print("[Paint] exported %s (%d regions, %d repainted)" % [path, regions.size(), n_new] + (" OK" if err == OK else (" ERR %d" % err)))

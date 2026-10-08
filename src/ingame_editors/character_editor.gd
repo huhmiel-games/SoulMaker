@@ -275,15 +275,15 @@ var _face_saved := {} # empty, or {pos: Vector3, arm: float}
 
 
 func on_menu_level(level: int) -> void:
-	if level == CharacterMenu.LEVEL_HAIR or level == CharacterMenu.LEVEL_EYEBROWS or level == CharacterMenu.LEVEL_EYES or level == CharacterMenu.LEVEL_BEARD or level == CharacterMenu.LEVEL_FACE:
+	if level == CharacterMenu.LEVEL_HAIR or level == CharacterMenu.LEVEL_EYEBROWS or level == CharacterMenu.LEVEL_EYES or level == CharacterMenu.LEVEL_BEARD or CharacterMenu.is_face_level(level):
 		face_push()
 	else:
 		face_pop()
 	# Sculpt judging needs a still face: pause the preview advance on the Face
-	# level (idle preview only — the animtest probe keeps running), snap to
+	# hub and subs (idle preview only — the animtest probe keeps running), snap to
 	# take start on entry, resume on leave. The flag survives rebuilds
 	# (_restart_preview_anim only replays; _anim_paused still gates advance).
-	var want_pause := level == CharacterMenu.LEVEL_FACE and _idle_only
+	var want_pause := CharacterMenu.is_face_level(level) and _idle_only
 	if want_pause and not _anim_paused and _anim_player != null:
 		_anim_player.seek(0.0, true)
 	_anim_paused = want_pause
@@ -1101,9 +1101,31 @@ func _run_headless_test() -> void:
 	fails += _expect("face length clamped", face_shape_display(&"Length") == "90%")
 	reset_face_shape(&"Length")
 	_menu._push(CharacterMenu.LEVEL_FACE)
-	fails += _expect("menu face rows", _menu._entries.size() == CharacterAvatar.FACE_KEYS.size() + CharacterAvatar.SCULPT_KEYS.size() + 1)
-	fails += _expect("face cam on face", face_active())
+	fails += _expect("menu face hub 7+back", _menu._entries.size() == CharacterMenu.FACE_SUBS.size() + 1)
+	fails += _expect("face cam on hub", face_active())
 	fails += _expect("face pauses idle", _anim_paused == _idle_only)
+	# Each sub: its rows + Back; Back returns to the hub (two-level Back).
+	_menu._push(CharacterMenu.LEVEL_FACE_GLOBAL)
+	fails += _expect("menu face global rows", _menu._entries.size() == CharacterAvatar.FACE_KEYS.size() + 1)
+	fails += _expect("face cam on sub", face_active())
+	_menu._pop()
+	fails += _expect("menu back to hub", _menu._level == CharacterMenu.LEVEL_FACE and _menu._entries.size() == CharacterMenu.FACE_SUBS.size() + 1)
+	fails += _expect("face cam stays on hub", face_active())
+	_menu._push(CharacterMenu.LEVEL_FACE_NOSE)
+	fails += _expect("menu face nose rows", _menu._entries.size() == 5 + 1)
+	_menu._pop()
+	_menu._push(CharacterMenu.LEVEL_FACE_MOUTH)
+	fails += _expect("menu face mouth rows", _menu._entries.size() == 1 + 1)
+	_menu._pop()
+	_menu._push(CharacterMenu.LEVEL_FACE_JAW)
+	fails += _expect("menu face jaw rows", _menu._entries.size() == 1 + 1)
+	_menu._pop()
+	for empty_sub in [CharacterMenu.LEVEL_FACE_EYES, CharacterMenu.LEVEL_FACE_CHEEKS, CharacterMenu.LEVEL_FACE_FOREHEAD]:
+		_menu._push(empty_sub)
+		fails += _expect("menu face sub back-only %d" % empty_sub, _menu._entries.size() == 1)
+		fails += _expect("face cam on empty sub", face_active())
+		_menu._pop()
+		fails += _expect("menu back to hub %d" % empty_sub, _menu._level == CharacterMenu.LEVEL_FACE)
 	_menu._pop()
 	fails += _expect("face cam off face", not face_active())
 	fails += _expect("face resumes", not _anim_paused)
@@ -1171,16 +1193,16 @@ func _run_headless_test() -> void:
 	# 16. Mask migration (08/10, regions v2): every baked point resolves on the
 	# live pristine (asset-drift guard — a reimport moving verts fails loud).
 	var cov := _avatar.sculpt_mask_coverage()
-	for region in ["Nose", "Mouth", "Chin"]:
+	for region in ["Nose", "Mouth", "Chin", "NoseBridge", "NoseTip", "NostrilFlare"]:
 		var cc: Array = cov.get(region, [0, 0])
 		fails += _expect("sculpt mask %s resolves" % region, int(cc[1]) > 0 and float(cc[0]) / float(cc[1]) > 0.9)
-	# 17. Unpainted rows (NoseBridge/NoseTip/NostrilFlare masks pending) are
-	# inert: adjust moves nothing, reset restores.
+	# 17. Painted detail rows move their mask and restore to zero.
 	for nk in [&"NoseBridge", &"NoseTip", &"NostrilFlare"]:
 		reset_face_sculpt(nk)
 		adjust_face_sculpt(nk, 10)
-		fails += _expect("sculpt %s inert" % String(nk), _avatar.sculpt_max_cliff() < 1e-9)
+		fails += _expect("sculpt %s moves" % String(nk), _avatar.sculpt_max_cliff() > 1e-9)
 		reset_face_sculpt(nk)
+		fails += _expect("sculpt %s restores" % String(nk), _avatar.sculpt_max_cliff() < 1e-9)
 	# No stowaway meshes: every visible MI lives directly under Fused
 	# (Skin/Cloths) or a Hair/Beard holder — never under a skeleton (the
 	# 08/10 ghost: nude MIs dragged along with the reparented master).

@@ -640,13 +640,13 @@ const SCULPT_PATH := "res://data/characters/face_sculpt.json"
 const SCULPT_KEYS: Array[StringName] = [&"NoseL", &"NoseW", &"MouthW", &"Chin", &"NoseBridge", &"NoseTip", &"NostrilFlare"]
 const SCULPT_STEP := 0.1
 const SCULPT_SPEC := {
-	&"NoseL": {"region": "Nose", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 1.0},
-	&"NoseW": {"region": "Nose", "axis": Vector3(1, 0, 0), "mirror": true, "max_cm": 0.8},
-	&"MouthW": {"region": "Mouth", "axis": Vector3(1, 0, 0), "mirror": true, "max_cm": 0.8},
-	&"Chin": {"region": "Chin", "axis": Vector3(0, -0.55, 1), "mirror": false, "max_cm": 1.0},
-	&"NoseBridge": {"region": "NoseBridge", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 1.0},
-	&"NoseTip": {"region": "NoseTip", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 0.8},
-	&"NostrilFlare": {"region": "NostrilFlare", "axis": Vector3(1, 0, 0), "mirror": true, "max_cm": 0.8},
+	&"NoseL": {"region": "Nose", "menu": "nose", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 1.0},
+	&"NoseW": {"region": "Nose", "menu": "nose", "axis": Vector3(1, 0, 0), "mirror": true, "max_cm": 0.8},
+	&"MouthW": {"region": "Mouth", "menu": "mouth", "axis": Vector3(1, 0, 0), "mirror": true, "max_cm": 0.8},
+	&"Chin": {"region": "Chin", "menu": "jaw", "axis": Vector3(0, -0.55, 1), "mirror": false, "max_cm": 1.0},
+	&"NoseBridge": {"region": "NoseBridge", "menu": "nose", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 1.0},
+	&"NoseTip": {"region": "NoseTip", "menu": "nose", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 0.8},
+	&"NostrilFlare": {"region": "NostrilFlare", "menu": "nose", "axis": Vector3(1, 0, 0), "mirror": true, "max_cm": 0.8},
 }
 var _sculpt := {} # StringName sculpt key -> float cm (0.0 default)
 var _sculpt_cache := {} # gender -> regions dict from SCULPT_PATH (lazy)
