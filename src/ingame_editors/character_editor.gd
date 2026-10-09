@@ -389,6 +389,10 @@ func eyebrow_display() -> String:
 	return _avatar.eyebrow_display()
 
 
+func eyebrow_file(gender: String, style: StringName) -> String:
+	return _avatar.eyebrow_file(gender, style)
+
+
 func adjust_eyebrow(dir: int) -> void:
 	_avatar.adjust_eyebrow(dir)
 
@@ -399,6 +403,14 @@ func reset_eyebrow() -> void:
 
 func eye_display() -> String:
 	return _avatar.eye_display()
+
+
+func eye_file(gender: String, style: StringName) -> String:
+	return _avatar.eye_file(gender, style)
+
+
+func eyelash_file(gender: String, style: StringName) -> String:
+	return _avatar.eyelash_file(gender, style)
 
 
 func adjust_eye(dir: int) -> void:
@@ -939,6 +951,14 @@ func _run_headless_test() -> void:
 	fails += _expect("body outfit kept", slot_display(&"Body") == "Ranger")
 	fails += _expect("female avatar fused", _avatar_mi() != null and _avatar_src_has("SuperHero"))
 	fails += _expect("female hands kept", _avatar_finger_verts() > 100)
+	# Both nudes skip brows/eyes at import; only male ships part files yet:
+	# female has no brows/eyes at all until its export pass (pinned gap).
+	fails += _expect("female brow absent", _slot_mats(&"Eyebrows").is_empty())
+	fails += _expect("female eyes absent", _slot_mats(&"Eyes").is_empty())
+	fails += _expect("female lashes absent", _slot_mats(&"Eyelashes").is_empty())
+	fails += _expect("female brow no file", eyebrow_file("Female", &"Default").is_empty())
+	fails += _expect("female eyes no file", eye_file("Female", &"Default").is_empty())
+	fails += _expect("female lashes no file", eyelash_file("Female", &"Default").is_empty())
 	_avatar._outfit[&"Body"] = 2
 	_apply_nude()
 	_rebuild_avatar()
@@ -951,7 +971,10 @@ func _run_headless_test() -> void:
 	fails += _expect("male avatar fused", _avatar_mi() != null and _avatar_surf_count() > 1)
 	fails += _expect("male hands kept", _avatar_finger_verts() > 100)
 	fails += _expect("skin push on", _avatar_push("SuperHero") > 0.01)
-	fails += _expect("eyes push uniform", is_equal_approx(_avatar_push("Eyes"), _avatar_push("SuperHero")))
+	# Male nude skips brows/eyes at import: the mounted parts stand in.
+	fails += _expect("male brows mounted", get_node_or_null("Avatar/Eyebrows/Male_Eyebrows") != null)
+	fails += _expect("male eyes mounted", get_node_or_null("Avatar/Eyes/Male_Eyes") != null)
+	fails += _expect("male lashes mounted", get_node_or_null("Avatar/Eyelashes/Male_Eyelashes") != null)
 	fails += _expect("fitkit default on", use_fitkit or "--nofit" in OS.get_cmdline_user_args() or "--nofit" in OS.get_cmdline_args())
 	fails += _expect("stages default on", (not no_suppress) or "--nosuppress" in OS.get_cmdline_user_args() or "--nosuppress" in OS.get_cmdline_args())
 	fails += _expect("fitkit cfg male legs", not FitKit.cfg_for(&"Legs", 0).is_empty())
@@ -1157,11 +1180,25 @@ func _run_headless_test() -> void:
 	fails += _expect("face cam on hair", face_active())
 	_menu._pop()
 	fails += _expect("face cam off hair", not face_active())
-	# 7. Eyebrows (single style prepared, own color slot, face cam).
+	# 7. Eyebrows (mounted male part, fused female fallback, own color slot, face cam).
 	fails += _expect("brow style default", eyebrow_display() == "Default")
 	adjust_eyebrow(1)
 	fails += _expect("brow style single", eyebrow_display() == "Default")
 	reset_eyebrow()
+	fails += _expect("brow file male", eyebrow_file("Male", &"Default").ends_with("Male_Eyebrows.gltf"))
+	var bmi2 := get_node_or_null("Avatar/Eyebrows/Male_Eyebrows") as MeshInstance3D
+	fails += _expect("brow mounted", bmi2 != null and bmi2.mesh != null)
+	fails += _expect("brow on master", bmi2 != null and hmaster != null and bmi2.get_node_or_null(bmi2.skeleton) == hmaster)
+	var browhead := true
+	if bmi2 != null and bmi2.mesh != null:
+		for s in bmi2.mesh.get_surface_count():
+			var barr := bmi2.mesh.surface_get_arrays(s)
+			var bbi: PackedInt32Array = barr[Mesh.ARRAY_BONES]
+			var bbw: PackedFloat32Array = barr[Mesh.ARRAY_WEIGHTS]
+			for i in bbw.size():
+				if bbw[i] > 0.0 and bbi[i] != hidx:
+					browhead = false
+	fails += _expect("brow 100pct head", hidx != -1 and browhead)
 	var brow_mats := _slot_mats(&"Eyebrows")
 	var shared := false
 	for m in brow_mats:
@@ -1197,11 +1234,25 @@ func _run_headless_test() -> void:
 	fails += _expect("skin hue written", is_equal_approx(float((_slot_mats(&"Skin")[0] as ShaderMaterial).get_shader_parameter("hue_shift_deg")), 40.0))
 	_dresser._confirm()
 	fails += _expect("skin color stored", _avatar._color_params.has(&"Skin"))
-	# 9. Eyes submenu (single style prepared, own color slot, hue-shift).
+	# 9. Eyes submenu (mounted male part, fused female fallback, hue-shift).
 	fails += _expect("eye style default", eye_display() == "Default")
 	adjust_eye(1)
 	fails += _expect("eye style single", eye_display() == "Default")
 	reset_eye()
+	fails += _expect("eye file male", eye_file("Male", &"Default").ends_with("Male_Eyes.gltf"))
+	var emi := get_node_or_null("Avatar/Eyes/Male_Eyes") as MeshInstance3D
+	fails += _expect("eyes mounted", emi != null and emi.mesh != null)
+	fails += _expect("eyes on master", emi != null and hmaster != null and emi.get_node_or_null(emi.skeleton) == hmaster)
+	var eyehead := true
+	if emi != null and emi.mesh != null:
+		for s in emi.mesh.get_surface_count():
+			var earr := emi.mesh.surface_get_arrays(s)
+			var ebi: PackedInt32Array = earr[Mesh.ARRAY_BONES]
+			var ebw: PackedFloat32Array = earr[Mesh.ARRAY_WEIGHTS]
+			for i in ebw.size():
+				if ebw[i] > 0.0 and ebi[i] != hidx:
+					eyehead = false
+	fails += _expect("eyes 100pct head", hidx != -1 and eyehead)
 	var eye_mats := _slot_mats(&"Eyes")
 	var eye_shared := false
 	for m in eye_mats:
@@ -1220,6 +1271,29 @@ func _run_headless_test() -> void:
 	fails += _expect("face cam on eyes", face_active())
 	_menu._pop()
 	fails += _expect("face cam off eyes", not face_active())
+	# 9b. Eyelashes (mounted male part, no nude counterpart, no menu: albedo
+	# defaults like hair; female ships no file yet).
+	fails += _expect("lash file male", eyelash_file("Male", &"Default").ends_with("Male_Eyelashes.gltf"))
+	var lmi := get_node_or_null("Avatar/Eyelashes/Male_Eyelashes") as MeshInstance3D
+	fails += _expect("lashes mounted", lmi != null and lmi.mesh != null)
+	fails += _expect("lashes on master", lmi != null and hmaster != null and lmi.get_node_or_null(lmi.skeleton) == hmaster)
+	var lashhead := true
+	if lmi != null and lmi.mesh != null:
+		for s in lmi.mesh.get_surface_count():
+			var larr := lmi.mesh.surface_get_arrays(s)
+			var lbi: PackedInt32Array = larr[Mesh.ARRAY_BONES]
+			var lbw: PackedFloat32Array = larr[Mesh.ARRAY_WEIGHTS]
+			for i in lbw.size():
+				if lbw[i] > 0.0 and lbi[i] != hidx:
+					lashhead = false
+	fails += _expect("lashes 100pct head", hidx != -1 and lashhead)
+	var lash_mats := _slot_mats(&"Eyelashes")
+	fails += _expect("lashes albedo slot", not lash_mats.is_empty())
+	var lash_shared := false
+	for m in lash_mats:
+		if _slot_mats(&"Skin").has(m):
+			lash_shared = true
+	fails += _expect("lashes split from skin", not lash_shared)
 	# 10. Beard submenu (single vendor file now, more later — albedo like hair).
 	fails += _expect("beard none default", beard_display() == "None" and beard_file("Male", &"None").is_empty())
 	fails += _expect("beard file male", beard_file("Male", &"Beard").ends_with("Hair_Beard.gltf"))

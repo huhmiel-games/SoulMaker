@@ -28,7 +28,7 @@ const SLOTS: Array[StringName] = [&"Body", &"Arms", &"Legs", &"Feet", &"Head", &
 const OUTFIT_COLOR_SLOTS: Array[StringName] = [&"Body", &"Arms", &"Legs", &"Feet", &"Head", &"Accessories"]
 ## Slots edited in albedo mode (quasi-white vendor textures with nothing to
 ## hue-shift: Hair + Eyebrows share the T_Hair set).
-const ALBEDO_SLOTS: Array[StringName] = [&"Hair", &"Eyebrows", &"Beard"]
+const ALBEDO_SLOTS: Array[StringName] = [&"Hair", &"Eyebrows", &"Beard", &"Eyelashes"]
 ## Hair styles (07/10, user-attributed): rigged-to-HeadBone vendor files,
 ## one mesh each, all verts 100% Head (verified headless). Beard ignored.
 const HAIR_DIR := "res://assets/meshes/Hairstyles/Rigged to Head Bone/glTF (Godot -Unreal)/"
@@ -150,6 +150,9 @@ func full_rebuild() -> void:
 func _post_build() -> void:
 	_apply_hair()
 	_apply_beard()
+	_apply_eyebrow()
+	_apply_eye()
+	_apply_eyelashes()
 	_reapply_colors()
 	_apply_physics()
 	_snap_pristine()
@@ -523,27 +526,40 @@ func last_cdata() -> Dictionary:
 	return _last_cdata
 
 
+## Holder-dressed materials (Hair/Beard/face parts): the mounted MI surfaces,
+## override (toon) preferred over base. Empty when nothing mounted.
+func _holder_mats(slot: StringName) -> Array:
+	var out := []
+	var holder := get_node_or_null(String(slot))
+	if holder == null:
+		return out
+	for mi in ColorEditor._meshes_under(holder):
+		var mmi := mi as MeshInstance3D
+		if mmi == null or mmi.mesh == null:
+			continue
+		for s in mmi.mesh.get_surface_count():
+			var om := mmi.get_surface_override_material(s) as ShaderMaterial
+			if om != null:
+				out.append(om)
+				continue
+			var base := mmi.mesh.surface_get_material(s) as ShaderMaterial
+			if base != null:
+				out.append(base)
+	return out
+
+
 ## Colors menu: fused materials whose source belongs to the slot (Skin =
 ## skin src list, slots = cloth src list). Empty = no part, toast only.
 func slot_mats(slot: StringName) -> Array:
 	var out := []
-	if slot == &"Hair" or slot == &"Beard":
-		var holder := get_node_or_null(String(slot))
-		if holder == null:
-			return out
-		for mi in ColorEditor._meshes_under(holder):
-			var mmi := mi as MeshInstance3D
-			if mmi == null or mmi.mesh == null:
-				continue
-			for s in mmi.mesh.get_surface_count():
-				var om := mmi.get_surface_override_material(s) as ShaderMaterial
-				if om != null:
-					out.append(om)
-					continue
-				var base := mmi.mesh.surface_get_material(s) as ShaderMaterial
-				if base != null:
-					out.append(base)
-		return out
+	if slot == &"Hair" or slot == &"Beard" or slot == &"Eyelashes":
+		return _holder_mats(slot)
+	if slot == &"Eyebrows" or slot == &"Eyes":
+		# Mounted part wins (male); empty holder = fused nude carries them
+		# (female until its export pass) — fall through to the fused lookup.
+		var hm := _holder_mats(slot)
+		if not hm.is_empty():
+			return hm
 	var keys: Array = SLOT_SRC_KEYS.get(slot, [])
 	var skin_side := slot == &"Skin" or slot == &"Eyebrows" or slot == &"Eyes" # face bits live on the nude
 	for e in _avatar_each_mat():
@@ -1320,7 +1336,114 @@ func _apply_beard() -> void:
 	print("[Character] Beard -> %s" % path.get_file())
 
 
-## Eyebrow menu verbs (same value-row contract; single vendor style for now,
+## Face parts (09/10, user-exported Blender files): mounted rigid head-follow
+## like hair (bone remap by name, missing -> Head). Empty path = the gender
+## ships no file yet (female until its export pass): no-op, and the fused
+## nude carries brows/eyes (male nude skips them at import). Eyelashes have
+## no nude counterpart and no menu: auto-mounted when the file exists, albedo
+## color defaults like hair.
+const FACE_PART_DIR := "res://assets/meshes/characters/parts/"
+const EYEBROW_FILES := {"Male": [&"Default"]}
+const EYE_FILES := {"Male": [&"Default"]}
+const EYELASH_FILES := {"Male": [&"Default"]}
+
+
+func eyebrow_file(gender: String, style: StringName) -> String:
+	if style != &"Default" or not (EYEBROW_FILES.get(gender, []) as Array).has(style):
+		return ""
+	return "%s%s/eyebrows/%s_Eyebrows.gltf" % [FACE_PART_DIR, gender.to_lower(), gender]
+
+
+func eye_file(gender: String, style: StringName) -> String:
+	if style != &"Default" or not (EYE_FILES.get(gender, []) as Array).has(style):
+		return ""
+	return "%s%s/eyes/%s_Eyes.gltf" % [FACE_PART_DIR, gender.to_lower(), gender]
+
+
+func eyelash_file(gender: String, style: StringName) -> String:
+	if style != &"Default" or not (EYELASH_FILES.get(gender, []) as Array).has(style):
+		return ""
+	return "%s%s/eyelashes/%s_Eyelashes.gltf" % [FACE_PART_DIR, gender.to_lower(), gender]
+
+
+## Runtime face-part holder (created, never saved). Same mount as hair.
+func _face_holder(slot: String) -> Node3D:
+	var h := get_node_or_null(slot) as Node3D
+	if h == null:
+		h = Node3D.new()
+		h.name = slot
+		add_child(h)
+	return h
+
+
+func _mount_face_part(slot: String, path: String, albedo: bool) -> void:
+	var holder := _face_holder(slot)
+	_clear_holder(holder)
+	if path.is_empty():
+		return
+	var packed := load(path) as PackedScene
+	if packed == null:
+		push_error("[Character] cannot load %s" % path)
+		return
+	var inst := packed.instantiate()
+	var found := inst.find_children("*", "MeshInstance3D", true, false)
+	if found.is_empty():
+		push_error("[Character] no face mesh in %s" % path)
+		inst.queue_free()
+		return
+	var src := found[0] as MeshInstance3D
+	var sks := inst.find_children("*", "Skeleton3D", true, false)
+	var src_sk := sks[0] as Skeleton3D if not sks.is_empty() else null
+	var master := master_skeleton()
+	if master == null or src_sk == null or src.mesh == null:
+		push_error("[Character] face mount failed (%s)" % path)
+		inst.queue_free()
+		return
+	var head := master.find_bone(&"Head")
+	var mesh := src.mesh
+	var out := ArrayMesh.new()
+	for s in mesh.get_surface_count():
+		var a := mesh.surface_get_arrays(s)
+		var bi: PackedInt32Array = a[Mesh.ARRAY_BONES]
+		var nb := PackedInt32Array()
+		nb.resize(bi.size())
+		for i in bi.size():
+			var ti := master.find_bone(src_sk.get_bone_name(bi[i]))
+			nb[i] = ti if ti != -1 else head
+		a[Mesh.ARRAY_BONES] = nb
+		FitKit._strip_custom(a) # importer customs (COLOR_1...) round-trip
+		# rejected by add_surface_from_arrays; the toon shader never reads them
+		out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, a)
+		out.surface_set_material(s, mesh.surface_get_material(s))
+	inst.queue_free()
+	var mi := MeshInstance3D.new()
+	mi.name = path.get_file().get_basename()
+	mi.mesh = out
+	holder.add_child(mi)
+	mi.skeleton = mi.get_path_to(master)
+	_reset_dress(holder, albedo)
+	print("[Character] %s -> %s" % [slot, path.get_file()])
+
+
+func _apply_eyebrow() -> void:
+	_mount_face_part("Eyebrows", eyebrow_file(GENDERS[_gender], EYEBROW_STYLES[_eyebrow]), true)
+	# Gender without a file (female) falls back to the fused nude brows:
+	# clamp the index so a future multi-style list cannot stick out of range.
+	if _eyebrow >= EYEBROW_STYLES.size():
+		_eyebrow = 0
+
+
+func _apply_eye() -> void:
+	_mount_face_part("Eyes", eye_file(GENDERS[_gender], EYE_STYLES[_eye]), false)
+	if _eye >= EYE_STYLES.size():
+		_eye = 0
+
+
+func _apply_eyelashes() -> void:
+	_mount_face_part("Eyelashes", eyelash_file(GENDERS[_gender], &"Default"), true)
+
+
+## Eyebrow menu verbs (same value-row contract; single style for now,
 ## more files later — the cycle/reset plumbing is ready).
 const EYEBROW_STYLES: Array[StringName] = [&"Default"]
 
