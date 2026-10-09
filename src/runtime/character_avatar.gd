@@ -15,13 +15,16 @@ extends Node3D
 
 signal rebuilt
 
-const PART_DIR := "res://assets/meshes/outfits/universal_outfit_free/Exports/glTF (Godot-Unreal)/Modular Parts/"
+const OUTFIT_DIR := "res://assets/meshes/outfits/"
+const ARMOR_DIR := "res://assets/meshes/armor/"
+## Slot -> subdir under the gender dir (user layout, kept as-is).
+const SLOT_DIRS := {&"Body": "bodies", &"Arms": "hands", &"Legs": "legs", &"Feet": "feets", &"Head": "heads", &"Accessories": "accessories"}
 const NUDE_DIR := "res://assets/meshes/characters/"
 const GENDERS: Array[String] = ["Male", "Female"]
 const OUTFITS: Array[String] = ["Peasant", "Ranger"]
 ## Extra test variants per slot (Blender-edited files): cycled after OUTFITS
 ## for that slot only. part_file returns "" when the combo ships no file.
-const SLOT_EXTRA := {&"Body": ["PeasantB", "PeasantF"], &"Accessories": ["RangerG"], &"Feet": ["PeasantF"], &"Legs": ["PeasantF"], &"Arms": ["PeasantF"]}
+const SLOT_EXTRA := {&"Body": ["PeasantB"], &"Accessories": ["RangerG"]}
 const SLOTS: Array[StringName] = [&"Body", &"Arms", &"Legs", &"Feet", &"Head", &"Accessories"]
 ## Outfit color entries: outfits only (Skin/Hair/Eyebrows have their own
 ## submenus — no duplicates). Skin color lives in the Skin submenu.
@@ -31,7 +34,7 @@ const OUTFIT_COLOR_SLOTS: Array[StringName] = [&"Body", &"Arms", &"Legs", &"Feet
 const ALBEDO_SLOTS: Array[StringName] = [&"Hair", &"Eyebrows", &"Beard", &"Eyelashes"]
 ## Hair styles (07/10, user-attributed): rigged-to-HeadBone vendor files,
 ## one mesh each, all verts 100% Head (verified headless). Beard ignored.
-const HAIR_DIR := "res://assets/meshes/Hairstyles/Rigged to Head Bone/glTF (Godot -Unreal)/"
+const HAIR_PART_DIR := "res://assets/meshes/characters/parts/"
 const HAIR_FILES := {
 	"Male": [&"Buzzed", &"SimpleParted"],
 	"Female": [&"Buns", &"Long", &"BuzzedFemale"],
@@ -225,49 +228,36 @@ func reset_slot(slot: StringName) -> void:
 
 
 ## glTF file for a (gender, outfit, slot) combo, "" when the combo ships no
-## part (Peasant has no Head/Accessories; Ranger side names are irregular:
-## Feet_Boots on male, Head_Hood, Acc_Pauldron vs Acc_Pauldrons).
+## part (Peasant has no Head/Accessories; male ships no Arms files at all —
+## bare nude arms; pauldrons live unwired under armor/ until the armor pass).
+## Ranger side names stay irregular (Feet_Boots, Head_Hood) until the user
+## rename pass; a final existence guard keeps deleted files loud-free.
 func part_file(gender: String, outfit: String, slot: StringName) -> String:
+	var dir := "%s%s/%s/" % [OUTFIT_DIR, gender.to_lower(), String(SLOT_DIRS.get(slot, "bodies"))]
+	var path := ""
 	match slot:
 		&"Head":
 			if outfit != "Ranger":
 				return ""
-			return "%s%s_%s_Head_Hood.gltf" % [PART_DIR, gender, outfit]
+			path = "%s%s_%s_Head_Hood.gltf" % [dir, gender, outfit]
 		&"Accessories":
 			if outfit == "RangerG" and gender == "Female":
-				return PART_DIR + "Female_Ranger_Gauntlets.gltf"
-			if outfit != "Ranger":
+				path = "%sfemale/gauntlets/Female_Ranger_Gauntlets.gltf" % ARMOR_DIR
+			else:
 				return ""
-			if gender == "Male":
-				return PART_DIR + "Male_Ranger_Acc_Pauldron.gltf"
-			return PART_DIR + "Female_Ranger_Acc_Pauldrons.gltf"
 		&"Feet":
 			if gender == "Male" and outfit == "Ranger":
-				return PART_DIR + "Male_Ranger_Feet_Boots.gltf"
-			if gender == "Male" and outfit == "PeasantF":
-				return PART_DIR + "Male_Peasant_Feet_Fix.gltf"
-			if outfit == "PeasantF":
-				return ""
-			return "%s%s_%s_Feet.gltf" % [PART_DIR, gender, outfit]
+				path = "%s%s_%s_Feet_Boots.gltf" % [dir, gender, outfit]
+			else:
+				path = "%s%s_%s_%s.gltf" % [dir, gender, outfit, String(slot)]
 		&"Body", &"Arms", &"Legs":
 			if outfit == "PeasantB" and slot == &"Body" and gender == "Female":
-				return PART_DIR + "Female_Peasant_Body_B.gltf"
-			if slot == &"Arms" and outfit == "Peasant" and gender == "Male":
-				return PART_DIR + "Male_Peasant_Arms_without_hands.gltf"
-			if slot == &"Arms" and outfit == "Ranger" and gender == "Male":
-				return PART_DIR + "Male_Ranger_Arms_without_hands.gltf"
-			if slot == &"Arms" and outfit == "Ranger" and gender == "Female":
-				return PART_DIR + "Female_Ranger_Arms_without_hands.gltf"
-			if outfit == "PeasantF" and slot == &"Legs" and gender == "Male":
-				return PART_DIR + "Male_Peasant_Legs_Fix.gltf"
-			if outfit == "PeasantF" and slot == &"Body" and gender == "Male":
-				return PART_DIR + "Male_Peasant_Body_Fix.gltf"
-			if outfit == "PeasantF" and slot == &"Arms" and gender == "Male":
-				return PART_DIR + "Male_Peasant_Arms_Fix.gltf"
-			if outfit == "PeasantB" or outfit == "RangerG" or outfit == "PeasantF":
-				return ""
-			return "%s%s_%s_%s.gltf" % [PART_DIR, gender, outfit, String(slot)]
-	return ""
+				path = "%s%s_%s_Body_B.gltf" % [dir, gender, outfit.trim_suffix("B")]
+			else:
+				path = "%s%s_%s_%s.gltf" % [dir, gender, outfit, String(slot)]
+	if path.is_empty() or not FileAccess.file_exists(path):
+		return ""
+	return path
 
 
 ## Outfit choices for a slot: base OUTFITS + test extras (variant files).
@@ -1161,7 +1151,8 @@ func hair_styles() -> Array:
 func hair_file(gender: String, style: StringName) -> String:
 	if style == &"None":
 		return ""
-	return "%sHair_%s.gltf" % [HAIR_DIR, String(style)]
+	var path := "%s%s/hairs/Hair_%s.gltf" % [HAIR_PART_DIR, gender.to_lower(), String(style)]
+	return path if FileAccess.file_exists(path) else ""
 
 
 func hair_display() -> String:
@@ -1253,7 +1244,8 @@ func beard_styles() -> Array:
 func beard_file(gender: String, style: StringName) -> String:
 	if style == &"None":
 		return ""
-	return "%sHair_%s.gltf" % [HAIR_DIR, String(style)]
+	var path := "%s%s/beards/Hair_%s.gltf" % [HAIR_PART_DIR, gender.to_lower(), String(style)]
+	return path if FileAccess.file_exists(path) else ""
 
 
 func beard_display() -> String:

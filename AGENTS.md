@@ -69,6 +69,11 @@ headless validation is high, so:
   2026-09-20): « ok ça fonctionne » is a test report, not a commit order.
   The AI stages nothing and commits nothing until the human explicitly says
   so (`ok commit`, `tu peux commit`, …) — no anticipatory end-of-build commits.
+- **Never delete a file without explicit human approval** (standing rule,
+  2026-10-09): no `rm`, no overwriting-by-deletion, no "cleanup" of orphans
+  (assets, probes, imports…) on the AI's own initiative — list candidates and
+  wait for the order. A name-based orphan is not proof: a renamed `.gltf` keeps
+  its old buffer URI, so only a content check (references) decides.
 - No pose-diff "eyeball" proofs by the AI: visual confirmation is the human's
   job (faster and better). If a specific inspector/frame inspection is needed,
   the AI may request it explicitly.
