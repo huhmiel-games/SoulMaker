@@ -53,6 +53,9 @@ const FACE_SUBS := [
 
 var _level := LEVEL_ROOT # 0 root, 1 outfits, 2 outfit colors, 3 physics, 4 hair, 5 brows, 6 skin, 7 eyes, 8 beard, 9 face hub, 10-16 face subs
 var _host: CharacterEditor = null
+## Cursor memory (09/10): level -> cursor, restored on Back. Entering a level
+## always starts at the top; Back returns to the previously chosen entry
+## (Face->Mouth->Back lands on Face with Mouth highlighted).
 
 
 func _ready() -> void:
@@ -241,8 +244,13 @@ func _face_rows(group: String) -> Array:
 	return fout
 
 
+var _cursor_mem := {}
+
+
 func _push(level: int = LEVEL_OUTFITS) -> void:
+	_cursor_mem[_level] = _cursor
 	_level = level
+	_cursor = 0
 	_refresh_list()
 	title_label.text = _menu_title()
 	if _host != null:
@@ -251,7 +259,9 @@ func _push(level: int = LEVEL_OUTFITS) -> void:
 
 func _pop() -> void:
 	# Face subs return to the hub (two-level Back); everything else to root.
+	_cursor_mem[_level] = _cursor
 	_level = LEVEL_FACE if is_face_level(_level) and _level != LEVEL_FACE else LEVEL_ROOT
+	_cursor = int(_cursor_mem.get(_level, 0))
 	_refresh_list()
 	title_label.text = _menu_title()
 	if _host != null:

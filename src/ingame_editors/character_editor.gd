@@ -100,7 +100,7 @@ func part_file(gender: String, outfit: String, slot: StringName) -> String:
 ## new master (face re-anchor + colors/physics already handled avatar-side).
 func _on_avatar_rebuilt() -> void:
 	if face_active():
-		face_push() # re-anchor: the new head moved (height/gender)
+		face_reanchor() # the new head moved (height/gender); keep user zoom
 	_apply_xray() # new MIs default visible; restore the xray state
 	_restart_preview_anim()
 
@@ -263,12 +263,14 @@ func _draw_volumes(vols: Dictionary, cdata: Dictionary) -> void:
 ## Eyebrows (delegated, see the delegates block above).
 
 
-## Face close-up (Hair/Eyebrows submenus): the orbit pivot + arm are saved,
-## the pivot moves to the face (Head bone + FACE_AIM_UP: the bone origin sits
-## at the skull base, aiming there frames the neck) and the arm shortens;
-## leaving the submenu restores both. Yaw/pitch untouched — the user keeps
-## orbiting the face. Re-anchored after every rebuild while active
-## (height/gender move the head).
+## Face close-up (Hair/Eyebrows submenus): the orbit pivot + arm are saved on
+## FIRST entry, the pivot moves to the face (Head bone + FACE_AIM_UP: the bone
+## origin sits at the skull base, aiming there frames the neck) and the arm
+## shortens. Navigating inside Face (hub <-> subs) never touches the view
+## (09/10: re-push reset the user's zoom on every submenu hop); leaving
+## restores both. Yaw/pitch untouched — the user keeps orbiting the face.
+## Rebuilds re-aim the pivot via face_reanchor (height/gender move the head)
+## but keep the user's arm (zoom).
 const FACE_ARM := 0.9
 const FACE_AIM_UP := 0.10 # Head origin -> mid-face (nose/eyes zone)
 var _face_saved := {} # empty, or {pos: Vector3, arm: float}
@@ -308,10 +310,22 @@ func face_push() -> void:
 	var arm := pivot.get_node_or_null("SpringArm3D") as SpringArm3D
 	if arm == null:
 		return
-	if _face_saved.is_empty():
-		_face_saved = {"pos": pivot.position, "arm": arm.spring_length}
+	if not _face_saved.is_empty():
+		return # already inside Face: never move the user's view
+	_face_saved = {"pos": pivot.position, "arm": arm.spring_length}
 	pivot.position = _head_world() + Vector3.UP * FACE_AIM_UP
 	arm.spring_length = FACE_ARM
+
+
+## Re-aims the pivot at the moved head after a rebuild while Face stays
+## active. Keeps the user's arm (zoom); no-op outside Face.
+func face_reanchor() -> void:
+	if _face_saved.is_empty():
+		return
+	var pivot := _face_pivot()
+	if pivot == null:
+		return
+	pivot.position = _head_world() + Vector3.UP * FACE_AIM_UP
 
 
 func face_pop() -> void:
@@ -613,6 +627,21 @@ func _face_part_mean(slot: String) -> Vector3:
 				m += v
 				n += 1
 	return m / float(n) if n > 0 else Vector3.ZERO
+
+
+## All model-space verts of a mounted face part (empty when none mounted).
+func _face_part_verts(slot: String) -> PackedVector3Array:
+	var out := PackedVector3Array()
+	var holder := get_node_or_null("Avatar/" + slot) as Node3D
+	if holder == null:
+		return out
+	for ch in holder.get_children():
+		var mi := ch as MeshInstance3D
+		if mi == null or mi.mesh == null:
+			continue
+		for s in mi.mesh.get_surface_count():
+			out.append_array(mi.mesh.surface_get_arrays(s)[Mesh.ARRAY_VERTEX])
+	return out
 
 
 ## Min model-space distance between the mounted eyeballs and the Eyelids
@@ -1383,6 +1412,106 @@ func _run_headless_test() -> void:
 	var clear := _eye_lid_clearance()
 	print("[CharTest] eye clearance %.4f" % clear)
 	fails += _expect("eyes clear lids", clear > 0.0003)
+	# Follow superposition (09/10 dilution fix: Depth -4 then Height +1 must
+	# leave Z untouched while adding Y — pooled averaging dragged Z +2mm).
+	adjust_face_sculpt(&"EyeDepth", -4)
+	var ez0 := _face_part_mean("Eyes")
+	adjust_face_sculpt(&"EyeHeight", 1)
+	var ez1 := _face_part_mean("Eyes")
+	fails += _expect("follow no dilute z", absf(ez1.z - ez0.z) < 0.0005)
+	fails += _expect("follow height adds", ez1.y > ez0.y + 0.0005)
+	reset_face_sculpt(&"EyeDepth")
+	reset_face_sculpt(&"EyeHeight")
+	# 9d. Hair follow (09/10 step 3): the hairline rides ForeheadHeight so
+	# the skin never slides under the cards; unrelated parts stay pristine.
+	adjust_hair(1) # mount Buzzed (male) for a measurable follow target
+	var hbefore := _face_part_verts("Hair")
+	adjust_face_sculpt(&"ForeheadHeight", 8)
+	var hafter := _face_part_verts("Hair")
+	# Weighted zone rises (front band past the ears plane; the global mean
+	# is diluted by the frozen back mass, so measure the band, not the cap).
+	var hsk := _avatar_skeleton()
+	var hbi := hsk.find_bone(&"Head") if hsk != null else -1
+	var front0 := 0.0
+	var front1 := 0.0
+	var frontn := 0
+	var backmax := 0.0
+	if hbi != -1 and hbefore.size() == hafter.size():
+		var hinv: Transform3D = _avatar._bone_rest_world(hsk, hbi).affine_inverse()
+		var earsz := _avatar.sculpt_region_center("Ears").z
+		for i in hbefore.size():
+			if (hinv * hbefore[i]).z > earsz:
+				front0 += hbefore[i].y
+				front1 += hafter[i].y
+				frontn += 1
+			else:
+				backmax = maxf(backmax, hbefore[i].distance_to(hafter[i]))
+	fails += _expect("hair follows forehead", frontn > 0 and (front1 - front0) / float(frontn) > 0.002)
+	fails += _expect("eyes ignore forehead", (get_node_or_null("Avatar/Eyes/Male_Eyes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyes"])
+	reset_face_sculpt(&"ForeheadHeight")
+	fails += _expect("hair follow restores", (get_node_or_null("Avatar/Hair/Buzzed") as MeshInstance3D).mesh == _avatar._face_pristine["Hair"])
+	reset_hair()
+	# 9e. Width follow (09/10 live: temples clipped the hair sides): shell
+	# vert copies its nearest skin vert's offset ("glue"), so the cap keeps
+	# its rest gap both directions (ramp/full-width/column proxies all
+	# failed live: starved temples, breathing cap, narrowing dive).
+	adjust_hair(1)
+	var wbefore := _face_part_verts("Hair")
+	adjust_face_sculpt(&"ForeheadWidth", 8)
+	var wafter := _face_part_verts("Hair")
+	var wsk := _avatar_skeleton()
+	var wbi := wsk.find_bone(&"Head") if wsk != null else -1
+	var wb: Dictionary = _avatar.sculpt_region_bounds("Forehead")
+	var near := 0.0
+	var nearn := 0
+	# Glue integrity (guards index/order drift between grid, fields and map):
+	# far hair moves no more than its own skin does (old proxies breathed
+	# 6mm over static skin), and the rest gap is small (mapping is sane).
+	var over := 0.0
+	var gap := 0.0
+	var gapn := 0
+	var gapmax := 0.0
+	if wbi != -1 and wbefore.size() == wafter.size() and not wb.is_empty():
+		var winv: Transform3D = _avatar._bone_rest_world(wsk, wbi).affine_inverse()
+		var gqs: PackedVector3Array = _avatar._glue_qs
+		var gfields: Dictionary = _avatar._glue_fields
+		var hpris := _avatar._face_pristine.get("Hair") as ArrayMesh
+		var gmap: PackedInt32Array = (_avatar._glue_map.get(hpris.get_rid().get_id(), PackedInt32Array()) as PackedInt32Array) if hpris != null else PackedInt32Array()
+		for i in wbefore.size():
+			var wq: Vector3 = winv * wbefore[i]
+			var ww: float = _avatar.follow_halo_w(wq, wb["mn"], wb["mx"], _avatar.HAIR_HALO)
+			if ww > 0.5:
+				near += absf((winv * wafter[i]).x) - absf(wq.x)
+				nearn += 1
+			elif ww < 0.05 and i < gmap.size() and gmap[i] < gqs.size():
+				var skoff := Vector3.ZERO
+				for gk in gfields:
+					skoff += (gfields[gk] as PackedVector3Array)[gmap[i]]
+				over = maxf(over, wbefore[i].distance_to(wafter[i]) - skoff.length() - 0.001)
+			if i % 5 == 0 and i < gmap.size() and gmap[i] < gqs.size():
+				gap += wq.distance_to(gqs[gmap[i]])
+				gapn += 1
+				gapmax = maxf(gapmax, wq.distance_to(gqs[gmap[i]]))
+	fails += _expect("hair column spreads", nearn > 0 and near / float(nearn) > 0.004)
+	fails += _expect("hair never overshoots skin", over <= 0.0)
+	fails += _expect("hair rest gap sane", gapn > 0 and gap / float(gapn) < 0.012 and gapmax < 0.025)
+	# Negative Width (09/10 live: + fixed, - still clipped): the column must
+	# narrow symmetric to the positive spread, never dive past the skin.
+	adjust_face_sculpt(&"ForeheadWidth", -16)
+	var wafter_neg := _face_part_verts("Hair")
+	var spread_neg := 0.0
+	var spreadn_neg := 0
+	if wbi != -1 and wbefore.size() == wafter_neg.size() and not wb.is_empty():
+		var winv2: Transform3D = _avatar._bone_rest_world(wsk, wbi).affine_inverse()
+		for i in wbefore.size():
+			var wq2: Vector3 = winv2 * wbefore[i]
+			if _avatar.follow_halo_w(wq2, wb["mn"], wb["mx"], _avatar.HAIR_HALO) > 0.5:
+				spread_neg += absf((winv2 * wafter_neg[i]).x) - absf(wq2.x)
+				spreadn_neg += 1
+	fails += _expect("hair column narrows", spreadn_neg > 0 and spread_neg / float(spreadn_neg) < -0.004)
+	reset_face_sculpt(&"ForeheadWidth")
+	fails += _expect("hair width restores", (get_node_or_null("Avatar/Hair/Buzzed") as MeshInstance3D).mesh == _avatar._face_pristine["Hair"])
+	reset_hair()
 	# 10. Beard submenu (single vendor file now, more later — albedo like hair).
 	fails += _expect("beard none default", beard_display() == "None" and beard_file("Male", &"None").is_empty())
 	fails += _expect("beard file male", beard_file("Male", &"Beard").ends_with("Hair_Beard.gltf"))
@@ -1430,6 +1559,38 @@ func _run_headless_test() -> void:
 	adjust_face_shape(&"Length", -50)
 	fails += _expect("face length clamped", face_shape_display(&"Length") == "90%")
 	reset_face_shape(&"Length")
+	# 11b. Cursor memory (09/10): entering tops, Back restores the parent pick.
+	_menu._cursor = 5
+	_menu._push(CharacterMenu.LEVEL_FACE)
+	fails += _expect("menu push tops", _menu._cursor == 0)
+	_menu._cursor = 2
+	_menu._push(CharacterMenu.LEVEL_FACE_MOUTH)
+	fails += _expect("menu sub tops", _menu._cursor == 0)
+	_menu._pop()
+	fails += _expect("menu back restores", _menu._level == CharacterMenu.LEVEL_FACE and _menu._cursor == 2)
+	_menu._pop()
+	fails += _expect("menu root restores", _menu._level == CharacterMenu.LEVEL_ROOT and _menu._cursor == 5)
+	# 11c. Face view stability (09/10): submenu hops never move the camera;
+	# rebuilds re-aim the pivot but keep the user's zoom; leaving restores.
+	var cam := get_node_or_null("CamPivot/SpringArm3D/Camera3D") as Camera3D
+	fails += _expect("editor camera centered", cam != null and is_zero_approx(cam.position.x))
+	_menu._push(CharacterMenu.LEVEL_FACE)
+	var arm2 := (pivot.get_node_or_null("SpringArm3D") as SpringArm3D) if pivot != null else null
+	if arm2 != null:
+		arm2.spring_length = 1.5 # user zoom while inside Face
+	var piv0: Vector3 = pivot.position if pivot != null else Vector3.ZERO
+	_menu._push(CharacterMenu.LEVEL_FACE_MOUTH)
+	fails += _expect("face hop keeps zoom", arm2 != null and is_equal_approx(arm2.spring_length, 1.5))
+	fails += _expect("face hop keeps pivot", pivot != null and pivot.position.is_equal_approx(piv0))
+	_menu._pop()
+	fails += _expect("face hub keeps zoom", arm2 != null and is_equal_approx(arm2.spring_length, 1.5))
+	if pivot != null:
+		pivot.position = Vector3.ZERO
+	face_reanchor()
+	fails += _expect("rebuild re-aims pivot", pivot != null and pivot.position.is_equal_approx(_head_world() + Vector3.UP * FACE_AIM_UP))
+	fails += _expect("reanchor keeps zoom", arm2 != null and is_equal_approx(arm2.spring_length, 1.5))
+	_menu._pop()
+	fails += _expect("face exit restores zoom", arm2 != null and is_equal_approx(arm2.spring_length, 3.2))
 	_menu._push(CharacterMenu.LEVEL_FACE)
 	fails += _expect("menu face hub 7+back", _menu._entries.size() == CharacterMenu.FACE_SUBS.size() + 1)
 	fails += _expect("face cam on hub", face_active())

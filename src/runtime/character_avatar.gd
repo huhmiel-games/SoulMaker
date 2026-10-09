@@ -181,11 +181,24 @@ var _skin_pristine: ArrayMesh = null
 ## Pristine mounted face-part meshes (follow-sculpt source of truth, same
 ## role as _skin_pristine): slot -> ArrayMesh, stored at mount time.
 var _face_pristine := {}
+## Shell-follow glue (09/10): nearest-skin correspondence. _glue_qs = combined
+## Head-local pristine Skin verts (first Skin MI, eye surfaces excluded, same
+## order as the retained fields); _glue_fields = per-key combined offsets of
+## the current bake; _glue_grid maps 10mm cells to combined indices (rebuilt
+## when the skin mesh changes); _glue_map caches hair-mesh rid -> nearest
+## skin index per hair vert (both sides pristine, so static).
+const GLUE_CELL := 0.01
+var _glue_qs := PackedVector3Array()
+var _glue_fields := {}
+var _glue_grid := {}
+var _glue_grid_rid := -1
+var _glue_map := {}
 
 
 func _snap_pristine() -> void:
 	_skin_pristine = null
 	_adj_cache.clear() # keys are mesh rids: rebuild = new meshes
+	_glue_grid_rid = -1 # skin rebuilt: grid + maps rebuilt lazily
 	for mi in _avatar_mis():
 		var mmi := mi as MeshInstance3D
 		if mmi != null and mmi.name == &"Skin" and mmi.mesh != null:
@@ -687,16 +700,26 @@ const SCULPT_SPEC := {
 	&"BrowRidgeDepth": {"region": "BrowRidge", "menu": "forehead", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 0.4},
 	&"EarSize": {"region": "Ears", "menu": "forehead", "mode": "scale", "rate": 0.15, "mirror": false, "max_cm": 0.8},
 }
-## Face-part follow (09/10): holder slot -> driving sculpt keys. The mounted
-## parts (rigid, 100% Head) bake the MEAN mask displacement of their socket
+## Face-part follow (09/10): holder slot -> driving sculpt keys. Compact rigid
+## parts (eyes, lashes, brows — 100% Head) bake the SUM of per-key mask means
 ## into their verts (same Head-frame math as the skin), so socket rows never
-## strand them. Eyes track the socket (Depth/Height) but NOT lid weight;
-## lashes ride the lids; brows ride the ridge (both menus' depth rows).
+## strand them and rows superpose without diluting each other. Eyes track the
+## socket (Depth/Height) but NOT lid weight; lashes ride the lids; brows
+## ride the ridge (both menus' depth rows). Hair is a shell, not a lump
+## (09/10 live: every proxy failed — z-ramp starved the temples at ~40%,
+## full-width breathed the whole cap and dived inside the skin when
+## narrowing, bbox-column starved verts just outside the paint): each hair
+## vert copies the sculpt offset of its NEAREST skin vert ("glue"), so the cap
+## preserves its rest gap exactly, both directions, for every driving key.
 const SCULPT_FOLLOW := {
 	&"Eyes": [&"EyeDepth", &"EyeHeight"],
 	&"Eyelashes": [&"EyeDepth", &"EyeHeight", &"EyelidHeavy"],
 	&"Eyebrows": [&"BrowDepth", &"BrowRidgeDepth", &"BrowHeight", &"BrowThick"],
+	&"Hair": {"keys": [&"ForeheadHeight", &"ForeheadWidth"], "glue": true},
 }
+## Shell-follow zoning (m, test contract only): the hairline column moves,
+## everything past HAIR_HALO stays frozen.
+const HAIR_HALO := 0.025
 var _sculpt := {} # StringName sculpt key -> float cm (0.0 default)
 var _sculpt_cache := {} # gender -> regions dict from SCULPT_PATH (lazy)
 
@@ -774,6 +797,22 @@ func sculpt_region_stats(region: String) -> Dictionary:
 	return {"cx": float(r["cx"]), "hx": float(r["hx"])}
 
 
+## Region centroid (follow weights, test planes), ZERO when missing.
+func sculpt_region_center(region: String) -> Vector3:
+	var r: Dictionary = _sculpt_regions().get(region, {})
+	if r.is_empty():
+		return Vector3.ZERO
+	return r["c"] as Vector3
+
+
+## Region bbox (follow column math, test zoning), {} when missing.
+func sculpt_region_bounds(region: String) -> Dictionary:
+	var r: Dictionary = _sculpt_regions().get(region, {})
+	if r.is_empty():
+		return {}
+	return {"mn": r["mn"], "mx": r["mx"]}
+
+
 ## Mask point hit rate vs the live pristine Skin: [matched, total] per region.
 ## Guards asset drift (reimport moving verts kills matches — loud, not silent).
 func sculpt_mask_coverage() -> Dictionary:
@@ -839,13 +878,24 @@ func _sculpt_fused() -> void:
 	# members (halo excluded: exact socket motion). Survives all surfaces.
 	var follow_acc := {}
 	for fslot in SCULPT_FOLLOW:
-		for fkey in (SCULPT_FOLLOW[fslot] as Array):
+		for fkey in _follow_keys(SCULPT_FOLLOW[fslot]):
 			if active.has(fkey) and not follow_acc.has(fkey):
 				follow_acc[fkey] = {"parts": [], "sum": Vector3.ZERO, "count": 0}
 	for fslot in SCULPT_FOLLOW:
-		for fkey in (SCULPT_FOLLOW[fslot] as Array):
+		for fkey in _follow_keys(SCULPT_FOLLOW[fslot]):
 			if follow_acc.has(fkey) and not (follow_acc[fkey] as Dictionary)["parts"].has(fslot):
 				((follow_acc[fkey] as Dictionary)["parts"] as Array).append(fslot)
+	# Glue keys: driving rows of shell entries (hair) — their per-vert skin
+	# fields are retained (combined across Skin surfaces, twin-equalized like
+	# the bake) so each shell vert can copy its nearest skin vert's offset.
+	var glue_keys := {}
+	for fslot_g in SCULPT_FOLLOW:
+		var e_g = SCULPT_FOLLOW[fslot_g]
+		if e_g is Dictionary and bool((e_g as Dictionary).get("glue", false)):
+			for gk in _follow_keys(e_g):
+				glue_keys[gk] = true
+	var glue_fields := {} # key -> combined PackedVector3Array (this bake)
+	var glue_owner: MeshInstance3D = null # first Skin MI owns the glue order
 	for mi in _avatar_mis():
 		var mmi := mi as MeshInstance3D
 		if mmi == null or mmi.name != &"Skin":
@@ -855,6 +905,10 @@ func _sculpt_fused() -> void:
 			src_mesh = mmi.mesh as ArrayMesh
 		if src_mesh == null:
 			continue
+		var take_glue := glue_owner == null
+		if take_glue:
+			glue_owner = mmi
+			_glue_ensure(src_mesh, mmi, head_inv)
 		var out := ArrayMesh.new()
 		for s in src_mesh.get_surface_count():
 			var src := String(_avatar_src_for(mmi, s)).to_lower()
@@ -912,6 +966,7 @@ func _sculpt_fused() -> void:
 				qs[i] = head_inv * verts[i]
 			var total := PackedVector3Array()
 			total.resize(n)
+			var surf_koffs := {} # glue-driving key -> post-diffusion field
 			# Per-key fields (08/10 halo-erasure fix): each row computes its
 			# own off + mask, diffuses through verts masked for NOBODY ELSE,
 			# then adds in. The old shared wmax let any overlapping region
@@ -974,6 +1029,8 @@ func _sculpt_fused() -> void:
 						if kwmax[i] > 0.0:
 							fa["sum"] = (fa["sum"] as Vector3) + koff[i]
 							fa["count"] = int(fa["count"]) + 1
+				if take_glue and glue_keys.has(key):
+					surf_koffs[key] = koff
 			off = total
 			# Twin equalization (seam guard): bit-identical verts share the
 			# strongest offset — a section seam can never crack open even
@@ -984,19 +1041,14 @@ func _sculpt_fused() -> void:
 				if not tgroups.has(verts[i]):
 					tgroups[verts[i]] = []
 				(tgroups[verts[i]] as Array).append(i)
-			for pos in tgroups:
-				var ml: Array = tgroups[pos]
-				if ml.size() < 2:
-					continue
-				var best := Vector3.ZERO
-				var bestl := -1.0
-				for m in ml:
-					var l: float = off[int(m)].length_squared()
-					if l > bestl:
-						bestl = l
-						best = off[int(m)]
-				for m in ml:
-					off[int(m)] = best
+			off = _twin_eq(off, tgroups)
+			if take_glue:
+				for gk in surf_koffs:
+					# Same seam rule as the bake, then CoW-safe append
+					# (never append to a packed array read out of a container).
+					var gcomb: PackedVector3Array = glue_fields.get(gk, PackedVector3Array())
+					gcomb.append_array(_twin_eq(surf_koffs[gk], tgroups))
+					glue_fields[gk] = gcomb
 			for i in n:
 				if off[i] != Vector3.ZERO:
 					verts[i] = head_world * (qs[i] + off[i])
@@ -1004,29 +1056,53 @@ func _sculpt_fused() -> void:
 			out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, a)
 			out.surface_set_material(s, src_mesh.surface_get_material(s))
 		mmi.mesh = out
-	# Part follow: per-slot mean over its driving keys, baked into the part
-	# verts with the skin's own Head-frame math (anim-exact: the offset lives
-	# in bone space, not as a static node translation). No mask verts (key
-	# inactive or region unpainted) = restore pristine.
-	var fmean := {}
+	# Part follow (09/10 dilution fix: SUM of per-key means, never a pooled
+	# average). Shell entries ("glue") skip means entirely: each shell vert
+	# copies its nearest skin vert's offset from the retained per-key fields.
+	_glue_fields = glue_fields
+	var fdrive := {}
 	for fslot2 in SCULPT_FOLLOW:
-		var fsum := Vector3.ZERO
-		var fcount := 0
-		for fkey2 in (SCULPT_FOLLOW[fslot2] as Array):
+		var flist: Array = []
+		for fkey2 in _follow_keys(SCULPT_FOLLOW[fslot2]):
 			if follow_acc.has(fkey2):
 				var fa2: Dictionary = follow_acc[fkey2]
-				fsum += fa2["sum"] as Vector3
-				fcount += int(fa2["count"])
-		if fcount > 0:
-			fmean[fslot2] = fsum / float(fcount)
+				if int(fa2["count"]) > 0:
+					flist.append({"key": fkey2, "mean": (fa2["sum"] as Vector3) / float(fa2["count"])})
+		if not flist.is_empty():
+			fdrive[fslot2] = flist
 	for fslot2 in SCULPT_FOLLOW:
-		_face_follow_bake(String(fslot2), fmean.get(fslot2, Vector3.ZERO), head_world, head_inv, bi)
+		_face_follow_bake(String(fslot2), fdrive.get(fslot2, []), head_world, head_inv, bi, regions)
 
 
-## Bakes a uniform Head-frame translation into a mounted part's verts (same
-## conversion as the skin, so probe/idle poses carry it identically). Zero
-## mean = restore the pristine mesh. Skips holders with nothing mounted.
-func _face_follow_bake(slot: String, mean: Vector3, head_world: Transform3D, head_inv: Transform3D, head_idx: int) -> void:
+## Driving keys of a follow entry (plain Array, or Dict with a "keys" list
+## plus a "glue" flag for shell entries like hair).
+static func _follow_keys(entry) -> Array:
+	if entry is Dictionary:
+		return (entry as Dictionary).get("keys", [])
+	return entry as Array
+
+
+## Column weight of a Head-local point around a region bbox (test zoning
+## contract for shell follow): 1 inside and anywhere in front of the column
+## (z+), decaying to 0 at `halo` behind, beside or above. Bounds are live
+## region stats, repaint-proof.
+static func follow_halo_w(q: Vector3, mn: Vector3, mx: Vector3, halo: float) -> float:
+	var dx := maxf(mn.x - q.x, 0.0) + maxf(q.x - mx.x, 0.0)
+	var dy := maxf(mn.y - q.y, 0.0) + maxf(q.y - mx.y, 0.0)
+	var dz := maxf(mn.z - q.z, 0.0) # front free
+	var d := sqrt(dx * dx + dy * dy + dz * dz)
+	return 1.0 - smoothstep(0.0, halo, d)
+
+
+## Bakes the SUM of per-key mask means into a mounted compact part's verts
+## (same Head-frame math as the skin, so probe/idle poses carry it
+## identically). Shell entries ("glue") route to _face_glue_bake instead.
+## No driving keys = restore pristine. Skips holders with nothing mounted.
+func _face_follow_bake(slot: String, flist: Array, head_world: Transform3D, head_inv: Transform3D, head_idx: int, regions: Dictionary) -> void:
+	var entry0 = SCULPT_FOLLOW.get(slot, [])
+	if entry0 is Dictionary and bool((entry0 as Dictionary).get("glue", false)):
+		_face_glue_bake(slot, flist, head_world, head_inv, head_idx)
+		return
 	var holder := get_node_or_null(slot) as Node3D
 	if holder == null:
 		return
@@ -1035,7 +1111,7 @@ func _face_follow_bake(slot: String, mean: Vector3, head_world: Transform3D, hea
 		var mi := ch as MeshInstance3D
 		if mi == null or mi.mesh == null or pristine == null:
 			continue
-		if mean.length_squared() < 1e-12:
+		if flist.is_empty():
 			if mi.mesh != pristine:
 				mi.mesh = pristine
 			continue
@@ -1047,7 +1123,130 @@ func _face_follow_bake(slot: String, mean: Vector3, head_world: Transform3D, hea
 			var a := pristine.surface_get_arrays(s)
 			var pverts: PackedVector3Array = a[Mesh.ARRAY_VERTEX]
 			for i in pverts.size():
-				pverts[i] = head_world * (head_inv * pverts[i] + mean)
+				var q: Vector3 = head_inv * pverts[i]
+				var off := Vector3.ZERO
+				for fd in flist:
+					off += (fd as Dictionary)["mean"] as Vector3
+				pverts[i] = head_world * (q + off)
+			a[Mesh.ARRAY_VERTEX] = pverts
+			pout.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, a)
+			pout.surface_set_material(s, pristine.surface_get_material(s))
+		mi.mesh = pout
+
+
+## Shell-follow grid (09/10): Head-local pristine Skin verts in 10mm cells
+## (eye surfaces excluded, same order as the retained fields). Rebuilt when
+## the skin mesh changes; stale hair maps are dropped with it.
+func _glue_ensure(src_mesh: ArrayMesh, mmi: MeshInstance3D, head_inv: Transform3D) -> void:
+	var rid := src_mesh.get_rid().get_id()
+	if _glue_grid_rid == rid and not _glue_grid.is_empty():
+		return
+	_glue_grid = {}
+	_glue_qs = PackedVector3Array()
+	_glue_map = {}
+	var idx := 0
+	for s in src_mesh.get_surface_count():
+		var src := String(_avatar_src_for(mmi, s)).to_lower()
+		if src.contains("eye") and not src.contains("brow"):
+			continue
+		var vv: PackedVector3Array = src_mesh.surface_get_arrays(s)[Mesh.ARRAY_VERTEX]
+		for i in vv.size():
+			var q: Vector3 = head_inv * vv[i]
+			_glue_qs.append(q)
+			var cell := Vector3i(floori(q.x / GLUE_CELL), floori(q.y / GLUE_CELL), floori(q.z / GLUE_CELL))
+			if not _glue_grid.has(cell):
+				_glue_grid[cell] = []
+			(_glue_grid[cell] as Array).append(idx)
+			idx += 1
+	_glue_grid_rid = rid
+
+
+## Nearest-skin index per shell vert (pristine both sides, so static per hair
+## mesh). Expanding-shell search: exact while the best hit beats the next
+## shell's reach; capped at 15 cells (head fits in a 300mm cube).
+func _glue_build_map(pristine: ArrayMesh, head_inv: Transform3D) -> PackedInt32Array:
+	var out := PackedInt32Array()
+	for s in pristine.get_surface_count():
+		var vv: PackedVector3Array = pristine.surface_get_arrays(s)[Mesh.ARRAY_VERTEX]
+		for i in vv.size():
+			var q: Vector3 = head_inv * vv[i]
+			var qc := Vector3i(floori(q.x / GLUE_CELL), floori(q.y / GLUE_CELL), floori(q.z / GLUE_CELL))
+			var bd := 1e18
+			var bi2 := -1
+			var r2 := 0
+			while r2 <= 15:
+				for dx in range(-r2, r2 + 1):
+					for dy in range(-r2, r2 + 1):
+						for dz in range(-r2, r2 + 1):
+							if maxi(maxi(absi(dx), absi(dy)), absi(dz)) != r2:
+								continue
+							var lst: Array = _glue_grid.get(qc + Vector3i(dx, dy, dz), [])
+							for cand in lst:
+								var dd: float = _glue_qs[int(cand)].distance_squared_to(q)
+								if dd < bd:
+									bd = dd
+									bi2 = int(cand)
+				# Unscanned cells sit past r2 * CELL: stop once the best hit
+				# beats that reach (head fits in a 300mm cube either way).
+				if bi2 != -1 and sqrt(bd) <= float(r2) * GLUE_CELL:
+					break
+				r2 += 1
+			out.append(maxi(bi2, 0))
+	return out
+
+
+## Shell-part follow ("glue", 09/10): each vert copies the sculpt offset of
+## its NEAREST skin vert (retained per-key fields of this bake), so the shell
+## preserves its rest gap exactly — both directions, every driving key, no
+## proxy ramp/clamp/column. Correspondence is static (both meshes pristine),
+## cached per hair mesh; the per-bake cost is one indexed gather per vert.
+## Missing glue data = leave pristine alone (never guess).
+func _face_glue_bake(slot: String, flist: Array, head_world: Transform3D, head_inv: Transform3D, head_idx: int) -> void:
+	var holder := get_node_or_null(slot) as Node3D
+	if holder == null:
+		return
+	var pristine := _face_pristine.get(slot) as ArrayMesh
+	if pristine == null:
+		return
+	if flist.is_empty():
+		for ch0 in holder.get_children():
+			var mi0 := ch0 as MeshInstance3D
+			if mi0 != null and mi0.mesh != null and mi0.mesh != pristine:
+				mi0.mesh = pristine
+		return
+	if _glue_fields.is_empty() or _glue_qs.is_empty() or _glue_grid.is_empty():
+		return
+	var rid := pristine.get_rid().get_id()
+	if not _glue_map.has(rid):
+		_glue_map[rid] = _glue_build_map(pristine, head_inv)
+	var gmap: PackedInt32Array = _glue_map[rid]
+	var keys: Array = []
+	for fd in flist:
+		var fk: StringName = (fd as Dictionary)["key"]
+		if (_glue_fields as Dictionary).has(fk):
+			keys.append(fk)
+	if keys.is_empty():
+		return
+	for ch in holder.get_children():
+		var mi := ch as MeshInstance3D
+		if mi == null or mi.mesh == null:
+			continue
+		if not _face_mi_all_head(mi, pristine, head_idx):
+			print("[Character] follow skipped %s (non-Head weights)" % slot)
+			continue
+		var pout := ArrayMesh.new()
+		var gi := 0
+		for s in pristine.get_surface_count():
+			var a := pristine.surface_get_arrays(s)
+			var pverts: PackedVector3Array = a[Mesh.ARRAY_VERTEX]
+			for i in pverts.size():
+				var off := Vector3.ZERO
+				if gi < gmap.size():
+					var sk: int = gmap[gi]
+					for k in keys:
+						off += ((_glue_fields as Dictionary)[k] as PackedVector3Array)[sk]
+				pverts[i] = head_world * (head_inv * pverts[i] + off)
+				gi += 1
 			a[Mesh.ARRAY_VERTEX] = pverts
 			pout.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, a)
 			pout.surface_set_material(s, pristine.surface_get_material(s))
@@ -1176,6 +1375,28 @@ func _sculpt_diffuse(off: PackedVector3Array, wmax: PackedFloat32Array, adj: Arr
 		off[i] = cur[i]
 
 
+## Twin equalization (seam guard): bit-identical verts share the strongest
+## offset — a section seam can never crack open even when twin neighborhoods
+## differ (weld shares neighbors, this shares the result). Returns the
+## equalized copy (CoW: no extra copy until the first twin write).
+static func _twin_eq(arr: PackedVector3Array, tgroups: Dictionary) -> PackedVector3Array:
+	var out := arr
+	for pos in tgroups:
+		var ml: Array = tgroups[pos]
+		if ml.size() < 2:
+			continue
+		var best := Vector3.ZERO
+		var bestl := -1.0
+		for m in ml:
+			var l: float = out[int(m)].length_squared()
+			if l > bestl:
+				bestl = l
+				best = out[int(m)]
+		for m in ml:
+			out[int(m)] = best
+	return out
+
+
 ## Max displacement step between topology neighbors on the current fused
 ## Skin (vs pristine, same topology): the anti-crevasse metric. Small =
 ## the rim follows instead of cliffing at the box edge.
@@ -1268,12 +1489,14 @@ func adjust_hair(dir: int) -> void:
 	_hair = posmod(_hair + dir, hair_styles().size())
 	_apply_hair()
 	_reapply_colors()
+	_sculpt_fused() # forehead follow re-bakes onto the fresh mount
 
 
 func reset_hair() -> void:
 	_hair = 0
 	_apply_hair()
 	_reapply_colors()
+	_sculpt_fused()
 
 
 ## Runtime Hair holder (created, never saved). Mounts the style mesh on the
@@ -1297,6 +1520,7 @@ func _apply_hair() -> void:
 		_hair = 0
 	var path := hair_file(GENDERS[_gender], styles[_hair])
 	if path.is_empty():
+		_face_pristine.erase("Hair")
 		return
 	var packed := load(path) as PackedScene
 	if packed == null:
@@ -1337,6 +1561,7 @@ func _apply_hair() -> void:
 	holder.add_child(mi)
 	mi.skeleton = mi.get_path_to(master)
 	_reset_dress(holder, true)
+	_face_pristine["Hair"] = out
 	print("[Character] Hair -> %s" % path.get_file())
 
 
