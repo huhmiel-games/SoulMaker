@@ -615,6 +615,45 @@ func _face_part_mean(slot: String) -> Vector3:
 	return m / float(n) if n > 0 else Vector3.ZERO
 
 
+## Min model-space distance between the mounted eyeballs and the Eyelids
+## skin (rest sculpt). -1 when unmeasurable (no parts, female).
+func _eye_lid_clearance() -> float:
+	var holder := get_node_or_null("Avatar/Eyes") as Node3D
+	var sk := _avatar_skeleton()
+	var smi := _avatar_skin_mi()
+	if holder == null or sk == null or smi == null or smi.mesh == null:
+		return -1.0
+	var bi := sk.find_bone(&"Head")
+	if bi == -1:
+		return -1.0
+	var inv: Transform3D = _avatar._bone_rest_world(sk, bi).affine_inverse()
+	var eye_pts := PackedVector3Array()
+	for ch in holder.get_children():
+		var mi := ch as MeshInstance3D
+		if mi == null or mi.mesh == null:
+			continue
+		for s in mi.mesh.get_surface_count():
+			eye_pts.append_array(mi.mesh.surface_get_arrays(s)[Mesh.ARRAY_VERTEX])
+	if eye_pts.is_empty():
+		return -1.0
+	var lid_pts := PackedVector3Array()
+	for s in smi.mesh.get_surface_count():
+		var vv: PackedVector3Array = smi.mesh.surface_get_arrays(s)[Mesh.ARRAY_VERTEX]
+		for v in vv:
+			if _avatar.sculpt_in_region("Eyelids", inv * v):
+				lid_pts.append(v)
+	if lid_pts.is_empty():
+		return -1.0
+	var best := 1e9
+	var stride := maxi(1, lid_pts.size() / 800)
+	var li := 0
+	while li < lid_pts.size():
+		for e in eye_pts:
+			best = minf(best, e.distance_squared_to(lid_pts[li]))
+		li += stride
+	return sqrt(best)
+
+
 func _region_fronts(before: PackedVector3Array, after: PackedVector3Array, region: String) -> Array:
 	var sk := _avatar_skeleton()
 	var bi := sk.find_bone(&"Head") if sk != null else -1
@@ -1319,23 +1358,31 @@ func _run_headless_test() -> void:
 	var eyes0 := _face_part_mean("Eyes")
 	adjust_face_sculpt(&"EyeDepth", 8)
 	var eyes1 := _face_part_mean("Eyes")
-	fails += _expect("eyes follow depth", eyes1.z < eyes0.z - 0.006)
+	fails += _expect("eyes follow out", eyes1.z > eyes0.z + 0.006)
 	fails += _expect("eyes follow baked", _avatar._face_pristine.has("Eyes") and get_node_or_null("Avatar/Eyes/Male_Eyes") != null and (get_node_or_null("Avatar/Eyes/Male_Eyes") as MeshInstance3D).mesh != _avatar._face_pristine["Eyes"])
 	reset_face_sculpt(&"EyeDepth")
 	fails += _expect("eyes follow restores", (get_node_or_null("Avatar/Eyes/Male_Eyes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyes"])
 	var lash0 := _face_part_mean("Eyelashes")
 	adjust_face_sculpt(&"EyelidHeavy", 8)
 	var lash1 := _face_part_mean("Eyelashes")
-	fails += _expect("lashes follow lid", lash1.y < lash0.y - 0.004)
+	fails += _expect("lashes follow lid", lash1.y < lash0.y - 0.003)
 	fails += _expect("eyes ignore lid", (get_node_or_null("Avatar/Eyes/Male_Eyes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyes"])
 	reset_face_sculpt(&"EyelidHeavy")
 	fails += _expect("lashes follow restores", (get_node_or_null("Avatar/Eyelashes/Male_Eyelashes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyelashes"])
 	var brow0 := _face_part_mean("Eyebrows")
 	adjust_face_sculpt(&"BrowRidgeDepth", 8)
 	var brow1 := _face_part_mean("Eyebrows")
-	fails += _expect("brows follow ridge", brow1.z > brow0.z + 0.006)
+	fails += _expect("brows follow ridge", brow1.z > brow0.z + 0.003)
 	reset_face_sculpt(&"BrowRidgeDepth")
 	fails += _expect("brows follow restores", (get_node_or_null("Avatar/Eyebrows/Male_Eyebrows") as MeshInstance3D).mesh == _avatar._face_pristine["Eyebrows"])
+	# Authored clearance pin (09/10, 1mm Blender fix): min distance between
+	# the eyeballs and the Eyelids skin at rest. A future export that touches
+	# the lids again fails here instead of in the viewport.
+	for sk3 in CharacterAvatar.SCULPT_KEYS:
+		reset_face_sculpt(sk3)
+	var clear := _eye_lid_clearance()
+	print("[CharTest] eye clearance %.4f" % clear)
+	fails += _expect("eyes clear lids", clear > 0.0003)
 	# 10. Beard submenu (single vendor file now, more later — albedo like hair).
 	fails += _expect("beard none default", beard_display() == "None" and beard_file("Male", &"None").is_empty())
 	fails += _expect("beard file male", beard_file("Male", &"Beard").ends_with("Hair_Beard.gltf"))
@@ -1612,14 +1659,14 @@ func _run_headless_test() -> void:
 	var mpout := _region_pout(mpout_pair[0], mpout_pair[1], "UpperLip")
 	fails += _expect("sculpt pout pushes center", mpout.size() == 2 and mpout[0] > 0.005)
 	fails += _expect("sculpt pout holds edges", mpout.size() == 2 and mpout[0] > mpout[1] + 0.002)
-	# 21. Eyes & brows (08/10): lid drops, globe sinks back, eye band lifts,
-	# brow mesh rises/thickens (Y scale), ridge pushes.
+	# 21. Eyes & brows (08/10, ranges 09/10): lid drops (±4), globe pushes
+	# out (+ = out, flipped 09/10), eye band lifts, ridge pushes (±4).
 	var eh_pair := _sculpt_deltas(&"EyelidHeavy", 8)
 	var eh_f := _region_floors(eh_pair[0], eh_pair[1], "UpperEyelid")
-	fails += _expect("sculpt lid drops", eh_f.size() == 2 and eh_f[1] < eh_f[0] - 0.006)
+	fails += _expect("sculpt lid drops", eh_f.size() == 2 and eh_f[1] < eh_f[0] - 0.003)
 	var ed_pair := _sculpt_deltas(&"EyeDepth", 8)
 	var ed_f := _region_fronts(ed_pair[0], ed_pair[1], "Eyelids")
-	fails += _expect("sculpt eye sinks", ed_f.size() == 2 and ed_f[1] < ed_f[0] - 0.006)
+	fails += _expect("sculpt eye out", ed_f.size() == 2 and ed_f[1] > ed_f[0] + 0.006)
 	var ey_pair := _sculpt_deltas(&"EyeHeight", 8)
 	var ey_f := _region_floors(ey_pair[0], ey_pair[1], "Eyelids")
 	fails += _expect("sculpt eye lifts", ey_f.size() == 2 and ey_f[1] > ey_f[0] + 0.006)
@@ -1627,7 +1674,7 @@ func _run_headless_test() -> void:
 	# (inert asserts in section 16 until then).
 	var bd_pair := _sculpt_deltas(&"BrowDepth", 8)
 	var bd_f := _region_fronts(bd_pair[0], bd_pair[1], "BrowRidge")
-	fails += _expect("sculpt ridge pushes", bd_f.size() == 2 and bd_f[1] > bd_f[0] + 0.006)
+	fails += _expect("sculpt ridge pushes", bd_f.size() == 2 and bd_f[1] > bd_f[0] + 0.003)
 	# 22. Jaw & chin (08/10): gonions widen symmetric, chin drops/widens/
 	# projects, cleft sinks.
 	var jw_pair := _sculpt_deltas(&"JawWidth", 8)
@@ -1673,7 +1720,7 @@ func _run_headless_test() -> void:
 	fails += _expect("sculpt forehead no cross", _no_center_cross(fw_pair[0], fw_pair[1]))
 	var br_pair := _sculpt_deltas(&"BrowRidgeDepth", 8)
 	var br_f := _region_fronts(br_pair[0], br_pair[1], "BrowRidge")
-	fails += _expect("sculpt ridge juts", br_f.size() == 2 and br_f[1] > br_f[0] + 0.006)
+	fails += _expect("sculpt ridge juts", br_f.size() == 2 and br_f[1] > br_f[0] + 0.003)
 	var es_pair := _sculpt_deltas(&"EarSize", 8)
 	var es_h := _region_yextent(es_pair[0], es_pair[1], "Ears")
 	fails += _expect("sculpt ears grow", es_h.size() == 2 and es_h[1] > es_h[0] + 0.0008)
