@@ -1,0 +1,12 @@
+[gd_scene format=3 uid="uid://eemjys4h72ou"]
+
+[ext_resource type="PackedScene" uid="uid://uedsfngbxgvc" path="res://assets/meshes/characters/Superhero_Male_FullBody.gltf" id="1_tswil"]
+[ext_resource type="PackedScene" uid="uid://802xj8x1ah7b" path="res://assets/meshes/characters/parts/male/eyes/Male_Eyes.gltf" id="2_ifeyy"]
+[ext_resource type="Script" path="res://scenes/tests/male_eyes_clipping_bug.gd" id="3_eyeclip"]
+
+[node name="Node3D" type="Node3D" unique_id=1622254622]
+script = ExtResource("3_eyeclip")
+
+[node name="Superhero_Male_FullBody" parent="." unique_id=771151860 instance=ExtResource("1_tswil")]
+
+[node name="Male_Eyes2" parent="." unique_id=2011122830 instance=ExtResource("2_ifeyy")]

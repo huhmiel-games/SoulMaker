@@ -595,6 +595,26 @@ func _region_floors(before: PackedVector3Array, after: PackedVector3Array, regio
 ## Foremost model-Z of a region's mask members, before/after paired by index
 ## (same fixed-set rule: membership on BEFORE positions).
 ## Returns [front_before, front_after].
+## Mean model-space position of a mounted face part's verts (Vector3.ZERO
+## when nothing mounted): proves sculpt follow moves the part with its socket.
+func _face_part_mean(slot: String) -> Vector3:
+	var holder := get_node_or_null("Avatar/" + slot) as Node3D
+	if holder == null:
+		return Vector3.ZERO
+	var m := Vector3.ZERO
+	var n := 0
+	for ch in holder.get_children():
+		var mi := ch as MeshInstance3D
+		if mi == null or mi.mesh == null:
+			continue
+		for s in mi.mesh.get_surface_count():
+			var vv: PackedVector3Array = mi.mesh.surface_get_arrays(s)[Mesh.ARRAY_VERTEX]
+			for v in vv:
+				m += v
+				n += 1
+	return m / float(n) if n > 0 else Vector3.ZERO
+
+
 func _region_fronts(before: PackedVector3Array, after: PackedVector3Array, region: String) -> Array:
 	var sk := _avatar_skeleton()
 	var bi := sk.find_bone(&"Head") if sk != null else -1
@@ -1294,6 +1314,28 @@ func _run_headless_test() -> void:
 		if _slot_mats(&"Skin").has(m):
 			lash_shared = true
 	fails += _expect("lashes split from skin", not lash_shared)
+	# 9c. Face-part follow (09/10): socket rows bake the mask-mean into the
+	# rigid parts (mesh space, anim-exact); unrelated rows leave them pristine.
+	var eyes0 := _face_part_mean("Eyes")
+	adjust_face_sculpt(&"EyeDepth", 8)
+	var eyes1 := _face_part_mean("Eyes")
+	fails += _expect("eyes follow depth", eyes1.z < eyes0.z - 0.006)
+	fails += _expect("eyes follow baked", _avatar._face_pristine.has("Eyes") and get_node_or_null("Avatar/Eyes/Male_Eyes") != null and (get_node_or_null("Avatar/Eyes/Male_Eyes") as MeshInstance3D).mesh != _avatar._face_pristine["Eyes"])
+	reset_face_sculpt(&"EyeDepth")
+	fails += _expect("eyes follow restores", (get_node_or_null("Avatar/Eyes/Male_Eyes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyes"])
+	var lash0 := _face_part_mean("Eyelashes")
+	adjust_face_sculpt(&"EyelidHeavy", 8)
+	var lash1 := _face_part_mean("Eyelashes")
+	fails += _expect("lashes follow lid", lash1.y < lash0.y - 0.004)
+	fails += _expect("eyes ignore lid", (get_node_or_null("Avatar/Eyes/Male_Eyes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyes"])
+	reset_face_sculpt(&"EyelidHeavy")
+	fails += _expect("lashes follow restores", (get_node_or_null("Avatar/Eyelashes/Male_Eyelashes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyelashes"])
+	var brow0 := _face_part_mean("Eyebrows")
+	adjust_face_sculpt(&"BrowRidgeDepth", 8)
+	var brow1 := _face_part_mean("Eyebrows")
+	fails += _expect("brows follow ridge", brow1.z > brow0.z + 0.006)
+	reset_face_sculpt(&"BrowRidgeDepth")
+	fails += _expect("brows follow restores", (get_node_or_null("Avatar/Eyebrows/Male_Eyebrows") as MeshInstance3D).mesh == _avatar._face_pristine["Eyebrows"])
 	# 10. Beard submenu (single vendor file now, more later — albedo like hair).
 	fails += _expect("beard none default", beard_display() == "None" and beard_file("Male", &"None").is_empty())
 	fails += _expect("beard file male", beard_file("Male", &"Beard").ends_with("Hair_Beard.gltf"))

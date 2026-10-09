@@ -178,6 +178,9 @@ func _bone_rest_world(sk: Skeleton3D, bi: int) -> Transform3D:
 ## Pristine fused Skin mesh (sculpt source of truth: every sculpt pass starts
 ## from here, so repeated adjusts never accumulate). Refreshed each build.
 var _skin_pristine: ArrayMesh = null
+## Pristine mounted face-part meshes (follow-sculpt source of truth, same
+## role as _skin_pristine): slot -> ArrayMesh, stored at mount time.
+var _face_pristine := {}
 
 
 func _snap_pristine() -> void:
@@ -684,6 +687,16 @@ const SCULPT_SPEC := {
 	&"BrowRidgeDepth": {"region": "BrowRidge", "menu": "forehead", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 0.8},
 	&"EarSize": {"region": "Ears", "menu": "forehead", "mode": "scale", "rate": 0.15, "mirror": false, "max_cm": 0.8},
 }
+## Face-part follow (09/10): holder slot -> driving sculpt keys. The mounted
+## parts (rigid, 100% Head) bake the MEAN mask displacement of their socket
+## into their verts (same Head-frame math as the skin), so socket rows never
+## strand them. Eyes track the socket (Depth/Height) but NOT lid weight;
+## lashes ride the lids; brows ride the ridge (both menus' depth rows).
+const SCULPT_FOLLOW := {
+	&"Eyes": [&"EyeDepth", &"EyeHeight"],
+	&"Eyelashes": [&"EyeDepth", &"EyeHeight", &"EyelidHeavy"],
+	&"Eyebrows": [&"BrowDepth", &"BrowRidgeDepth", &"BrowHeight", &"BrowThick"],
+}
 var _sculpt := {} # StringName sculpt key -> float cm (0.0 default)
 var _sculpt_cache := {} # gender -> regions dict from SCULPT_PATH (lazy)
 
@@ -812,6 +825,7 @@ func _sculpt_fused() -> void:
 			var mmi := mi as MeshInstance3D
 			if mmi != null and mmi.name == &"Skin" and _skin_pristine != null and mmi.mesh != _skin_pristine:
 				mmi.mesh = _skin_pristine
+		_face_follow_restore()
 		return
 	var sk := master_skeleton()
 	if sk == null:
@@ -821,6 +835,17 @@ func _sculpt_fused() -> void:
 		return
 	var head_world: Transform3D = _bone_rest_world(sk, bi)
 	var head_inv: Transform3D = head_world.affine_inverse()
+	# Follow accumulators: driving key -> {parts, sum, count} over mask
+	# members (halo excluded: exact socket motion). Survives all surfaces.
+	var follow_acc := {}
+	for fslot in SCULPT_FOLLOW:
+		for fkey in (SCULPT_FOLLOW[fslot] as Array):
+			if active.has(fkey) and not follow_acc.has(fkey):
+				follow_acc[fkey] = {"parts": [], "sum": Vector3.ZERO, "count": 0}
+	for fslot in SCULPT_FOLLOW:
+		for fkey in (SCULPT_FOLLOW[fslot] as Array):
+			if follow_acc.has(fkey) and not (follow_acc[fkey] as Dictionary)["parts"].has(fslot):
+				((follow_acc[fkey] as Dictionary)["parts"] as Array).append(fslot)
 	for mi in _avatar_mis():
 		var mmi := mi as MeshInstance3D
 		if mmi == null or mmi.name != &"Skin":
@@ -943,6 +968,12 @@ func _sculpt_fused() -> void:
 				_sculpt_diffuse(koff, kwmax, _sculpt_adj(src_mesh, s, verts, a[Mesh.ARRAY_INDEX]))
 				for i in n:
 					total[i] += koff[i]
+				if follow_acc.has(key):
+					var fa: Dictionary = follow_acc[key]
+					for i in n:
+						if kwmax[i] > 0.0:
+							fa["sum"] = (fa["sum"] as Vector3) + koff[i]
+							fa["count"] = int(fa["count"]) + 1
 			off = total
 			# Twin equalization (seam guard): bit-identical verts share the
 			# strongest offset — a section seam can never crack open even
@@ -973,6 +1004,80 @@ func _sculpt_fused() -> void:
 			out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, a)
 			out.surface_set_material(s, src_mesh.surface_get_material(s))
 		mmi.mesh = out
+	# Part follow: per-slot mean over its driving keys, baked into the part
+	# verts with the skin's own Head-frame math (anim-exact: the offset lives
+	# in bone space, not as a static node translation). No mask verts (key
+	# inactive or region unpainted) = restore pristine.
+	var fmean := {}
+	for fslot2 in SCULPT_FOLLOW:
+		var fsum := Vector3.ZERO
+		var fcount := 0
+		for fkey2 in (SCULPT_FOLLOW[fslot2] as Array):
+			if follow_acc.has(fkey2):
+				var fa2: Dictionary = follow_acc[fkey2]
+				fsum += fa2["sum"] as Vector3
+				fcount += int(fa2["count"])
+		if fcount > 0:
+			fmean[fslot2] = fsum / float(fcount)
+	for fslot2 in SCULPT_FOLLOW:
+		_face_follow_bake(String(fslot2), fmean.get(fslot2, Vector3.ZERO), head_world, head_inv, bi)
+
+
+## Bakes a uniform Head-frame translation into a mounted part's verts (same
+## conversion as the skin, so probe/idle poses carry it identically). Zero
+## mean = restore the pristine mesh. Skips holders with nothing mounted.
+func _face_follow_bake(slot: String, mean: Vector3, head_world: Transform3D, head_inv: Transform3D, head_idx: int) -> void:
+	var holder := get_node_or_null(slot) as Node3D
+	if holder == null:
+		return
+	var pristine := _face_pristine.get(slot) as ArrayMesh
+	for ch in holder.get_children():
+		var mi := ch as MeshInstance3D
+		if mi == null or mi.mesh == null or pristine == null:
+			continue
+		if mean.length_squared() < 1e-12:
+			if mi.mesh != pristine:
+				mi.mesh = pristine
+			continue
+		if not _face_mi_all_head(mi, pristine, head_idx):
+			print("[Character] follow skipped %s (non-Head weights)" % slot)
+			continue
+		var pout := ArrayMesh.new()
+		for s in pristine.get_surface_count():
+			var a := pristine.surface_get_arrays(s)
+			var pverts: PackedVector3Array = a[Mesh.ARRAY_VERTEX]
+			for i in pverts.size():
+				pverts[i] = head_world * (head_inv * pverts[i] + mean)
+			a[Mesh.ARRAY_VERTEX] = pverts
+			pout.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, a)
+			pout.surface_set_material(s, pristine.surface_get_material(s))
+		mi.mesh = pout
+
+
+## Restores every mounted part to its pristine mesh (all-zero sculpt path).
+func _face_follow_restore() -> void:
+	for slot in _face_pristine:
+		var holder := get_node_or_null(String(slot)) as Node3D
+		if holder == null:
+			continue
+		var pristine := _face_pristine[slot] as ArrayMesh
+		for ch in holder.get_children():
+			var mi := ch as MeshInstance3D
+			if mi != null and mi.mesh != null and pristine != null and mi.mesh != pristine:
+				mi.mesh = pristine
+
+
+## 100% Head guard for follow baking (the Head-frame conversion is only
+## exact for Head-bound verts): every weighted bone must be the Head.
+func _face_mi_all_head(mi: MeshInstance3D, pristine: ArrayMesh, head_idx: int) -> bool:
+	for s in pristine.get_surface_count():
+		var a := pristine.surface_get_arrays(s)
+		var bix: PackedInt32Array = a[Mesh.ARRAY_BONES]
+		var bw: PackedFloat32Array = a[Mesh.ARRAY_WEIGHTS]
+		for i in bw.size():
+			if bw[i] > 0.0 and bix[i] != head_idx:
+				return false
+	return true
 
 
 ## Neighbor lists per vert (shared triangles; position-welded when the
@@ -1372,6 +1477,7 @@ func _mount_face_part(slot: String, path: String, albedo: bool) -> void:
 	var holder := _face_holder(slot)
 	_clear_holder(holder)
 	if path.is_empty():
+		_face_pristine.erase(slot)
 		return
 	var packed := load(path) as PackedScene
 	if packed == null:
@@ -1414,6 +1520,7 @@ func _mount_face_part(slot: String, path: String, albedo: bool) -> void:
 	holder.add_child(mi)
 	mi.skeleton = mi.get_path_to(master)
 	_reset_dress(holder, albedo)
+	_face_pristine[slot] = out
 	print("[Character] %s -> %s" % [slot, path.get_file()])
 
 
