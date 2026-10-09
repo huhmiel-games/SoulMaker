@@ -698,7 +698,7 @@ const SCULPT_SPEC := {
 	&"ForeheadHeight": {"region": "Forehead", "menu": "forehead", "axis": Vector3(0, 1, 0), "mirror": false, "max_cm": 0.8},
 	&"ForeheadWidth": {"region": "Forehead", "menu": "forehead", "axis": Vector3(1, 0, 0), "mirror": true, "max_cm": 0.8},
 	&"BrowRidgeDepth": {"region": "BrowRidge", "menu": "forehead", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 0.4},
-	&"EarSize": {"region": "Ears", "menu": "forehead", "mode": "scale", "rate": 0.15, "mirror": false, "max_cm": 0.8},
+	&"EarSize": {"region": "Ears", "menu": "forehead", "mode": "root", "rate": 0.45, "orate": 0.09, "mirror": false, "max_cm": 0.8, "rings": 1},
 }
 ## Face-part follow (09/10): holder slot -> driving sculpt keys. Compact rigid
 ## parts (eyes, lashes, brows — 100% Head) bake the SUM of per-key mask means
@@ -758,6 +758,7 @@ func _sculpt_regions() -> Dictionary:
 		var c := Vector3.ZERO
 		var mn := Vector3(1e9, 1e9, 1e9)
 		var mx := Vector3(-1e9, -1e9, -1e9)
+		var minax := 1e9
 		var n := 0
 		for p in ((sec[region] as Dictionary).get("points", []) as Array):
 			var pa: Array = p
@@ -769,10 +770,11 @@ func _sculpt_regions() -> Dictionary:
 			c += fp
 			mn = mn.min(fp)
 			mx = mx.max(fp)
+			minax = minf(minax, absf(fp.x))
 			n += 1
 		if n > 0:
 			c /= float(n)
-			out[String(region)] = {"pts": pts, "cx": c.x, "hx": maxf(mx.x - c.x, c.x - mn.x), "c": c, "mn": mn, "mx": mx, "n": n}
+			out[String(region)] = {"pts": pts, "cx": c.x, "hx": maxf(mx.x - c.x, c.x - mn.x), "ix": minax, "c": c, "mn": mn, "mx": mx, "n": n}
 	_sculpt_cache[GENDERS[_gender]] = out
 	return out
 
@@ -967,6 +969,7 @@ func _sculpt_fused() -> void:
 			var total := PackedVector3Array()
 			total.resize(n)
 			var surf_koffs := {} # glue-driving key -> post-diffusion field
+			var ear_mask: PackedFloat32Array = PackedFloat32Array() # EarSize mask (twin-eq exclusion)
 			# Per-key fields (08/10 halo-erasure fix): each row computes its
 			# own off + mask, diffuses through verts masked for NOBODY ELSE,
 			# then adds in. The old shared wmax let any overlapping region
@@ -1010,6 +1013,22 @@ func _sculpt_fused() -> void:
 							var c2: Vector3 = r["c"]
 							var ang := -deg_to_rad(float(spec.get("deg", 8.0)) * kval)
 							koff[i] += Basis((spec["axis"] as Vector3).normalized(), ang) * (q - c2) + c2 - q
+						elif mode == "root":
+							# Per-side ear growth (EarSize): X grows outward from
+							# the mask inner edge (the root stays, the rim moves
+							# most — the skull never grows with the ear) while
+							# Y/Z grow in place about the centroid (free axes,
+							# "orate"). Symmetric masks only.
+							var ix := maxf(float(r.get("ix", 0.0)), 1e-9)
+							var rc: Vector3 = r["c"]
+							var side := signf(q.x - float(r["cx"]))
+							if side == 0.0:
+								side = 1.0
+							var rrate := float(spec.get("rate", 0.8))
+							var orate := float(spec.get("orate", 0.15))
+							koff[i].x += side * maxf(absf(q.x - float(r["cx"])) - ix, 0.0) * kval * rrate
+							koff[i].y += (q.y - rc.y) * kval * orate
+							koff[i].z += (q.z - rc.z) * kval * orate
 						elif mode == "falloff":
 							# Axial falloff bend (Curve, Pout...): sin peak
 							# mid-region along `along`, ends fixed, pushes `axis`.
@@ -1020,7 +1039,7 @@ func _sculpt_fused() -> void:
 							koff[i] += (spec["axis"] as Vector3).normalized() * v * sin(PI * t)
 						else:
 							koff[i] += (spec["axis"] as Vector3).normalized() * v
-				_sculpt_diffuse(koff, kwmax, _sculpt_adj(src_mesh, s, verts, a[Mesh.ARRAY_INDEX]))
+				_sculpt_diffuse(koff, kwmax, _sculpt_adj(src_mesh, s, verts, a[Mesh.ARRAY_INDEX]), int(spec.get("rings", SCULPT_RINGS)))
 				for i in n:
 					total[i] += koff[i]
 				if follow_acc.has(key):
@@ -1031,17 +1050,48 @@ func _sculpt_fused() -> void:
 							fa["count"] = int(fa["count"]) + 1
 				if take_glue and glue_keys.has(key):
 					surf_koffs[key] = koff
+				if key == &"EarSize":
+					# Ear/skull seam set (twin-eq exclusion below): the max
+					# rule would yank skull twins to the full ear offset.
+					ear_mask = kwmax
 			off = total
 			# Twin equalization (seam guard): bit-identical verts share the
 			# strongest offset — a section seam can never crack open even
 			# when twin neighborhoods differ (weld shares neighbors, this
-			# shares the result).
+			# shares the result). EXCEPT across the ear seam (09/10): an ear
+			# twin at full offset would drag its static skull twin along —
+			# mixed groups keep their natural (halo-smoothed) offsets, so
+			# growing the ear never grows the skull.
 			var tgroups := {}
 			for i in n:
 				if not tgroups.has(verts[i]):
 					tgroups[verts[i]] = []
 				(tgroups[verts[i]] as Array).append(i)
-			off = _twin_eq(off, tgroups)
+			if ear_mask.is_empty():
+				off = _twin_eq(off, tgroups)
+			else:
+				for pos in tgroups:
+					var ml: Array = tgroups[pos]
+					if ml.size() < 2:
+						continue
+					var has_ear := false
+					var has_out := false
+					for m in ml:
+						if ear_mask[int(m)] > 0.0:
+							has_ear = true
+						else:
+							has_out = true
+					if has_ear and has_out:
+						continue
+					var best := Vector3.ZERO
+					var bestl := -1.0
+					for m in ml:
+						var l: float = off[int(m)].length_squared()
+						if l > bestl:
+							bestl = l
+							best = off[int(m)]
+					for m in ml:
+						off[int(m)] = best
 			if take_glue:
 				for gk in surf_koffs:
 					# Same seam rule as the bake, then CoW-safe append
@@ -1345,19 +1395,21 @@ func _sculpt_adj(mesh: ArrayMesh, s: int, verts: PackedVector3Array, idx: Packed
 	return adj
 
 
-## Diffuses the offset field outward over SCULPT_RINGS topology rings
-## (xSCULPT_DECAY each): mask verts keep their exact offset (boundary
-## condition), others take the STRONGEST neighbor offset x decay. Max (not
-## mean): a lone core neighbor among k still verts would dilute to ~1/k and
-## leave a 9mm spike step; max follows the slope (4/2.4/1.4/2.2mm steps at
-## 10mm core — under the 5mm anti-cliff bar). Jacobi, deterministic.
-func _sculpt_diffuse(off: PackedVector3Array, wmax: PackedFloat32Array, adj: Array) -> void:
+## Diffuses the offset field outward over `rings` topology rings
+## (xSCULPT_DECAY each, default SCULPT_RINGS; per-key "rings" override for
+## tight rows like EarSize whose halo must not reach the head): mask verts
+## keep their exact offset (boundary condition), others take the STRONGEST
+## neighbor offset x decay. Max (not mean): a lone core neighbor among k
+## still verts would dilute to ~1/k and leave a 9mm spike step; max follows
+## the slope (4/2.4/1.4/2.2mm steps at 10mm core — under the 5mm anti-cliff
+## bar). Jacobi, deterministic.
+func _sculpt_diffuse(off: PackedVector3Array, wmax: PackedFloat32Array, adj: Array, rings: int = SCULPT_RINGS) -> void:
 	var n := off.size()
 	if adj.size() != n:
 		return
 	var cur := off.duplicate()
 	var nxt := off.duplicate()
-	for _r in SCULPT_RINGS:
+	for _r in rings:
 		nxt = cur.duplicate()
 		for i in n:
 			if wmax[i] > 0.0:

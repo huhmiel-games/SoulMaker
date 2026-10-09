@@ -1512,6 +1512,35 @@ func _run_headless_test() -> void:
 	reset_face_sculpt(&"ForeheadWidth")
 	fails += _expect("hair width restores", (get_node_or_null("Avatar/Hair/Buzzed") as MeshInstance3D).mesh == _avatar._face_pristine["Hair"])
 	reset_hair()
+	# 17c. EarSize spares the head (09/10 live: growing the ears grew the
+	# skull side and clipped the hair). Tight Ears mask (flap only) + 1
+	# diffusion ring: the skull (|x| < 65mm) barely moves, the flap does.
+	adjust_face_sculpt(&"EarSize", 8)
+	var esmax := 0.0
+	var eflap := 0.0
+	var esk := _avatar_skeleton()
+	var ebi := esk.find_bone(&"Head") if esk != null else -1
+	if ebi != -1:
+		var einv: Transform3D = _avatar._bone_rest_world(esk, ebi).affine_inverse()
+		var esmi := _avatar_skin_mi()
+		var epris := _avatar._skin_pristine
+		for _s in mini(esmi.mesh.get_surface_count(), epris.get_surface_count()):
+			var ecv: PackedVector3Array = esmi.mesh.surface_get_arrays(_s)[Mesh.ARRAY_VERTEX]
+			var epv: PackedVector3Array = epris.surface_get_arrays(_s)[Mesh.ARRAY_VERTEX]
+			if ecv.size() != epv.size():
+				continue
+			for _i in ecv.size():
+				var dd: float = ecv[_i].distance_to(epv[_i])
+				if dd < 0.0005:
+					continue
+				var ax: float = absf((einv * epv[_i]).x)
+				if ax < 0.065:
+					esmax = maxf(esmax, dd)
+				elif ax > 0.08:
+					eflap = maxf(eflap, dd)
+	fails += _expect("earsize spares skull", esmax < 0.002)
+	fails += _expect("earsize grows flap", eflap > 0.004)
+	reset_face_sculpt(&"EarSize")
 	# 10. Beard submenu (single vendor file now, more later — albedo like hair).
 	fails += _expect("beard none default", beard_display() == "None" and beard_file("Male", &"None").is_empty())
 	fails += _expect("beard file male", beard_file("Male", &"Beard").ends_with("Hair_Beard.gltf"))
@@ -1871,7 +1900,7 @@ func _run_headless_test() -> void:
 	var ff_h := _region_yextent(ff_pair[0], ff_pair[1], "LowerFace")
 	fails += _expect("sculpt face fills", ff_h.size() == 2 and ff_h[1] > ff_h[0] + 0.0008)
 	# 24. Forehead & ears (08/10): forehead lifts/widens, ridge pushes,
-	# ears grow (uniform centroid scale).
+	# ears grow from the root (09/10: centroid scale grew the skull side).
 	var fh_pair := _sculpt_deltas(&"ForeheadHeight", 8)
 	var fh_f := _region_floors(fh_pair[0], fh_pair[1], "Forehead")
 	fails += _expect("sculpt forehead lifts", fh_f.size() == 2 and fh_f[1] > fh_f[0] + 0.006)
