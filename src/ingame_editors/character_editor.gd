@@ -629,6 +629,104 @@ func _face_part_mean(slot: String) -> Vector3:
 	return m / float(n) if n > 0 else Vector3.ZERO
 
 
+## Per-side mean X of a mounted face part, split at the part's own mean x
+## (symmetric parts: left ball vs right ball). Returns [left, right], ZERO
+## pair when nothing mounted — proves side-split follow (EyeSpacing).
+func _face_part_side_x(slot: String) -> Array:
+	var all := _face_part_verts(slot)
+	if all.is_empty():
+		return [0.0, 0.0]
+	var m := 0.0
+	for v in all:
+		m += v.x
+	m /= float(all.size())
+	var l := 0.0
+	var ln := 0
+	var r := 0.0
+	var rn := 0
+	for v in all:
+		if v.x < m:
+			l += v.x
+			ln += 1
+		else:
+			r += v.x
+			rn += 1
+	if ln == 0 or rn == 0:
+		return [0.0, 0.0]
+	return [l / float(ln), r / float(rn)]
+
+
+## Per-side mean radius of a mounted face part about its own side means
+## (split at the part's mean x). Returns [left_r, right_r], ZERO pair when
+## unmounted — proves rigid parts dilate with the socket (EyeSize).
+func _face_part_side_radii(slot: String) -> Array:
+	var all := _face_part_verts(slot)
+	if all.is_empty():
+		return [0.0, 0.0]
+	var m := 0.0
+	for v in all:
+		m += v.x
+	m /= float(all.size())
+	var cl := Vector3.ZERO
+	var cr := Vector3.ZERO
+	var ln := 0
+	var rn := 0
+	for v in all:
+		if v.x < m:
+			cl += v
+			ln += 1
+		else:
+			cr += v
+			rn += 1
+	if ln == 0 or rn == 0:
+		return [0.0, 0.0]
+	cl /= float(ln)
+	cr /= float(rn)
+	var rl := 0.0
+	var rr := 0.0
+	for v in all:
+		if v.x < m:
+			rl += v.distance_to(cl)
+		else:
+			rr += v.distance_to(cr)
+	return [rl / float(ln), rr / float(rn)]
+
+
+## Mean Y motion of a part's outer verts (past the side mean, away from the
+## center), paired before/after. Returns [mean_dy, n] — proves lashes ride
+## the lid tilt (EyeAngle).
+func _face_part_outer_dy(before: PackedVector3Array, after: PackedVector3Array) -> Array:
+	if before.size() != after.size() or before.is_empty():
+		return [0.0, 0]
+	var m := 0.0
+	for v in before:
+		m += v.x
+	m /= float(before.size())
+	var cl := Vector3.ZERO
+	var cr := Vector3.ZERO
+	var ln := 0
+	var rn := 0
+	for v in before:
+		if v.x < m:
+			cl += v
+			ln += 1
+		else:
+			cr += v
+			rn += 1
+	if ln == 0 or rn == 0:
+		return [0.0, 0]
+	cl /= float(ln)
+	cr /= float(rn)
+	var dy := 0.0
+	var n := 0
+	for i in before.size():
+		var q: Vector3 = before[i]
+		if (q.x < m and q.x < cl.x) or (q.x >= m and q.x > cr.x):
+			dy += after[i].y - before[i].y
+			n += 1
+	return [dy / float(maxi(n, 1)), n]
+
+
 ## All model-space verts of a mounted face part (empty when none mounted).
 func _face_part_verts(slot: String) -> PackedVector3Array:
 	var out := PackedVector3Array()
@@ -1422,6 +1520,54 @@ func _run_headless_test() -> void:
 	fails += _expect("follow height adds", ez1.y > ez0.y + 0.0005)
 	reset_face_sculpt(&"EyeDepth")
 	reset_face_sculpt(&"EyeHeight")
+	# EyeSpacing drags the balls + lashes per side (side-split means — a
+	# global mean would cancel to ~0); Size/Angle are centroid-neutral so
+	# the rigid parts correctly keep their pristine mesh.
+	var esp0 := _face_part_side_x("Eyes")
+	var espl0 := _face_part_side_x("Eyelashes")
+	adjust_face_sculpt(&"EyeSpacing", 8)
+	var esp1 := _face_part_side_x("Eyes")
+	var espl1 := _face_part_side_x("Eyelashes")
+	fails += _expect("eyes space out", esp1[0] < esp0[0] - 0.005 and esp1[1] > esp0[1] + 0.005)
+	fails += _expect("lashes space out", espl1[0] < espl0[0] - 0.004 and espl1[1] > espl0[1] + 0.004)
+	reset_face_sculpt(&"EyeSpacing")
+	fails += _expect("eyes space restores", (get_node_or_null("Avatar/Eyes/Male_Eyes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyes"])
+	fails += _expect("lashes space restores", (get_node_or_null("Avatar/Eyelashes/Male_Eyelashes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyelashes"])
+	var esz0 := _face_part_side_radii("Eyes")
+	var eslz0 := _face_part_side_radii("Eyelashes")
+	adjust_face_sculpt(&"EyeSize", 8)
+	var esz1 := _face_part_side_radii("Eyes")
+	var eslz1 := _face_part_side_radii("Eyelashes")
+	fails += _expect("eyes scale with size", esz1[0] > esz0[0] + 0.0008 and esz1[1] > esz0[1] + 0.0008)
+	fails += _expect("lashes scale with size", eslz1[0] > eslz0[0] + 0.0005 and eslz1[1] > eslz0[1] + 0.0005)
+	reset_face_sculpt(&"EyeSize")
+	# Negative size (live clip report 10/10): the socket shrinks AND the
+	# balls shrink with it — the aperture never gets smaller than the globe.
+	adjust_face_sculpt(&"EyeSize", -8)
+	var esz2 := _face_part_side_radii("Eyes")
+	var eslz2 := _face_part_side_radii("Eyelashes")
+	fails += _expect("eyes shrink with socket", esz2[0] < esz0[0] - 0.0008 and esz2[1] < esz0[1] - 0.0008)
+	fails += _expect("lashes shrink with socket", eslz2[0] < eslz0[0] - 0.0005 and eslz2[1] < eslz0[1] - 0.0005)
+	reset_face_sculpt(&"EyeSize")
+	# Lashes ride the tilt (live report 10/10: they stayed straight): outer
+	# lash verts drop with the lid margin.
+	var lan0 := _face_part_verts("Eyelashes")
+	adjust_face_sculpt(&"EyeAngle", 8)
+	fails += _expect("eyes ignore angle", (get_node_or_null("Avatar/Eyes/Male_Eyes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyes"])
+	var lan1 := _face_part_verts("Eyelashes")
+	var lod := _face_part_outer_dy(lan0, lan1)
+	fails += _expect("lashes ride tilt", int(lod[1]) > 0 and float(lod[0]) < -0.0005)
+	reset_face_sculpt(&"EyeAngle")
+	fails += _expect("lashes tilt restores", (get_node_or_null("Avatar/Eyelashes/Male_Eyelashes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyelashes"])
+	# Spacing superposes with depth (side-split + global bakes add without
+	# touching each other's axis).
+	adjust_face_sculpt(&"EyeDepth", -4)
+	var ezs0 := _face_part_mean("Eyes")
+	adjust_face_sculpt(&"EyeSpacing", 8)
+	var ezs1 := _face_part_mean("Eyes")
+	fails += _expect("follow spacing spares z", absf(ezs1.z - ezs0.z) < 0.0005)
+	reset_face_sculpt(&"EyeDepth")
+	reset_face_sculpt(&"EyeSpacing")
 	# 9d. Hair follow (09/10 step 3): the hairline rides ForeheadHeight so
 	# the skin never slides under the cards; unrelated parts stay pristine.
 	adjust_hair(1) # mount Buzzed (male) for a measurable follow target
@@ -1618,6 +1764,106 @@ func _run_headless_test() -> void:
 			fails += _expect("earpoint gradient", ebotn == 0 or absf(ebot / float(ebotn)) < 0.0008)
 		fails += _expect("ear row transition band", eband < 0.020)
 		reset_face_sculpt(ek)
+	# 17e. Eye rows (per-side socket math on the Eyelids islands): spacing
+	# shifts each orbit as a block, size dilates about the side centroid,
+	# angle tilts about it mirrored (+ = outer corners drop). Halo confined
+	# to a 20mm band, symmetric both sides.
+	var lidx: float = _avatar.sculpt_region_center("Eyelids").x
+	var lb5: Dictionary = _avatar.sculpt_region_bounds("Eyelids")
+	for ek2 in [&"EyeSpacing", &"EyeSize", &"EyeAngle"]:
+		adjust_face_sculpt(ek2, 8)
+		var ldx := 0.0
+		var ldxn := 0
+		var rdx := 0.0
+		var rdxn := 0
+		var cl5 := Vector3.ZERO
+		var cln5 := 0
+		var cr5 := Vector3.ZERO
+		var crn5 := 0
+		var emaxl5 := 0.0
+		var emaxr5 := 0.0
+		var rl0 := 0.0
+		var rl1 := 0.0
+		var rln := 0
+		var ody := 0.0
+		var odyn := 0
+		var eband5 := 0.0
+		if ebi != -1 and not lb5.is_empty():
+			var einv5: Transform3D = _avatar._bone_rest_world(esk, ebi).affine_inverse()
+			var lmn5: Vector3 = lb5["mn"]
+			var lmx5: Vector3 = lb5["mx"]
+			var esmi5 := _avatar_skin_mi()
+			var epris5 := _avatar._skin_pristine
+			for _s5 in mini(esmi5.mesh.get_surface_count(), epris5.get_surface_count()):
+				var ecv5: PackedVector3Array = esmi5.mesh.surface_get_arrays(_s5)[Mesh.ARRAY_VERTEX]
+				var epv5: PackedVector3Array = epris5.surface_get_arrays(_s5)[Mesh.ARRAY_VERTEX]
+				if ecv5.size() != epv5.size():
+					continue
+				for _i5 in ecv5.size():
+					var eq5: Vector3 = einv5 * epv5[_i5]
+					if not _avatar.sculpt_in_region("Eyelids", eq5):
+						continue
+					var ed5: Vector3 = ecv5[_i5] - epv5[_i5]
+					if eq5.x < lidx:
+						cl5 += eq5
+						cln5 += 1
+						ldx += ed5.x
+						ldxn += 1
+						emaxl5 = maxf(emaxl5, ed5.length())
+					else:
+						cr5 += eq5
+						crn5 += 1
+						rdx += ed5.x
+						rdxn += 1
+						emaxr5 = maxf(emaxr5, ed5.length())
+			if cln5 > 0:
+				cl5 /= float(cln5)
+			if crn5 > 0:
+				cr5 /= float(crn5)
+			if ek2 != &"EyeSpacing":
+				for _s6 in mini(esmi5.mesh.get_surface_count(), epris5.get_surface_count()):
+					var ecv6: PackedVector3Array = esmi5.mesh.surface_get_arrays(_s6)[Mesh.ARRAY_VERTEX]
+					var epv6: PackedVector3Array = epris5.surface_get_arrays(_s6)[Mesh.ARRAY_VERTEX]
+					if ecv6.size() != epv6.size():
+						continue
+					for _i6 in ecv6.size():
+						var eq6: Vector3 = einv5 * epv6[_i6]
+						if not _avatar.sculpt_in_region("Eyelids", eq6):
+							continue
+						var ed6: Vector3 = ecv6[_i6] - epv6[_i6]
+						if ek2 == &"EyeSize":
+							var sc6: Vector3 = cl5 if eq6.x < lidx else cr5
+							rl0 += eq6.distance_to(sc6)
+							rl1 += (eq6 + ed6).distance_to(sc6)
+							rln += 1
+						elif (eq6.x < lidx and eq6.x < cl5.x) or (eq6.x >= lidx and eq6.x > cr5.x):
+							ody += ed6.y
+							odyn += 1
+			for _s7 in mini(esmi5.mesh.get_surface_count(), epris5.get_surface_count()):
+				var ecv7: PackedVector3Array = esmi5.mesh.surface_get_arrays(_s7)[Mesh.ARRAY_VERTEX]
+				var epv7: PackedVector3Array = epris5.surface_get_arrays(_s7)[Mesh.ARRAY_VERTEX]
+				if ecv7.size() != epv7.size():
+					continue
+				for _i7 in ecv7.size():
+					if ecv7[_i7].distance_to(epv7[_i7]) < 0.001:
+						continue
+					var eq7: Vector3 = einv5 * epv7[_i7]
+					var edd7 := Vector3(maxf(lmn5.x - eq7.x, 0.0) + maxf(eq7.x - lmx5.x, 0.0), maxf(lmn5.y - eq7.y, 0.0) + maxf(eq7.y - lmx5.y, 0.0), maxf(lmn5.z - eq7.z, 0.0) + maxf(eq7.z - lmx5.z, 0.0))
+					eband5 = maxf(eband5, edd7.length())
+		if ek2 == &"EyeSpacing":
+			fails += _expect("eyespace spreads", ldxn > 0 and rdxn > 0 and ldx / float(ldxn) < -0.005 and rdx / float(rdxn) > 0.005)
+			fails += _expect("eyespace symmetric", absf(emaxl5 - emaxr5) / maxf(maxf(emaxl5, emaxr5), 1e-9) < 0.25)
+		elif ek2 == &"EyeSize":
+			fails += _expect("eyesize dilates", rln > 0 and (rl1 - rl0) / float(rln) > 0.001)
+			fails += _expect("eyesize symmetric", absf(emaxl5 - emaxr5) / maxf(maxf(emaxl5, emaxr5), 1e-9) < 0.25)
+		else:
+			fails += _expect("eyeangle drops outer", odyn > 0 and ody / float(odyn) < -0.0008)
+			fails += _expect("eyeangle symmetric", absf(emaxl5 - emaxr5) / maxf(maxf(emaxl5, emaxr5), 1e-9) < 0.25)
+		# rings:3 rows (like Depth/Height) carry a ~21mm halo by design;
+		# the pin guards skull-dragging, not the designed falloff.
+		var band5 := 0.025 if ek2 == &"EyeSpacing" else 0.020
+		fails += _expect("eye row transition band", eband5 < band5)
+		reset_face_sculpt(ek2)
 	# 10. Beard submenu (single vendor file now, more later — albedo like hair).
 	fails += _expect("beard none default", beard_display() == "None" and beard_file("Male", &"None").is_empty())
 	fails += _expect("beard file male", beard_file("Male", &"Beard").ends_with("Hair_Beard.gltf"))
@@ -1747,7 +1993,7 @@ func _run_headless_test() -> void:
 	fails += _expect("menu face mouth rows", _menu._entries.size() == 7 + 1)
 	_menu._pop()
 	_menu._push(CharacterMenu.LEVEL_FACE_EYES)
-	fails += _expect("menu face eyes rows", _menu._entries.size() == 6 + 1)
+	fails += _expect("menu face eyes rows", _menu._entries.size() == 9 + 1)
 	_menu._pop()
 	_menu._push(CharacterMenu.LEVEL_FACE_JAW)
 	fails += _expect("menu face jaw rows", _menu._entries.size() == 6 + 1)
@@ -1823,7 +2069,7 @@ func _run_headless_test() -> void:
 	fails += _expect("sculpt mouth core widens", mouth_core.size() == 2 and mouth_core[1] > mouth_core[0] + 0.001)
 	# 15. Sculpt diffusion (08/10: crevasses at extremes — the rim must
 	# follow instead of cliffing at the box edge).
-	for ce in [[&"NoseL", -10], [&"NoseW", 8], [&"Chin", -10], [&"MouthW", -8], [&"MouthW", 8], [&"NoseLength", 10], [&"NosePosition", 8], [&"LipUpper", 8], [&"LipLower", 8], [&"MouthCorners", 8], [&"MouthPosition", 8], [&"MouthForward", 8], [&"NoseTipSize", 10], [&"NoseTipAngle", 10], [&"NoseCurve", 10], [&"MouthPout", 8], [&"EyelidHeavy", 8], [&"EyeDepth", 8], [&"EyeHeight", 8], [&"BrowDepth", 8], [&"JawWidth", 8], [&"ChinLength", 10], [&"ChinWidth", 8], [&"ChinProject", 10], [&"ChinCleft", 5], [&"CheekboneWidth", 8], [&"CheekboneHeight", 8], [&"CheekFullness", 8], [&"FaceFullness", 8], [&"ForeheadHeight", 8], [&"ForeheadWidth", 8], [&"BrowRidgeDepth", 8], [&"EarSize", 8], [&"EarRotation", 8], [&"EarlobeLength", 8], [&"EarPoint", 8]]:
+	for ce in [[&"NoseL", -10], [&"NoseW", 8], [&"Chin", -10], [&"MouthW", -8], [&"MouthW", 8], [&"NoseLength", 10], [&"NosePosition", 8], [&"LipUpper", 8], [&"LipLower", 8], [&"MouthCorners", 8], [&"MouthPosition", 8], [&"MouthForward", 8], [&"NoseTipSize", 10], [&"NoseTipAngle", 10], [&"NoseCurve", 10], [&"MouthPout", 8], [&"EyelidHeavy", 8], [&"EyeDepth", 8], [&"EyeHeight", 8], [&"EyeSpacing", 8], [&"EyeSize", 8], [&"EyeAngle", 8], [&"BrowDepth", 8], [&"JawWidth", 8], [&"ChinLength", 10], [&"ChinWidth", 8], [&"ChinProject", 10], [&"ChinCleft", 5], [&"CheekboneWidth", 8], [&"CheekboneHeight", 8], [&"CheekFullness", 8], [&"FaceFullness", 8], [&"ForeheadHeight", 8], [&"ForeheadWidth", 8], [&"BrowRidgeDepth", 8], [&"EarSize", 8], [&"EarRotation", 8], [&"EarlobeLength", 8], [&"EarPoint", 8]]:
 		reset_face_sculpt(ce[0])
 		adjust_face_sculpt(ce[0], ce[1])
 		var cl := _avatar.sculpt_max_cliff()
@@ -1839,7 +2085,7 @@ func _run_headless_test() -> void:
 		var cc: Array = cov.get(region, [0, 0])
 		fails += _expect("sculpt mask %s resolves" % region, int(cc[1]) > 0 and float(cc[0]) / float(cc[1]) > 0.9)
 	# 17. Painted detail rows move their mask and restore to zero.
-	for nk in [&"NoseBridge", &"NoseTip", &"NostrilFlare", &"NoseLength", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseTipSize", &"NoseTipAngle", &"NoseCurve", &"MouthPout", &"EyelidHeavy", &"EyeDepth", &"EyeHeight", &"BrowHeight", &"BrowThick", &"BrowDepth", &"JawWidth", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft", &"CheekboneWidth", &"CheekboneHeight", &"CheekFullness", &"FaceFullness", &"ForeheadHeight", &"ForeheadWidth", &"BrowRidgeDepth", &"EarSize", &"EarRotation", &"EarlobeLength", &"EarPoint"]:
+	for nk in [&"NoseBridge", &"NoseTip", &"NostrilFlare", &"NoseLength", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseTipSize", &"NoseTipAngle", &"NoseCurve", &"MouthPout", &"EyelidHeavy", &"EyeDepth", &"EyeHeight", &"EyeSpacing", &"EyeSize", &"EyeAngle", &"BrowHeight", &"BrowThick", &"BrowDepth", &"JawWidth", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft", &"CheekboneWidth", &"CheekboneHeight", &"CheekFullness", &"FaceFullness", &"ForeheadHeight", &"ForeheadWidth", &"BrowRidgeDepth", &"EarSize", &"EarRotation", &"EarlobeLength", &"EarPoint"]:
 		reset_face_sculpt(nk)
 		adjust_face_sculpt(nk, 10)
 		fails += _expect("sculpt %s moves" % String(nk), _avatar.sculpt_max_cliff() > 1e-9)
@@ -1937,6 +2183,10 @@ func _run_headless_test() -> void:
 	var ey_pair := _sculpt_deltas(&"EyeHeight", 8)
 	var ey_f := _region_floors(ey_pair[0], ey_pair[1], "Eyelids")
 	fails += _expect("sculpt eye lifts", ey_f.size() == 2 and ey_f[1] > ey_f[0] + 0.006)
+	var esp_pair := _sculpt_deltas(&"EyeSpacing", 8)
+	var esp_w := _core_widths(esp_pair[0], esp_pair[1], "Eyelids")
+	fails += _expect("sculpt eyes spread", esp_w.size() == 2 and esp_w[1] > esp_w[0] + 0.010)
+	fails += _expect("sculpt eyes no cross", _no_center_cross(esp_pair[0], esp_pair[1]))
 	# Brow mesh rows (Height/Thick) activate when the Brows region is painted
 	# (inert asserts in section 16 until then).
 	var bd_pair := _sculpt_deltas(&"BrowDepth", 8)
