@@ -1687,6 +1687,49 @@ func _run_headless_test() -> void:
 	reset_face_sculpt(&"ForeheadWidth")
 	fails += _expect("hair width restores", (get_node_or_null("Avatar/Hair/Buzzed") as MeshInstance3D).mesh == _avatar._face_pristine["Hair"])
 	reset_hair()
+	# 9f. Beard glue (jaw/chin rows drag the beard shell via nearest-skin
+	# offsets, same path as hair — mouth/cheek rows stay out for now).
+	adjust_beard(1)
+	var bbefore := _face_part_verts("Beard")
+	adjust_face_sculpt(&"JawWidth", 8)
+	var bafter := _face_part_verts("Beard")
+	var bspread := 0.0
+	var bspreadn := 0
+	if bbefore.size() == bafter.size():
+		for i in bbefore.size():
+			bspread += absf(bafter[i].x) - absf(bbefore[i].x)
+			bspreadn += 1
+	fails += _expect("beard follows jaw", bspreadn > 0 and bspread / float(bspreadn) > 0.002)
+	reset_face_sculpt(&"JawWidth")
+	adjust_face_sculpt(&"ChinProject", 10)
+	var bafterp := _face_part_verts("Beard")
+	var bpush := 0.0
+	var bpushn := 0
+	if bbefore.size() == bafterp.size():
+		for i in bbefore.size():
+			bpush += bafterp[i].z - bbefore[i].z
+			bpushn += 1
+	fails += _expect("beard follows chin out", bpushn > 0 and bpush / float(bpushn) > 0.0025)
+	reset_face_sculpt(&"ChinProject")
+	adjust_face_sculpt(&"ChinLength", 10)
+	var bafterl := _face_part_verts("Beard")
+	var bdrop := 0.0
+	var bdropn := 0
+	if bbefore.size() == bafterl.size():
+		for i in bbefore.size():
+			bdrop += bafterl[i].y - bbefore[i].y
+			bdropn += 1
+	fails += _expect("beard follows chin down", bdropn > 0 and bdrop / float(bdropn) < -0.0025)
+	reset_face_sculpt(&"ChinLength")
+	for bk in [&"JawWidth", &"JawDefinition", &"JawAngle", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft"]:
+		adjust_face_sculpt(bk, 8)
+		fails += _expect("beard wired %s" % String(bk), (get_node_or_null("Avatar/Beard/Beard") as MeshInstance3D).mesh != _avatar._face_pristine["Beard"])
+		reset_face_sculpt(bk)
+	fails += _expect("beard jaw restores", (get_node_or_null("Avatar/Beard/Beard") as MeshInstance3D).mesh == _avatar._face_pristine["Beard"])
+	adjust_face_sculpt(&"EyeDepth", 8)
+	fails += _expect("beard ignores eyes", (get_node_or_null("Avatar/Beard/Beard") as MeshInstance3D).mesh == _avatar._face_pristine["Beard"])
+	reset_face_sculpt(&"EyeDepth")
+	reset_beard()
 	# 17c. EarSize spares the head (09/10 live: growing the ears grew the
 	# skull side and clipped the hair). Tight Ears mask (flap only) + 1
 	# diffusion ring: the skull (|x| < 65mm) barely moves, the flap does.

@@ -725,6 +725,7 @@ const SCULPT_FOLLOW := {
 	&"Eyelashes": [&"EyeDepth", &"EyeHeight", &"EyelidHeavy", &"EyeSpacing", &"EyeSize", &"EyeAngle"],
 	&"Eyebrows": [&"BrowDepth", &"BrowRidgeDepth", &"BrowHeight", &"BrowThick", &"BrowAngle"],
 	&"Hair": {"keys": [&"ForeheadHeight", &"ForeheadWidth"], "glue": true},
+	&"Beard": {"keys": [&"JawWidth", &"JawDefinition", &"JawAngle", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft"], "glue": true},
 }
 ## Follow keys whose means split per side (EyeSpacing: one global mean would
 ## cancel to ~0 across the symmetric orbits). Split at the driving region's
@@ -1828,6 +1829,7 @@ func _apply_beard() -> void:
 		_beard = 0
 	var path := beard_file(GENDERS[_gender], styles[_beard])
 	if path.is_empty():
+		_face_pristine.erase("Beard")
 		return
 	var packed := load(path) as PackedScene
 	if packed == null:
@@ -1868,6 +1870,7 @@ func _apply_beard() -> void:
 	holder.add_child(mi)
 	mi.skeleton = mi.get_path_to(master)
 	_reset_dress(holder, true)
+	_face_pristine["Beard"] = out
 	print("[Character] Beard -> %s" % path.get_file())
 
 
