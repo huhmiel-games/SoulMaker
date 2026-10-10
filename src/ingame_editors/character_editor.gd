@@ -1559,6 +1559,35 @@ func _run_headless_test() -> void:
 	fails += _expect("lashes ride tilt", int(lod[1]) > 0 and float(lod[0]) < -0.0005)
 	reset_face_sculpt(&"EyeAngle")
 	fails += _expect("lashes tilt restores", (get_node_or_null("Avatar/Eyelashes/Male_Eyelashes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyelashes"])
+	# Brows ride their own tilt (same rigid-rotation follow as lashes).
+	var brw0 := _face_part_verts("Eyebrows")
+	adjust_face_sculpt(&"BrowAngle", 8)
+	var brw1 := _face_part_verts("Eyebrows")
+	var brd := _face_part_outer_dy(brw0, brw1)
+	fails += _expect("brows ride tilt", int(brd[1]) > 0 and float(brd[0]) < -0.0005)
+	reset_face_sculpt(&"BrowAngle")
+	fails += _expect("brows tilt restores", (get_node_or_null("Avatar/Eyebrows/Male_Eyebrows") as MeshInstance3D).mesh == _avatar._face_pristine["Eyebrows"])
+	# BrowThick dilates the mesh itself (live report 10/10: the skin-only
+	# motion hid under the rigid part — mean ≈ 0 so nothing followed).
+	var bth_before := _face_part_verts("Eyebrows")
+	adjust_face_sculpt(&"BrowThick", 10)
+	var bth_after := _face_part_verts("Eyebrows")
+	var bth_grows := false
+	if bth_before.size() == bth_after.size() and not bth_before.is_empty():
+		var bmn0 := 1e9
+		var bmx0 := -1e9
+		var bmn1 := 1e9
+		var bmx1 := -1e9
+		for v in bth_before:
+			bmn0 = minf(bmn0, v.y)
+			bmx0 = maxf(bmx0, v.y)
+		for v in bth_after:
+			bmn1 = minf(bmn1, v.y)
+			bmx1 = maxf(bmx1, v.y)
+		bth_grows = (bmx1 - bmn1) > (bmx0 - bmn0) + 0.001
+	fails += _expect("brows thicken", bth_grows)
+	reset_face_sculpt(&"BrowThick")
+	fails += _expect("brows thick restores", (get_node_or_null("Avatar/Eyebrows/Male_Eyebrows") as MeshInstance3D).mesh == _avatar._face_pristine["Eyebrows"])
 	# Spacing superposes with depth (side-split + global bakes add without
 	# touching each other's axis).
 	adjust_face_sculpt(&"EyeDepth", -4)
@@ -1864,6 +1893,78 @@ func _run_headless_test() -> void:
 		var band5 := 0.025 if ek2 == &"EyeSpacing" else 0.020
 		fails += _expect("eye row transition band", eband5 < band5)
 		reset_face_sculpt(ek2)
+	# 17f. BrowAngle (siderot on the Brows islands, same convention as
+	# EyeAngle: + = outer corners drop). Symmetric swing, halo band.
+	var brcx: float = _avatar.sculpt_region_center("Brows").x
+	var brb: Dictionary = _avatar.sculpt_region_bounds("Brows")
+	adjust_face_sculpt(&"BrowAngle", 8)
+	var brmaxl := 0.0
+	var brmaxr := 0.0
+	var brody := 0.0
+	var brodyn := 0
+	var brband := 0.0
+	if ebi != -1 and not brb.is_empty():
+		var brinv: Transform3D = _avatar._bone_rest_world(esk, ebi).affine_inverse()
+		var brmn: Vector3 = brb["mn"]
+		var brmx: Vector3 = brb["mx"]
+		var brmi := _avatar_skin_mi()
+		var brpris := _avatar._skin_pristine
+		var brcl := Vector3.ZERO
+		var brcr := Vector3.ZERO
+		var brcln := 0
+		var brcrn := 0
+		for _s8 in mini(brmi.mesh.get_surface_count(), brpris.get_surface_count()):
+			var bcv8: PackedVector3Array = brmi.mesh.surface_get_arrays(_s8)[Mesh.ARRAY_VERTEX]
+			var bpv8: PackedVector3Array = brpris.surface_get_arrays(_s8)[Mesh.ARRAY_VERTEX]
+			if bcv8.size() != bpv8.size():
+				continue
+			for _i8 in bcv8.size():
+				var bq8: Vector3 = brinv * bpv8[_i8]
+				if not _avatar.sculpt_in_region("Brows", bq8):
+					continue
+				var bd8: Vector3 = bcv8[_i8] - bpv8[_i8]
+				if bq8.x < brcx:
+					brcl += bq8
+					brcln += 1
+					brmaxl = maxf(brmaxl, bd8.length())
+				else:
+					brcr += bq8
+					brcrn += 1
+					brmaxr = maxf(brmaxr, bd8.length())
+		if brcln > 0:
+			brcl /= float(brcln)
+		if brcrn > 0:
+			brcr /= float(brcrn)
+		for _s9 in mini(brmi.mesh.get_surface_count(), brpris.get_surface_count()):
+			var bcv9: PackedVector3Array = brmi.mesh.surface_get_arrays(_s9)[Mesh.ARRAY_VERTEX]
+			var bpv9: PackedVector3Array = brpris.surface_get_arrays(_s9)[Mesh.ARRAY_VERTEX]
+			if bcv9.size() != bpv9.size():
+				continue
+			for _i9 in bcv9.size():
+				var bq9: Vector3 = brinv * bpv9[_i9]
+				if not _avatar.sculpt_in_region("Brows", bq9):
+					continue
+				var bd9: Vector3 = bcv9[_i9] - bpv9[_i9]
+				if (bq9.x < brcx and bq9.x < brcl.x) or (bq9.x >= brcx and bq9.x > brcr.x):
+					brody += bd9.y
+					brodyn += 1
+		for _sA in mini(brmi.mesh.get_surface_count(), brpris.get_surface_count()):
+			var bcvA: PackedVector3Array = brmi.mesh.surface_get_arrays(_sA)[Mesh.ARRAY_VERTEX]
+			var bpvA: PackedVector3Array = brpris.surface_get_arrays(_sA)[Mesh.ARRAY_VERTEX]
+			if bcvA.size() != bpvA.size():
+				continue
+			for _iA in bcvA.size():
+				if bcvA[_iA].distance_to(bpvA[_iA]) < 0.001:
+					continue
+				var bqA: Vector3 = brinv * bpvA[_iA]
+				var bddA := Vector3(maxf(brmn.x - bqA.x, 0.0) + maxf(bqA.x - brmx.x, 0.0), maxf(brmn.y - bqA.y, 0.0) + maxf(bqA.y - brmx.y, 0.0), maxf(brmn.z - bqA.z, 0.0) + maxf(bqA.z - brmx.z, 0.0))
+				brband = maxf(brband, bddA.length())
+	fails += _expect("browangle drops outer", brodyn > 0 and brody / float(brodyn) < -0.0008)
+	fails += _expect("browangle symmetric", absf(brmaxl - brmaxr) / maxf(maxf(brmaxl, brmaxr), 1e-9) < 0.25)
+	# Coarse brow mesh (~8mm edges): the rings:3 halo reaches 25.4mm by
+	# design (smooth — the cliff pin guards the visible crease, not this).
+	fails += _expect("brow row transition band", brband < 0.030)
+	reset_face_sculpt(&"BrowAngle")
 	# 10. Beard submenu (single vendor file now, more later — albedo like hair).
 	fails += _expect("beard none default", beard_display() == "None" and beard_file("Male", &"None").is_empty())
 	fails += _expect("beard file male", beard_file("Male", &"Beard").ends_with("Hair_Beard.gltf"))
@@ -1993,7 +2094,7 @@ func _run_headless_test() -> void:
 	fails += _expect("menu face mouth rows", _menu._entries.size() == 7 + 1)
 	_menu._pop()
 	_menu._push(CharacterMenu.LEVEL_FACE_EYES)
-	fails += _expect("menu face eyes rows", _menu._entries.size() == 9 + 1)
+	fails += _expect("menu face eyes rows", _menu._entries.size() == 10 + 1)
 	_menu._pop()
 	_menu._push(CharacterMenu.LEVEL_FACE_JAW)
 	fails += _expect("menu face jaw rows", _menu._entries.size() == 6 + 1)
@@ -2069,7 +2170,7 @@ func _run_headless_test() -> void:
 	fails += _expect("sculpt mouth core widens", mouth_core.size() == 2 and mouth_core[1] > mouth_core[0] + 0.001)
 	# 15. Sculpt diffusion (08/10: crevasses at extremes — the rim must
 	# follow instead of cliffing at the box edge).
-	for ce in [[&"NoseL", -10], [&"NoseW", 8], [&"Chin", -10], [&"MouthW", -8], [&"MouthW", 8], [&"NoseLength", 10], [&"NosePosition", 8], [&"LipUpper", 8], [&"LipLower", 8], [&"MouthCorners", 8], [&"MouthPosition", 8], [&"MouthForward", 8], [&"NoseTipSize", 10], [&"NoseTipAngle", 10], [&"NoseCurve", 10], [&"MouthPout", 8], [&"EyelidHeavy", 8], [&"EyeDepth", 8], [&"EyeHeight", 8], [&"EyeSpacing", 8], [&"EyeSize", 8], [&"EyeAngle", 8], [&"BrowDepth", 8], [&"JawWidth", 8], [&"ChinLength", 10], [&"ChinWidth", 8], [&"ChinProject", 10], [&"ChinCleft", 5], [&"CheekboneWidth", 8], [&"CheekboneHeight", 8], [&"CheekFullness", 8], [&"FaceFullness", 8], [&"ForeheadHeight", 8], [&"ForeheadWidth", 8], [&"BrowRidgeDepth", 8], [&"EarSize", 8], [&"EarRotation", 8], [&"EarlobeLength", 8], [&"EarPoint", 8]]:
+	for ce in [[&"NoseL", -10], [&"NoseW", 8], [&"Chin", -10], [&"MouthW", -8], [&"MouthW", 8], [&"NoseLength", 10], [&"NosePosition", 8], [&"LipUpper", 8], [&"LipLower", 8], [&"MouthCorners", 8], [&"MouthPosition", 8], [&"MouthForward", 8], [&"NoseTipSize", 10], [&"NoseTipAngle", 10], [&"NoseCurve", 10], [&"MouthPout", 8], [&"EyelidHeavy", 8], [&"EyeDepth", 8], [&"EyeHeight", 8], [&"EyeSpacing", 8], [&"EyeSize", 8], [&"EyeAngle", 8], [&"BrowAngle", 8], [&"BrowDepth", 8], [&"JawWidth", 8], [&"ChinLength", 10], [&"ChinWidth", 8], [&"ChinProject", 10], [&"ChinCleft", 5], [&"CheekboneWidth", 8], [&"CheekboneHeight", 8], [&"CheekFullness", 8], [&"FaceFullness", 8], [&"ForeheadHeight", 8], [&"ForeheadWidth", 8], [&"BrowRidgeDepth", 8], [&"EarSize", 8], [&"EarRotation", 8], [&"EarlobeLength", 8], [&"EarPoint", 8]]:
 		reset_face_sculpt(ce[0])
 		adjust_face_sculpt(ce[0], ce[1])
 		var cl := _avatar.sculpt_max_cliff()
@@ -2085,7 +2186,7 @@ func _run_headless_test() -> void:
 		var cc: Array = cov.get(region, [0, 0])
 		fails += _expect("sculpt mask %s resolves" % region, int(cc[1]) > 0 and float(cc[0]) / float(cc[1]) > 0.9)
 	# 17. Painted detail rows move their mask and restore to zero.
-	for nk in [&"NoseBridge", &"NoseTip", &"NostrilFlare", &"NoseLength", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseTipSize", &"NoseTipAngle", &"NoseCurve", &"MouthPout", &"EyelidHeavy", &"EyeDepth", &"EyeHeight", &"EyeSpacing", &"EyeSize", &"EyeAngle", &"BrowHeight", &"BrowThick", &"BrowDepth", &"JawWidth", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft", &"CheekboneWidth", &"CheekboneHeight", &"CheekFullness", &"FaceFullness", &"ForeheadHeight", &"ForeheadWidth", &"BrowRidgeDepth", &"EarSize", &"EarRotation", &"EarlobeLength", &"EarPoint"]:
+	for nk in [&"NoseBridge", &"NoseTip", &"NostrilFlare", &"NoseLength", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseTipSize", &"NoseTipAngle", &"NoseCurve", &"MouthPout", &"EyelidHeavy", &"EyeDepth", &"EyeHeight", &"EyeSpacing", &"EyeSize", &"EyeAngle", &"BrowAngle", &"BrowHeight", &"BrowThick", &"BrowDepth", &"JawWidth", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft", &"CheekboneWidth", &"CheekboneHeight", &"CheekFullness", &"FaceFullness", &"ForeheadHeight", &"ForeheadWidth", &"BrowRidgeDepth", &"EarSize", &"EarRotation", &"EarlobeLength", &"EarPoint"]:
 		reset_face_sculpt(nk)
 		adjust_face_sculpt(nk, 10)
 		fails += _expect("sculpt %s moves" % String(nk), _avatar.sculpt_max_cliff() > 1e-9)

@@ -659,7 +659,7 @@ func reset_face(key: StringName) -> void:
 ## center fixed — no bunching, no fold); the X half-extent comes from the
 ## baked points.
 const SCULPT_PATH := "res://data/characters/face_sculpt.json"
-const SCULPT_KEYS: Array[StringName] = [&"NoseL", &"NoseW", &"MouthW", &"Chin", &"NoseBridge", &"NoseTip", &"NostrilFlare", &"NoseLength", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseTipSize", &"NoseTipAngle", &"NoseCurve", &"MouthPout", &"EyelidHeavy", &"EyeDepth", &"EyeHeight", &"EyeSpacing", &"EyeSize", &"EyeAngle", &"BrowHeight", &"BrowThick", &"BrowDepth", &"JawWidth", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft", &"CheekboneWidth", &"CheekboneHeight", &"CheekFullness", &"FaceFullness", &"ForeheadHeight", &"ForeheadWidth", &"BrowRidgeDepth", &"EarSize", &"EarRotation", &"EarlobeLength", &"EarPoint"]
+const SCULPT_KEYS: Array[StringName] = [&"NoseL", &"NoseW", &"MouthW", &"Chin", &"NoseBridge", &"NoseTip", &"NostrilFlare", &"NoseLength", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseTipSize", &"NoseTipAngle", &"NoseCurve", &"MouthPout", &"EyelidHeavy", &"EyeDepth", &"EyeHeight", &"EyeSpacing", &"EyeSize", &"EyeAngle", &"BrowHeight", &"BrowThick", &"BrowAngle", &"BrowDepth", &"JawWidth", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft", &"CheekboneWidth", &"CheekboneHeight", &"CheekFullness", &"FaceFullness", &"ForeheadHeight", &"ForeheadWidth", &"BrowRidgeDepth", &"EarSize", &"EarRotation", &"EarlobeLength", &"EarPoint"]
 const SCULPT_STEP := 0.1
 const SCULPT_SPEC := {
 	&"NoseL": {"region": "Nose", "menu": "nose", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 1.0},
@@ -688,6 +688,7 @@ const SCULPT_SPEC := {
 	&"EyeAngle": {"region": "Eyelids", "menu": "eyes", "mode": "siderot", "axis": Vector3(0, 0, 1), "deg": 10.0, "mirror": false, "max_cm": 0.8},
 	&"BrowHeight": {"region": "Brows", "menu": "eyes", "axis": Vector3(0, 1, 0), "mirror": false, "max_cm": 0.8},
 	&"BrowThick": {"region": "Brows", "menu": "eyes", "mode": "scale", "axis": Vector3(0, 1, 0), "rate": 0.15, "mirror": false, "max_cm": 1.0},
+	&"BrowAngle": {"region": "Brows", "menu": "eyes", "mode": "siderot", "axis": Vector3(0, 0, 1), "deg": 10.0, "mirror": false, "max_cm": 0.8},
 	&"BrowDepth": {"region": "BrowRidge", "menu": "eyes", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 0.4},
 	&"JawWidth": {"region": "Jaw", "menu": "jaw", "axis": Vector3(1, 0, 0), "mirror": true, "max_cm": 0.8},
 	&"ChinLength": {"region": "Chin", "menu": "jaw", "axis": Vector3(0, -1, 0), "mirror": false, "max_cm": 1.0},
@@ -720,7 +721,7 @@ const SCULPT_SPEC := {
 const SCULPT_FOLLOW := {
 	&"Eyes": [&"EyeDepth", &"EyeHeight", &"EyeSpacing", &"EyeSize"],
 	&"Eyelashes": [&"EyeDepth", &"EyeHeight", &"EyelidHeavy", &"EyeSpacing", &"EyeSize", &"EyeAngle"],
-	&"Eyebrows": [&"BrowDepth", &"BrowRidgeDepth", &"BrowHeight", &"BrowThick"],
+	&"Eyebrows": [&"BrowDepth", &"BrowRidgeDepth", &"BrowHeight", &"BrowThick", &"BrowAngle"],
 	&"Hair": {"keys": [&"ForeheadHeight", &"ForeheadWidth"], "glue": true},
 }
 ## Follow keys whose means split per side (EyeSpacing: one global mean would
@@ -730,11 +731,11 @@ const SCULPT_FOLLOW_SIDES := [&"EyeSpacing"]
 ## Follow keys applied as rigid per-side ROTATION (EyeAngle: lashes ride the
 ## lid tilt — a translation mean would read ~0). Same angle/pivot convention
 ## as the siderot skin mode. Balls stay out: the globe must not roll.
-const SCULPT_FOLLOW_ROT := [&"EyeAngle"]
+const SCULPT_FOLLOW_ROT := [&"EyeAngle", &"BrowAngle"]
 ## Follow keys applied as per-side DILATION about the socket centroid
 ## (EyeSize: balls track the aperture with the skin rate, so a shrinking
 ## socket never clips the globe — and growing sockets grow the balls).
-const SCULPT_FOLLOW_SCALE := [&"EyeSize"]
+const SCULPT_FOLLOW_SCALE := [&"EyeSize", &"BrowThick"]
 ## Shell-follow zoning (m, test contract only): the hairline column moves,
 ## everything past HAIR_HALO stays frozen.
 const HAIR_HALO := 0.025
@@ -1243,11 +1244,13 @@ func _sculpt_fused() -> void:
 			elif SCULPT_FOLLOW_SCALE.has(fkey2) and active.has(fkey2):
 				# Rigid per-side dilation (balls track the aperture): same
 				# pivot/rate as the sidescale skin mode, both directions.
+				# The spec axis masks the growth (BrowThick = Y only, like
+				# the skin "scale" mode) so part and skin stay consistent.
 				var sspec: Dictionary = SCULPT_SPEC.get(fkey2, {})
 				var sreg: Dictionary = regions.get(String(sspec.get("region", "")), {})
 				if sreg.is_empty():
 					continue
-				flist.append({"key": fkey2, "scale": true, "cx": float(sreg["cx"]), "factor": float(_sculpt.get(fkey2, 0.0)) * float(sspec.get("rate", 0.15)), "pivL": sreg["cL"], "pivR": sreg["cR"]})
+				flist.append({"key": fkey2, "scale": true, "cx": float(sreg["cx"]), "factor": float(_sculpt.get(fkey2, 0.0)) * float(sspec.get("rate", 0.15)), "axis": sspec.get("axis", Vector3.ONE), "pivL": sreg["cL"], "pivR": sreg["cR"]})
 			elif follow_acc.has(fkey2):
 				var fa2: Dictionary = follow_acc[fkey2]
 				if bool(fa2.get("sides", false)):
@@ -1321,9 +1324,12 @@ func _face_follow_bake(slot: String, flist: Array, head_world: Transform3D, head
 						var rang: float = float(fdd["angR"]) if fside_r else float(fdd["angL"])
 						off += Basis(fdd["axis"] as Vector3, rang) * (q - rpiv) + rpiv - q
 					elif bool(fdd.get("scale", false)):
-						# Side-split dilation about the socket centroid.
+						# Side-split dilation about the socket centroid,
+						# masked to the spec axis (EyeSize = all, Thick = Y).
 						var spiv: Vector3 = (fdd["pivR"] as Vector3) if fside_r else (fdd["pivL"] as Vector3)
-						off += (q - spiv) * float(fdd["factor"])
+						var sgr: Vector3 = (q - spiv) * float(fdd["factor"])
+						var sax: Vector3 = fdd.get("axis", Vector3.ONE)
+						off += Vector3(sgr.x * sax.x, sgr.y * sax.y, sgr.z * sax.z)
 					elif bool(fdd.get("sides", false)):
 						# Side-split drive (EyeSpacing): each ball/lash takes
 						# its own orbit's mean — a global mean would cancel.
