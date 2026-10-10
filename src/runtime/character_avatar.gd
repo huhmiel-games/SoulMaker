@@ -725,7 +725,7 @@ const SCULPT_FOLLOW := {
 	&"Eyelashes": [&"EyeDepth", &"EyeHeight", &"EyelidHeavy", &"EyeSpacing", &"EyeSize", &"EyeAngle"],
 	&"Eyebrows": [&"BrowDepth", &"BrowRidgeDepth", &"BrowHeight", &"BrowThick", &"BrowAngle"],
 	&"Hair": {"keys": [&"ForeheadHeight", &"ForeheadWidth"], "glue": true},
-	&"Beard": {"keys": [&"JawWidth", &"JawDefinition", &"JawAngle", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft"], "glue": true},
+	&"Beard": {"keys": [&"JawWidth", &"JawDefinition", &"JawAngle", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft", &"MouthW", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"MouthPout"], "glue": true},
 }
 ## Follow keys whose means split per side (EyeSpacing: one global mean would
 ## cancel to ~0 across the symmetric orbits). Split at the driving region's

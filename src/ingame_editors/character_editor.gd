@@ -1721,10 +1721,24 @@ func _run_headless_test() -> void:
 			bdropn += 1
 	fails += _expect("beard follows chin down", bdropn > 0 and bdrop / float(bdropn) < -0.0025)
 	reset_face_sculpt(&"ChinLength")
-	for bk in [&"JawWidth", &"JawDefinition", &"JawAngle", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft"]:
+	for bk in [&"JawWidth", &"JawDefinition", &"JawAngle", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft", &"MouthW", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"MouthPout"]:
 		adjust_face_sculpt(bk, 8)
 		fails += _expect("beard wired %s" % String(bk), (get_node_or_null("Avatar/Beard/Beard") as MeshInstance3D).mesh != _avatar._face_pristine["Beard"])
 		reset_face_sculpt(bk)
+	# Mustache rides the lips (live report: it stayed put): the moved set
+	# (upper beard verts) advances with the pout.
+	adjust_face_sculpt(&"MouthPout", 8)
+	var bafterm := _face_part_verts("Beard")
+	var mmove := 0.0
+	var mmoven := 0
+	if bbefore.size() == bafterm.size():
+		for i in bbefore.size():
+			var dzz: float = bafterm[i].z - bbefore[i].z
+			if dzz > 0.001:
+				mmove += dzz
+				mmoven += 1
+	fails += _expect("mustache follows mouth", mmoven > 0 and mmove / float(mmoven) > 0.003)
+	reset_face_sculpt(&"MouthPout")
 	fails += _expect("beard jaw restores", (get_node_or_null("Avatar/Beard/Beard") as MeshInstance3D).mesh == _avatar._face_pristine["Beard"])
 	adjust_face_sculpt(&"EyeDepth", 8)
 	fails += _expect("beard ignores eyes", (get_node_or_null("Avatar/Beard/Beard") as MeshInstance3D).mesh == _avatar._face_pristine["Beard"])
