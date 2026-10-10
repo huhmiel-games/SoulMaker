@@ -1541,6 +1541,83 @@ func _run_headless_test() -> void:
 	fails += _expect("earsize spares skull", esmax < 0.002)
 	fails += _expect("earsize grows flap", eflap > 0.004)
 	reset_face_sculpt(&"EarSize")
+	# 17d. Ear rows (rotation pivots per side, lobe/point ramp along Y):
+	# symmetric swing, gradient bottom (lobe) / top (point), and motion
+	# outside the mask confined to a 20mm transition band (halo smoothing,
+	# not skull growth — the old bug dragged 9-11mm with the ear).
+	var ecy: float = _avatar.sculpt_region_center("Ears").y
+	var ebb: Dictionary = _avatar.sculpt_region_bounds("Ears")
+	for ek in [&"EarRotation", &"EarlobeLength", &"EarPoint"]:
+		adjust_face_sculpt(ek, 8)
+		var emaxl := 0.0
+		var emaxr := 0.0
+		var eskull := 0.0
+		var ebot := 0.0
+		var ebotn := 0
+		var etop := 0.0
+		var etopn := 0
+		var elob := 0.0
+		var elobn := 0
+		var etip := 0.0
+		var etipn := 0
+		var eband := 0.0
+		if ebi != -1 and not ebb.is_empty():
+			var einv3: Transform3D = _avatar._bone_rest_world(esk, ebi).affine_inverse()
+			var emn: Vector3 = ebb["mn"]
+			var emx: Vector3 = ebb["mx"]
+			var esmi3 := _avatar_skin_mi()
+			var epris3 := _avatar._skin_pristine
+			for _s3 in mini(esmi3.mesh.get_surface_count(), epris3.get_surface_count()):
+				var ecv3: PackedVector3Array = esmi3.mesh.surface_get_arrays(_s3)[Mesh.ARRAY_VERTEX]
+				var epv3: PackedVector3Array = epris3.surface_get_arrays(_s3)[Mesh.ARRAY_VERTEX]
+				if ecv3.size() != epv3.size():
+					continue
+				for _i3 in ecv3.size():
+					var eq3: Vector3 = einv3 * epv3[_i3]
+					var ed3: Vector3 = ecv3[_i3] - epv3[_i3]
+					if ek == &"EarlobeLength" and _avatar.sculpt_in_region("Lobe", eq3):
+						elob += ed3.y
+						elobn += 1
+					if ek == &"EarPoint" and _avatar.sculpt_in_region("EarTip", eq3):
+						etip += ed3.y
+						etipn += 1
+					if absf(eq3.x) < 0.065:
+						eskull = maxf(eskull, ed3.length())
+						continue
+					if absf(eq3.x) < 0.07 or eq3.y < 0.045 or eq3.y > 0.12:
+						continue
+					if eq3.x < 0.0:
+						emaxl = maxf(emaxl, ed3.length())
+					else:
+						emaxr = maxf(emaxr, ed3.length())
+					if eq3.y < ecy:
+						ebot += ed3.y
+						ebotn += 1
+					else:
+						etop += ed3.y
+						etopn += 1
+			for _s4 in mini(esmi3.mesh.get_surface_count(), epris3.get_surface_count()):
+				var ecv4: PackedVector3Array = esmi3.mesh.surface_get_arrays(_s4)[Mesh.ARRAY_VERTEX]
+				var epv4: PackedVector3Array = epris3.surface_get_arrays(_s4)[Mesh.ARRAY_VERTEX]
+				if ecv4.size() != epv4.size():
+					continue
+				for _i4 in ecv4.size():
+					if ecv4[_i4].distance_to(epv4[_i4]) < 0.001:
+						continue
+					var eq4: Vector3 = einv3 * epv4[_i4]
+					var edd := Vector3(maxf(emn.x - eq4.x, 0.0) + maxf(eq4.x - emx.x, 0.0), maxf(emn.y - eq4.y, 0.0) + maxf(eq4.y - emx.y, 0.0), maxf(emn.z - eq4.z, 0.0) + maxf(eq4.z - emx.z, 0.0))
+					eband = maxf(eband, edd.length())
+		if ek == &"EarRotation":
+			fails += _expect("ear rotation swings", emaxl > 0.002 and emaxr > 0.002)
+			fails += _expect("ear rotation symmetric", absf(emaxl - emaxr) / maxf(maxf(emaxl, emaxr), 1e-9) < 0.25)
+		elif ek == &"EarlobeLength":
+			fails += _expect("earlobe drops", elobn > 0 and elob / float(elobn) < -0.0015)
+			fails += _expect("earlobe gradient", etopn == 0 or absf(etop / float(etopn)) < 0.0008)
+		else:
+			fails += _expect("earpoint rises", etipn > 0 and etip / float(etipn) > 0.0015)
+			fails += _expect("earpoint gradient", ebotn == 0 or absf(ebot / float(ebotn)) < 0.0008)
+		fails += _expect("ear row transition band", eband < 0.020)
+		reset_face_sculpt(ek)
 	# 10. Beard submenu (single vendor file now, more later — albedo like hair).
 	fails += _expect("beard none default", beard_display() == "None" and beard_file("Male", &"None").is_empty())
 	fails += _expect("beard file male", beard_file("Male", &"Beard").ends_with("Hair_Beard.gltf"))
@@ -1679,8 +1756,12 @@ func _run_headless_test() -> void:
 	fails += _expect("menu face cheeks rows", _menu._entries.size() == 4 + 1)
 	_menu._pop()
 	_menu._push(CharacterMenu.LEVEL_FACE_FOREHEAD)
-	fails += _expect("menu face forehead rows", _menu._entries.size() == 4 + 1)
+	fails += _expect("menu face forehead rows", _menu._entries.size() == 3 + 1)
 	fails += _expect("face cam on forehead", face_active())
+	_menu._pop()
+	_menu._push(CharacterMenu.LEVEL_FACE_EARS)
+	fails += _expect("menu face ears rows", _menu._entries.size() == 4 + 1)
+	fails += _expect("face cam on ears", face_active())
 	_menu._pop()
 	fails += _expect("menu back to hub forehead", _menu._level == CharacterMenu.LEVEL_FACE)
 	_menu._pop()
@@ -1742,27 +1823,23 @@ func _run_headless_test() -> void:
 	fails += _expect("sculpt mouth core widens", mouth_core.size() == 2 and mouth_core[1] > mouth_core[0] + 0.001)
 	# 15. Sculpt diffusion (08/10: crevasses at extremes — the rim must
 	# follow instead of cliffing at the box edge).
-	for ce in [[&"NoseL", -10], [&"NoseW", 8], [&"Chin", -10], [&"MouthW", -8], [&"MouthW", 8], [&"NoseLength", 10], [&"NosePosition", 8], [&"LipUpper", 8], [&"LipLower", 8], [&"MouthCorners", 8], [&"MouthPosition", 8], [&"MouthForward", 8], [&"NoseTipSize", 10], [&"NoseTipAngle", 10], [&"NoseCurve", 10], [&"MouthPout", 8], [&"EyelidHeavy", 8], [&"EyeDepth", 8], [&"EyeHeight", 8], [&"BrowDepth", 8], [&"JawWidth", 8], [&"ChinLength", 10], [&"ChinWidth", 8], [&"ChinProject", 10], [&"ChinCleft", 5], [&"CheekboneWidth", 8], [&"CheekboneHeight", 8], [&"CheekFullness", 8], [&"FaceFullness", 8], [&"ForeheadHeight", 8], [&"ForeheadWidth", 8], [&"BrowRidgeDepth", 8], [&"EarSize", 8]]:
+	for ce in [[&"NoseL", -10], [&"NoseW", 8], [&"Chin", -10], [&"MouthW", -8], [&"MouthW", 8], [&"NoseLength", 10], [&"NosePosition", 8], [&"LipUpper", 8], [&"LipLower", 8], [&"MouthCorners", 8], [&"MouthPosition", 8], [&"MouthForward", 8], [&"NoseTipSize", 10], [&"NoseTipAngle", 10], [&"NoseCurve", 10], [&"MouthPout", 8], [&"EyelidHeavy", 8], [&"EyeDepth", 8], [&"EyeHeight", 8], [&"BrowDepth", 8], [&"JawWidth", 8], [&"ChinLength", 10], [&"ChinWidth", 8], [&"ChinProject", 10], [&"ChinCleft", 5], [&"CheekboneWidth", 8], [&"CheekboneHeight", 8], [&"CheekFullness", 8], [&"FaceFullness", 8], [&"ForeheadHeight", 8], [&"ForeheadWidth", 8], [&"BrowRidgeDepth", 8], [&"EarSize", 8], [&"EarRotation", 8], [&"EarlobeLength", 8], [&"EarPoint", 8]]:
 		reset_face_sculpt(ce[0])
 		adjust_face_sculpt(ce[0], ce[1])
 		var cl := _avatar.sculpt_max_cliff()
-		fails += _expect("sculpt no cliff %s" % String(ce[0]), cl < 0.005)
+		# EarSize bar is 6mm, not 5 (10/10 live: invisible on the coarse
+		# helix edge, user-validated OK — the 5mm bar stands everywhere else).
+		var bar := 0.006 if ce[0] == &"EarSize" else 0.005
+		fails += _expect("sculpt no cliff %s" % String(ce[0]), cl < bar)
 		reset_face_sculpt(ce[0])
 	# 16. Mask migration (08/10, regions v2): every baked point resolves on the
 	# live pristine (asset-drift guard — a reimport moving verts fails loud).
 	var cov := _avatar.sculpt_mask_coverage()
-	for region in ["Nose", "Mouth", "Chin", "NoseBridge", "NoseTip", "NostrilFlare", "UpperLip", "LowerLip", "MouthCorners", "Eyelids", "UpperEyelid", "BrowRidge", "Jaw", "ChinCleft", "Cheekbones", "Cheeks", "LowerFace", "Forehead", "Ears"]:
+	for region in ["Nose", "Mouth", "Chin", "NoseBridge", "NoseTip", "NostrilFlare", "UpperLip", "LowerLip", "MouthCorners", "Eyelids", "UpperEyelid", "Brows", "BrowRidge", "Jaw", "ChinCleft", "Cheekbones", "Cheeks", "LowerFace", "Forehead", "Ears", "Lobe", "EarTip"]:
 		var cc: Array = cov.get(region, [0, 0])
 		fails += _expect("sculpt mask %s resolves" % region, int(cc[1]) > 0 and float(cc[0]) / float(cc[1]) > 0.9)
-	# Brows paint pending (region absent from shipped JSON): Brow rows are
-	# inert by design until painted (same path as NoseBridge pre-paint).
-	for bk in [&"BrowHeight", &"BrowThick"]:
-		reset_face_sculpt(bk)
-		adjust_face_sculpt(bk, 10)
-		fails += _expect("sculpt %s inert unpainted" % String(bk), _avatar.sculpt_max_cliff() < 1e-9)
-		reset_face_sculpt(bk)
 	# 17. Painted detail rows move their mask and restore to zero.
-	for nk in [&"NoseBridge", &"NoseTip", &"NostrilFlare", &"NoseLength", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseTipSize", &"NoseTipAngle", &"NoseCurve", &"MouthPout", &"EyelidHeavy", &"EyeDepth", &"EyeHeight", &"BrowDepth", &"JawWidth", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft", &"CheekboneWidth", &"CheekboneHeight", &"CheekFullness", &"FaceFullness", &"ForeheadHeight", &"ForeheadWidth", &"BrowRidgeDepth", &"EarSize"]:
+	for nk in [&"NoseBridge", &"NoseTip", &"NostrilFlare", &"NoseLength", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseTipSize", &"NoseTipAngle", &"NoseCurve", &"MouthPout", &"EyelidHeavy", &"EyeDepth", &"EyeHeight", &"BrowHeight", &"BrowThick", &"BrowDepth", &"JawWidth", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft", &"CheekboneWidth", &"CheekboneHeight", &"CheekFullness", &"FaceFullness", &"ForeheadHeight", &"ForeheadWidth", &"BrowRidgeDepth", &"EarSize", &"EarRotation", &"EarlobeLength", &"EarPoint"]:
 		reset_face_sculpt(nk)
 		adjust_face_sculpt(nk, 10)
 		fails += _expect("sculpt %s moves" % String(nk), _avatar.sculpt_max_cliff() > 1e-9)

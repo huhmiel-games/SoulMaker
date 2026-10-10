@@ -30,7 +30,7 @@ const REGIONS: Array[String] = [
 	"Eyelids", "UpperEyelid", "Brows", "BrowRidge",
 	"Jaw", "Chin", "ChinCleft",
 	"Cheekbones", "Cheeks", "LowerFace",
-	"Forehead", "Ears",
+	"Forehead", "Ears", "Lobe", "EarTip",
 ]
 const GENDER := "Male"
 ## Paint guide per region (button tooltips, condensed from TODO.md).
@@ -74,7 +74,9 @@ de bouche à l'autre, coins inclus. Les sous-régions
 	"Cheeks": "Les joues molles.\nPrendre : la partie qui se creuse quand on aspire les joues, entre\npommettes, nez et mâchoire.\nC'est la zone joues pleines / joues creuses.",
 	"LowerFace": "Le bas du visage.\nPrendre : les joues basses + le contour entre le menton et les\nangles de mâchoire (la zone de la « graisse du bas du visage »).",
 	"Forehead": "Le front.\nPrendre : la peau entre les sourcils et la racine des cheveux.\nNe pas prendre : les cheveux eux-mêmes (autre mesh) ni les sourcils\nen bas.",
-	"Ears": "Les oreilles.\nPrendre : les 2 pavillons en entier, lobe (bout mou en bas) inclus.\nPour le lobe seul : ne garder que le bout mou du bas.",
+	"Ears": "Les oreilles.\nPrendre : les 2 pavillons en entier, lobe (bout mou en bas) inclus.\nLe lobe seul se peint à part (région Lobe).",
+	"Lobe": "Le lobe seul.\nPrendre : le bout mou en bas de chaque pavillon.\nSert à allonger le lobe.",
+	"EarTip": "La pointe de l'oreille.\nPrendre : le haut de l'ourlet (hélice), le repli du haut de chaque\npavillon.\nSert à tirer la pointe (elfe).",
 }
 
 var _surfs := [] # [{mi, verts, idx}] exporter enumeration on the live preview

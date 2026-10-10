@@ -659,7 +659,7 @@ func reset_face(key: StringName) -> void:
 ## center fixed — no bunching, no fold); the X half-extent comes from the
 ## baked points.
 const SCULPT_PATH := "res://data/characters/face_sculpt.json"
-const SCULPT_KEYS: Array[StringName] = [&"NoseL", &"NoseW", &"MouthW", &"Chin", &"NoseBridge", &"NoseTip", &"NostrilFlare", &"NoseLength", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseTipSize", &"NoseTipAngle", &"NoseCurve", &"MouthPout", &"EyelidHeavy", &"EyeDepth", &"EyeHeight", &"BrowHeight", &"BrowThick", &"BrowDepth", &"JawWidth", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft", &"CheekboneWidth", &"CheekboneHeight", &"CheekFullness", &"FaceFullness", &"ForeheadHeight", &"ForeheadWidth", &"BrowRidgeDepth", &"EarSize"]
+const SCULPT_KEYS: Array[StringName] = [&"NoseL", &"NoseW", &"MouthW", &"Chin", &"NoseBridge", &"NoseTip", &"NostrilFlare", &"NoseLength", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseTipSize", &"NoseTipAngle", &"NoseCurve", &"MouthPout", &"EyelidHeavy", &"EyeDepth", &"EyeHeight", &"BrowHeight", &"BrowThick", &"BrowDepth", &"JawWidth", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft", &"CheekboneWidth", &"CheekboneHeight", &"CheekFullness", &"FaceFullness", &"ForeheadHeight", &"ForeheadWidth", &"BrowRidgeDepth", &"EarSize", &"EarRotation", &"EarlobeLength", &"EarPoint"]
 const SCULPT_STEP := 0.1
 const SCULPT_SPEC := {
 	&"NoseL": {"region": "Nose", "menu": "nose", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 1.0},
@@ -698,7 +698,10 @@ const SCULPT_SPEC := {
 	&"ForeheadHeight": {"region": "Forehead", "menu": "forehead", "axis": Vector3(0, 1, 0), "mirror": false, "max_cm": 0.8},
 	&"ForeheadWidth": {"region": "Forehead", "menu": "forehead", "axis": Vector3(1, 0, 0), "mirror": true, "max_cm": 0.8},
 	&"BrowRidgeDepth": {"region": "BrowRidge", "menu": "forehead", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 0.4},
-	&"EarSize": {"region": "Ears", "menu": "forehead", "mode": "root", "rate": 0.45, "orate": 0.09, "mirror": false, "max_cm": 0.8, "rings": 1},
+	&"EarSize": {"region": "Ears", "menu": "ears", "mode": "root", "rate": 0.45, "orate": 0.09, "mirror": false, "max_cm": 0.8, "rings": 1},
+	&"EarRotation": {"region": "Ears", "menu": "ears", "mode": "rootrot", "axis": Vector3(0, 1, 0), "deg": 15.0, "mirror": false, "max_cm": 0.8, "rings": 1},
+	&"EarlobeLength": {"region": "Lobe", "menu": "ears", "mode": "tip", "along": Vector3(0, 1, 0), "end": "min", "axis": Vector3(0, -1, 0), "rate": 0.6, "mirror": false, "max_cm": 0.8, "rings": 1},
+	&"EarPoint": {"region": "EarTip", "menu": "ears", "mode": "tip", "along": Vector3(0, 1, 0), "end": "max", "axis": Vector3(0, 1, 0), "rate": 0.6, "mirror": false, "max_cm": 4.8, "rings": 1},
 }
 ## Face-part follow (09/10): holder slot -> driving sculpt keys. Compact rigid
 ## parts (eyes, lashes, brows — 100% Head) bake the SUM of per-key mask means
@@ -1024,11 +1027,40 @@ func _sculpt_fused() -> void:
 							var side := signf(q.x - float(r["cx"]))
 							if side == 0.0:
 								side = 1.0
-							var rrate := float(spec.get("rate", 0.8))
-							var orate := float(spec.get("orate", 0.15))
-							koff[i].x += side * maxf(absf(q.x - float(r["cx"])) - ix, 0.0) * kval * rrate
+							var rspan := maxf(maxf(absf((r["mn"] as Vector3).x), absf((r["mx"] as Vector3).x)) - ix, 1e-9)
+							var rover := maxf(absf(q.x - float(r["cx"])) - ix, 0.0)
+							var rrate := float(spec.get("rate", 0.45))
+							var orate := float(spec.get("orate", 0.09))
+							koff[i].x += side * rover * rover / rspan * kval * rrate
 							koff[i].y += (q.y - rc.y) * kval * orate
 							koff[i].z += (q.z - rc.z) * kval * orate
+						elif mode == "rootrot":
+							# Per-side rotation about the mask inner-edge root
+							# (EarRotation): each ear swings about its own
+							# (±ix, cy, cz) pivot with mirrored angles, so both
+							# sides stay symmetric. "axis" + "deg" per cm.
+							var rix := maxf(float(r.get("ix", 0.0)), 1e-9)
+							var rc3: Vector3 = r["c"]
+							var rside := signf(q.x - float(r["cx"]))
+							if rside == 0.0:
+								rside = 1.0
+							var rp := Vector3(rside * rix, rc3.y, rc3.z)
+							# Sign fixed live 09/10 (+ = décolle).
+							var rang := -rside * deg_to_rad(float(spec.get("deg", 15.0)) * kval)
+							koff[i] += Basis((spec["axis"] as Vector3).normalized(), rang) * (q - rp) + rp - q
+						elif mode == "tip":
+							# Linear ramp along `along` (EarlobeLength/EarPoint):
+							# 0 at one bbox end, 1 at the other ("end": "min" /
+							# "max" selects the peak end), pushing `axis`.
+							var tla: Vector3 = (spec["along"] as Vector3).normalized()
+							var td0: float = (r["mn"] as Vector3).dot(tla)
+							var td1: float = (r["mx"] as Vector3).dot(tla)
+							var tw := 0.5
+							if absf(td1 - td0) > 1e-9:
+								tw = clampf((q.dot(tla) - td0) / (td1 - td0), 0.0, 1.0)
+							if String(spec.get("end", "max")) == "min":
+								tw = 1.0 - tw
+							koff[i] += (spec["axis"] as Vector3).normalized() * v * tw * float(spec.get("rate", 1.0))
 						elif mode == "falloff":
 							# Axial falloff bend (Curve, Pout...): sin peak
 							# mid-region along `along`, ends fixed, pushes `axis`.
@@ -1050,7 +1082,7 @@ func _sculpt_fused() -> void:
 							fa["count"] = int(fa["count"]) + 1
 				if take_glue and glue_keys.has(key):
 					surf_koffs[key] = koff
-				if key == &"EarSize":
+				if String((SCULPT_SPEC.get(key, {}) as Dictionary).get("region", "")) == "Ears":
 					# Ear/skull seam set (twin-eq exclusion below): the max
 					# rule would yank skull twins to the full ear offset.
 					ear_mask = kwmax

@@ -36,6 +36,7 @@ const LEVEL_FACE_EYES := 13
 const LEVEL_FACE_JAW := 14
 const LEVEL_FACE_CHEEKS := 15
 const LEVEL_FACE_FOREHEAD := 16
+const LEVEL_FACE_EARS := 17
 
 ## Face hub submenus (label + sculpt-spec group; global = FACE_KEYS Width/
 ## Length, the rest filter SCULPT_KEYS on spec.menu — a new spec row lands in
@@ -48,10 +49,11 @@ const FACE_SUBS := [
 	{"level": LEVEL_FACE_EYES, "label": "Eyes >", "group": "eyes"},
 	{"level": LEVEL_FACE_JAW, "label": "Jaw & Chin >", "group": "jaw"},
 	{"level": LEVEL_FACE_CHEEKS, "label": "Cheeks >", "group": "cheeks"},
-	{"level": LEVEL_FACE_FOREHEAD, "label": "Forehead & Ears >", "group": "forehead"},
+	{"level": LEVEL_FACE_FOREHEAD, "label": "Forehead >", "group": "forehead"},
+	{"level": LEVEL_FACE_EARS, "label": "Ears >", "group": "ears"},
 ]
 
-var _level := LEVEL_ROOT # 0 root, 1 outfits, 2 outfit colors, 3 physics, 4 hair, 5 brows, 6 skin, 7 eyes, 8 beard, 9 face hub, 10-16 face subs
+var _level := LEVEL_ROOT # 0 root, 1 outfits, 2 outfit colors, 3 physics, 4 hair, 5 brows, 6 skin, 7 eyes, 8 beard, 9 face hub, 10-17 face subs
 var _host: CharacterEditor = null
 ## Cursor memory (09/10): level -> cursor, restored on Back. Entering a level
 ## always starts at the top; Back returns to the previously chosen entry
@@ -105,13 +107,15 @@ func _menu_title() -> String:
 		LEVEL_FACE_CHEEKS:
 			return "FACE · CHEEKS"
 		LEVEL_FACE_FOREHEAD:
-			return "FACE · FOREHEAD & EARS"
+			return "FACE · FOREHEAD"
+		LEVEL_FACE_EARS:
+			return "FACE · EARS"
 	return "CHARACTER"
 
 
 ## Face hub + submenus share the close-up (whole face needs it).
 static func is_face_level(level: int) -> bool:
-	return level == LEVEL_FACE or level == LEVEL_FACE_GLOBAL or level == LEVEL_FACE_NOSE or level == LEVEL_FACE_MOUTH or level == LEVEL_FACE_EYES or level == LEVEL_FACE_JAW or level == LEVEL_FACE_CHEEKS or level == LEVEL_FACE_FOREHEAD
+	return level == LEVEL_FACE or level == LEVEL_FACE_GLOBAL or level == LEVEL_FACE_NOSE or level == LEVEL_FACE_MOUTH or level == LEVEL_FACE_EYES or level == LEVEL_FACE_JAW or level == LEVEL_FACE_CHEEKS or level == LEVEL_FACE_FOREHEAD or level == LEVEL_FACE_EARS
 
 
 func _menu_hint() -> String:
