@@ -14,29 +14,47 @@ size = Vector2(8, 8)
 [node name="CharacterEditor" type="Node3D" unique_id=2001735706]
 script = ExtResource("1")
 
-[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1368433160]
+[node name="ViewportContainer" type="SubViewportContainer" parent="." unique_id=912384001]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 360.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+stretch = false
+
+[node name="WorldViewport" type="SubViewport" parent="ViewportContainer" unique_id=912384002]
+own_world_3d = true
+handle_input_locally = false
+msaa_3d = 2
+size = Vector2i(1280, 720)
+render_target_update_mode = 4
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="ViewportContainer/WorldViewport" unique_id=1368433160]
 environment = ExtResource("2")
 
-[node name="Sun" type="DirectionalLight3D" parent="." unique_id=1268775030]
+[node name="Sun" type="DirectionalLight3D" parent="ViewportContainer/WorldViewport" unique_id=1268775030]
 transform = Transform3D(0.87758255, 0.3927224, -0.27498722, 0, 0.5735765, 0.819152, 0.47942555, -0.7188735, 0.50336075, 0, 0, 0)
 light_energy = 1.1
 shadow_enabled = true
 
-[node name="CamPivot" type="Node3D" parent="." unique_id=1840123637]
+[node name="CamPivot" type="Node3D" parent="ViewportContainer/WorldViewport" unique_id=1840123637]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
 script = ExtResource("3")
 
-[node name="SpringArm3D" type="SpringArm3D" parent="CamPivot" unique_id=6934180]
+[node name="SpringArm3D" type="SpringArm3D" parent="ViewportContainer/WorldViewport/CamPivot" unique_id=6934180]
 spring_length = 3.2
 margin = 0.3
 
-[node name="Camera3D" type="Camera3D" parent="CamPivot/SpringArm3D" unique_id=1560075264]
+[node name="Camera3D" type="Camera3D" parent="ViewportContainer/WorldViewport/CamPivot/SpringArm3D" unique_id=1560075264]
 current = true
 fov = 50.0
 
-[node name="Ground" type="StaticBody3D" parent="." unique_id=822741180]
+[node name="Ground" type="StaticBody3D" parent="ViewportContainer/WorldViewport" unique_id=822741180]
 
-[node name="GroundMesh" type="MeshInstance3D" parent="Ground" unique_id=480757860]
+[node name="GroundMesh" type="MeshInstance3D" parent="ViewportContainer/WorldViewport/Ground" unique_id=480757860]
 mesh = SubResource("ground_mesh")
 
 [node name="MenuLayer" type="CanvasLayer" parent="." unique_id=485800586]

@@ -72,7 +72,13 @@ func _ready() -> void:
 		_xray = 2
 	_avatar = CharacterAvatar.new()
 	_avatar.name = "Avatar"
-	add_child(_avatar)
+	var w := _world()
+	if w != null:
+		w.add_child(_avatar)
+	else:
+		add_child(_avatar)
+	_fit_world_viewport()
+	get_tree().root.size_changed.connect(_fit_world_viewport)
 	_avatar.use_fitkit = use_fitkit
 	_avatar.no_suppress = no_suppress
 	_avatar.setup(_dresser, get_node_or_null("MenuLayer/HUD"))
@@ -89,6 +95,30 @@ func _ready() -> void:
 		_animtest_setup()
 	else:
 		_idle_setup()
+
+
+## Preview world (10/10): the mannequin + orbit camera live inside a
+## SubViewport covering the window right of the 360px menu, so the camera
+## centers on the visible area by construction (no h_offset hacks fighting
+## the orbit/face math at other aspect ratios). Same pattern as map_editor.
+const WORLD_MENU_WIDTH := 360.0
+
+
+## The SubViewport everything 3D lives in (avatar, orbit pivot, sun, ground,
+## volume overlay). Paths under it move together; use this, not literals.
+func _world() -> SubViewport:
+	return get_node_or_null("ViewportContainer/WorldViewport") as SubViewport
+
+
+## Tracks the visible area 1:1 (no stretch upscale blur, no aspect skew):
+## right-of-menu window pixels. Re-run on every window resize; headless the
+## root size is constant so one call in _ready suffices.
+func _fit_world_viewport() -> void:
+	var w := _world()
+	if w == null:
+		return
+	var win := get_tree().root.size
+	w.size = Vector2i(maxi(win.x - int(WORLD_MENU_WIDTH), 320), maxi(win.y, 240))
 
 
 ## glTF part lookup (avatar-owned table). Delegated: chartest calls it here.
@@ -185,9 +215,10 @@ const VOL_ALPHA := 0.25
 
 ## Frees the pass-1 volume overlay (rebuilt on demand by _draw_volumes).
 func _clear_volumes() -> void:
-	var old := get_node_or_null("Volumes")
+	var w := _world()
+	var old := (w.get_node_or_null("Volumes") if w != null else null)
 	if old != null:
-		remove_child(old)
+		w.remove_child(old)
 		old.queue_free()
 
 
@@ -202,7 +233,11 @@ func _draw_volumes(vols: Dictionary, cdata: Dictionary) -> void:
 		return
 	var root := Node3D.new()
 	root.name = "Volumes"
-	add_child(root)
+	var w := _world()
+	if w != null:
+		w.add_child(root)
+	else:
+		add_child(root)
 	for chain in vols:
 		var v: Dictionary = vols[chain]
 		var col: Color = VOL_COLORS.get(String(chain), Color(1.0, 1.0, 1.0))
@@ -302,7 +337,10 @@ func _head_world() -> Vector3:
 
 
 func _face_pivot() -> Node3D:
-	return get_node_or_null("CamPivot") as Node3D
+	var w := _world()
+	if w == null:
+		return null
+	return w.get_node_or_null("CamPivot") as Node3D
 
 
 func face_push() -> void:
@@ -614,7 +652,7 @@ func _region_floors(before: PackedVector3Array, after: PackedVector3Array, regio
 ## Mean model-space position of a mounted face part's verts (Vector3.ZERO
 ## when nothing mounted): proves sculpt follow moves the part with its socket.
 func _face_part_mean(slot: String) -> Vector3:
-	var holder := get_node_or_null("Avatar/" + slot) as Node3D
+	var holder := _avatar.get_node_or_null("" + slot) as Node3D
 	if holder == null:
 		return Vector3.ZERO
 	var m := Vector3.ZERO
@@ -732,7 +770,7 @@ func _face_part_outer_dy(before: PackedVector3Array, after: PackedVector3Array) 
 ## All model-space verts of a mounted face part (empty when none mounted).
 func _face_part_verts(slot: String) -> PackedVector3Array:
 	var out := PackedVector3Array()
-	var holder := get_node_or_null("Avatar/" + slot) as Node3D
+	var holder := _avatar.get_node_or_null("" + slot) as Node3D
 	if holder == null:
 		return out
 	for ch in holder.get_children():
@@ -747,7 +785,7 @@ func _face_part_verts(slot: String) -> PackedVector3Array:
 ## Min model-space distance between the mounted eyeballs and the Eyelids
 ## skin (rest sculpt). -1 when unmeasurable (no parts, female).
 func _eye_lid_clearance() -> float:
-	var holder := get_node_or_null("Avatar/Eyes") as Node3D
+	var holder := _avatar.get_node_or_null("Eyes") as Node3D
 	var sk := _avatar_skeleton()
 	var smi := _avatar_skin_mi()
 	if holder == null or sk == null or smi == null or smi.mesh == null:
@@ -1160,9 +1198,9 @@ func _run_headless_test() -> void:
 	fails += _expect("male hands kept", _avatar_finger_verts() > 100)
 	fails += _expect("skin push on", _avatar_push("SuperHero") > 0.01)
 	# Male nude skips brows/eyes at import: the mounted parts stand in.
-	fails += _expect("male brows mounted", get_node_or_null("Avatar/Eyebrows/Male_Eyebrows") != null)
-	fails += _expect("male eyes mounted", get_node_or_null("Avatar/Eyes/Male_Eyes") != null)
-	fails += _expect("male lashes mounted", get_node_or_null("Avatar/Eyelashes/Male_Eyelashes") != null)
+	fails += _expect("male brows mounted", _avatar.get_node_or_null("Eyebrows/Male_Eyebrows") != null)
+	fails += _expect("male eyes mounted", _avatar.get_node_or_null("Eyes/Male_Eyes") != null)
+	fails += _expect("male lashes mounted", _avatar.get_node_or_null("Eyelashes/Male_Eyelashes") != null)
 	fails += _expect("fitkit default on", use_fitkit or "--nofit" in OS.get_cmdline_user_args() or "--nofit" in OS.get_cmdline_args())
 	fails += _expect("stages default on", (not no_suppress) or "--nosuppress" in OS.get_cmdline_user_args() or "--nosuppress" in OS.get_cmdline_args())
 	fails += _expect("fitkit cfg male legs", not FitKit.cfg_for(&"Legs", 0).is_empty())
@@ -1176,11 +1214,11 @@ func _run_headless_test() -> void:
 	_cycle_xray()
 	fails += _expect("xray skin only", _avatar_skin_mi().visible and not _avatar_cloth_mi().visible)
 	_cycle_xray()
-	fails += _expect("xray volumes", _avatar_skin_mi().visible and _avatar_cloth_mi().visible and get_node_or_null("Volumes") != null)
+	fails += _expect("xray volumes", _avatar_skin_mi().visible and _avatar_cloth_mi().visible and _world().get_node_or_null("Volumes") != null)
 	_cycle_xray()
 	fails += _expect("xray wire", _wire and XRAY_NAMES[_xray] == "Wire" and _avatar_skin_mi().visible and _avatar_cloth_mi().visible)
 	_cycle_xray()
-	fails += _expect("xray back to fused", not _wire and _xray == 0 and _avatar_skin_mi().visible and _avatar_cloth_mi().visible and get_node_or_null("Volumes") == null)
+	fails += _expect("xray back to fused", not _wire and _xray == 0 and _avatar_skin_mi().visible and _avatar_cloth_mi().visible and _world().get_node_or_null("Volumes") == null)
 	adjust_slot(&"Head", 1)
 	fails += _expect("hood shown", slot_display(&"Head") == "Ranger")
 	fails += _expect("hood fused", _avatar_mi() != null and _avatar_surf_count() > 1)
@@ -1313,7 +1351,7 @@ func _run_headless_test() -> void:
 	fails += _expect("hair buns female", hair_file("Female", &"Buns").ends_with("Hair_Buns.gltf"))
 	adjust_hair(1)
 	fails += _expect("hair style shown", hair_display() == "Buzzed")
-	var hmi := get_node_or_null("Avatar/Hair/Buzzed") as MeshInstance3D
+	var hmi := _avatar.get_node_or_null("Hair/Buzzed") as MeshInstance3D
 	fails += _expect("hair mounted", hmi != null and hmi.mesh != null)
 	var hmaster := _avatar_skeleton()
 	fails += _expect("hair on master", hmi != null and hmaster != null and hmi.get_node_or_null(hmi.skeleton) == hmaster)
@@ -1360,7 +1398,7 @@ func _run_headless_test() -> void:
 	fails += _expect("hair cancel restores white", Color((_slot_mats(&"Hair")[0] as ShaderMaterial).get_shader_parameter("albedo")).s < 0.1)
 	_avatar._color_params.erase(&"Hair")
 	reset_hair()
-	fails += _expect("hair reset bald", hair_display() == "None" and get_node_or_null("Avatar/Hair/Buzzed") == null)
+	fails += _expect("hair reset bald", hair_display() == "None" and _avatar.get_node_or_null("Hair/Buzzed") == null)
 	open_color(&"Hair")
 	fails += _expect("hair color empty no-op", not is_color_open())
 	_menu._push(CharacterMenu.LEVEL_HAIR)
@@ -1374,7 +1412,7 @@ func _run_headless_test() -> void:
 	fails += _expect("brow style single", eyebrow_display() == "Default")
 	reset_eyebrow()
 	fails += _expect("brow file male", eyebrow_file("Male", &"Default").ends_with("Male_Eyebrows.gltf"))
-	var bmi2 := get_node_or_null("Avatar/Eyebrows/Male_Eyebrows") as MeshInstance3D
+	var bmi2 := _avatar.get_node_or_null("Eyebrows/Male_Eyebrows") as MeshInstance3D
 	fails += _expect("brow mounted", bmi2 != null and bmi2.mesh != null)
 	fails += _expect("brow on master", bmi2 != null and hmaster != null and bmi2.get_node_or_null(bmi2.skeleton) == hmaster)
 	var browhead := true
@@ -1405,7 +1443,7 @@ func _run_headless_test() -> void:
 	fails += _expect("brow color stored", _avatar._color_params.has(&"Eyebrows"))
 	_menu._push(CharacterMenu.LEVEL_EYEBROWS)
 	fails += _expect("menu brow rows", _menu._entries.size() == 3)
-	var pivot := get_node_or_null("CamPivot") as Node3D
+	var pivot := _face_pivot()
 	var arm := (pivot.get_node_or_null("SpringArm3D") as SpringArm3D) if pivot != null else null
 	fails += _expect("face cam close", face_active() and arm != null and is_equal_approx(arm.spring_length, FACE_ARM))
 	fails += _expect("face cam at head", pivot != null and pivot.position.y > _head_world().y)
@@ -1428,7 +1466,7 @@ func _run_headless_test() -> void:
 	fails += _expect("eye style single", eye_display() == "Default")
 	reset_eye()
 	fails += _expect("eye file male", eye_file("Male", &"Default").ends_with("Male_Eyes.gltf"))
-	var emi := get_node_or_null("Avatar/Eyes/Male_Eyes") as MeshInstance3D
+	var emi := _avatar.get_node_or_null("Eyes/Male_Eyes") as MeshInstance3D
 	fails += _expect("eyes mounted", emi != null and emi.mesh != null)
 	fails += _expect("eyes on master", emi != null and hmaster != null and emi.get_node_or_null(emi.skeleton) == hmaster)
 	var eyehead := true
@@ -1462,7 +1500,7 @@ func _run_headless_test() -> void:
 	# 9b. Eyelashes (mounted male part, no nude counterpart, no menu: albedo
 	# defaults like hair; female ships no file yet).
 	fails += _expect("lash file male", eyelash_file("Male", &"Default").ends_with("Male_Eyelashes.gltf"))
-	var lmi := get_node_or_null("Avatar/Eyelashes/Male_Eyelashes") as MeshInstance3D
+	var lmi := _avatar.get_node_or_null("Eyelashes/Male_Eyelashes") as MeshInstance3D
 	fails += _expect("lashes mounted", lmi != null and lmi.mesh != null)
 	fails += _expect("lashes on master", lmi != null and hmaster != null and lmi.get_node_or_null(lmi.skeleton) == hmaster)
 	var lashhead := true
@@ -1488,22 +1526,22 @@ func _run_headless_test() -> void:
 	adjust_face_sculpt(&"EyeDepth", 8)
 	var eyes1 := _face_part_mean("Eyes")
 	fails += _expect("eyes follow out", eyes1.z > eyes0.z + 0.006)
-	fails += _expect("eyes follow baked", _avatar._face_pristine.has("Eyes") and get_node_or_null("Avatar/Eyes/Male_Eyes") != null and (get_node_or_null("Avatar/Eyes/Male_Eyes") as MeshInstance3D).mesh != _avatar._face_pristine["Eyes"])
+	fails += _expect("eyes follow baked", _avatar._face_pristine.has("Eyes") and _avatar.get_node_or_null("Eyes/Male_Eyes") != null and (_avatar.get_node_or_null("Eyes/Male_Eyes") as MeshInstance3D).mesh != _avatar._face_pristine["Eyes"])
 	reset_face_sculpt(&"EyeDepth")
-	fails += _expect("eyes follow restores", (get_node_or_null("Avatar/Eyes/Male_Eyes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyes"])
+	fails += _expect("eyes follow restores", (_avatar.get_node_or_null("Eyes/Male_Eyes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyes"])
 	var lash0 := _face_part_mean("Eyelashes")
 	adjust_face_sculpt(&"EyelidHeavy", 8)
 	var lash1 := _face_part_mean("Eyelashes")
 	fails += _expect("lashes follow lid", lash1.y < lash0.y - 0.003)
-	fails += _expect("eyes ignore lid", (get_node_or_null("Avatar/Eyes/Male_Eyes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyes"])
+	fails += _expect("eyes ignore lid", (_avatar.get_node_or_null("Eyes/Male_Eyes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyes"])
 	reset_face_sculpt(&"EyelidHeavy")
-	fails += _expect("lashes follow restores", (get_node_or_null("Avatar/Eyelashes/Male_Eyelashes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyelashes"])
+	fails += _expect("lashes follow restores", (_avatar.get_node_or_null("Eyelashes/Male_Eyelashes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyelashes"])
 	var brow0 := _face_part_mean("Eyebrows")
 	adjust_face_sculpt(&"BrowRidgeDepth", 8)
 	var brow1 := _face_part_mean("Eyebrows")
 	fails += _expect("brows follow ridge", brow1.z > brow0.z + 0.003)
 	reset_face_sculpt(&"BrowRidgeDepth")
-	fails += _expect("brows follow restores", (get_node_or_null("Avatar/Eyebrows/Male_Eyebrows") as MeshInstance3D).mesh == _avatar._face_pristine["Eyebrows"])
+	fails += _expect("brows follow restores", (_avatar.get_node_or_null("Eyebrows/Male_Eyebrows") as MeshInstance3D).mesh == _avatar._face_pristine["Eyebrows"])
 	# Authored clearance pin (09/10, 1mm Blender fix): min distance between
 	# the eyeballs and the Eyelids skin at rest. A future export that touches
 	# the lids again fails here instead of in the viewport.
@@ -1533,8 +1571,8 @@ func _run_headless_test() -> void:
 	fails += _expect("eyes space out", esp1[0] < esp0[0] - 0.005 and esp1[1] > esp0[1] + 0.005)
 	fails += _expect("lashes space out", espl1[0] < espl0[0] - 0.004 and espl1[1] > espl0[1] + 0.004)
 	reset_face_sculpt(&"EyeSpacing")
-	fails += _expect("eyes space restores", (get_node_or_null("Avatar/Eyes/Male_Eyes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyes"])
-	fails += _expect("lashes space restores", (get_node_or_null("Avatar/Eyelashes/Male_Eyelashes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyelashes"])
+	fails += _expect("eyes space restores", (_avatar.get_node_or_null("Eyes/Male_Eyes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyes"])
+	fails += _expect("lashes space restores", (_avatar.get_node_or_null("Eyelashes/Male_Eyelashes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyelashes"])
 	var esz0 := _face_part_side_radii("Eyes")
 	var eslz0 := _face_part_side_radii("Eyelashes")
 	adjust_face_sculpt(&"EyeSize", 8)
@@ -1555,12 +1593,12 @@ func _run_headless_test() -> void:
 	# lash verts drop with the lid margin.
 	var lan0 := _face_part_verts("Eyelashes")
 	adjust_face_sculpt(&"EyeAngle", 8)
-	fails += _expect("eyes ignore angle", (get_node_or_null("Avatar/Eyes/Male_Eyes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyes"])
+	fails += _expect("eyes ignore angle", (_avatar.get_node_or_null("Eyes/Male_Eyes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyes"])
 	var lan1 := _face_part_verts("Eyelashes")
 	var lod := _face_part_outer_dy(lan0, lan1)
 	fails += _expect("lashes ride tilt", int(lod[1]) > 0 and float(lod[0]) < -0.0005)
 	reset_face_sculpt(&"EyeAngle")
-	fails += _expect("lashes tilt restores", (get_node_or_null("Avatar/Eyelashes/Male_Eyelashes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyelashes"])
+	fails += _expect("lashes tilt restores", (_avatar.get_node_or_null("Eyelashes/Male_Eyelashes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyelashes"])
 	# Brows ride their own tilt (same rigid-rotation follow as lashes).
 	var brw0 := _face_part_verts("Eyebrows")
 	adjust_face_sculpt(&"BrowAngle", 8)
@@ -1568,7 +1606,7 @@ func _run_headless_test() -> void:
 	var brd := _face_part_outer_dy(brw0, brw1)
 	fails += _expect("brows ride tilt", int(brd[1]) > 0 and float(brd[0]) < -0.0005)
 	reset_face_sculpt(&"BrowAngle")
-	fails += _expect("brows tilt restores", (get_node_or_null("Avatar/Eyebrows/Male_Eyebrows") as MeshInstance3D).mesh == _avatar._face_pristine["Eyebrows"])
+	fails += _expect("brows tilt restores", (_avatar.get_node_or_null("Eyebrows/Male_Eyebrows") as MeshInstance3D).mesh == _avatar._face_pristine["Eyebrows"])
 	# BrowThick dilates the mesh itself (live report 10/10: the skin-only
 	# motion hid under the rigid part — mean ≈ 0 so nothing followed).
 	var bth_before := _face_part_verts("Eyebrows")
@@ -1589,7 +1627,7 @@ func _run_headless_test() -> void:
 		bth_grows = (bmx1 - bmn1) > (bmx0 - bmn0) + 0.001
 	fails += _expect("brows thicken", bth_grows)
 	reset_face_sculpt(&"BrowThick")
-	fails += _expect("brows thick restores", (get_node_or_null("Avatar/Eyebrows/Male_Eyebrows") as MeshInstance3D).mesh == _avatar._face_pristine["Eyebrows"])
+	fails += _expect("brows thick restores", (_avatar.get_node_or_null("Eyebrows/Male_Eyebrows") as MeshInstance3D).mesh == _avatar._face_pristine["Eyebrows"])
 	# Spacing superposes with depth (side-split + global bakes add without
 	# touching each other's axis).
 	adjust_face_sculpt(&"EyeDepth", -4)
@@ -1624,9 +1662,9 @@ func _run_headless_test() -> void:
 			else:
 				backmax = maxf(backmax, hbefore[i].distance_to(hafter[i]))
 	fails += _expect("hair follows forehead", frontn > 0 and (front1 - front0) / float(frontn) > 0.002)
-	fails += _expect("eyes ignore forehead", (get_node_or_null("Avatar/Eyes/Male_Eyes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyes"])
+	fails += _expect("eyes ignore forehead", (_avatar.get_node_or_null("Eyes/Male_Eyes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyes"])
 	reset_face_sculpt(&"ForeheadHeight")
-	fails += _expect("hair follow restores", (get_node_or_null("Avatar/Hair/Buzzed") as MeshInstance3D).mesh == _avatar._face_pristine["Hair"])
+	fails += _expect("hair follow restores", (_avatar.get_node_or_null("Hair/Buzzed") as MeshInstance3D).mesh == _avatar._face_pristine["Hair"])
 	reset_hair()
 	# 9e. Width follow (09/10 live: temples clipped the hair sides): shell
 	# vert copies its nearest skin vert's offset ("glue"), so the cap keeps
@@ -1687,7 +1725,7 @@ func _run_headless_test() -> void:
 				spreadn_neg += 1
 	fails += _expect("hair column narrows", spreadn_neg > 0 and spread_neg / float(spreadn_neg) < -0.004)
 	reset_face_sculpt(&"ForeheadWidth")
-	fails += _expect("hair width restores", (get_node_or_null("Avatar/Hair/Buzzed") as MeshInstance3D).mesh == _avatar._face_pristine["Hair"])
+	fails += _expect("hair width restores", (_avatar.get_node_or_null("Hair/Buzzed") as MeshInstance3D).mesh == _avatar._face_pristine["Hair"])
 	reset_hair()
 	# 9f. Beard glue (jaw/chin rows drag the beard shell via nearest-skin
 	# offsets, same path as hair — mouth/cheek rows stay out for now).
@@ -1725,7 +1763,7 @@ func _run_headless_test() -> void:
 	reset_face_sculpt(&"ChinLength")
 	for bk in [&"JawWidth", &"JawDefinition", &"JawAngle", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft", &"MouthW", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"MouthPout"]:
 		adjust_face_sculpt(bk, 8)
-		fails += _expect("beard wired %s" % String(bk), (get_node_or_null("Avatar/Beard/Beard") as MeshInstance3D).mesh != _avatar._face_pristine["Beard"])
+		fails += _expect("beard wired %s" % String(bk), (_avatar.get_node_or_null("Beard/Beard") as MeshInstance3D).mesh != _avatar._face_pristine["Beard"])
 		reset_face_sculpt(bk)
 	# Mustache rides the lips (live report: it stayed put): the moved set
 	# (upper beard verts) advances with the pout.
@@ -1741,9 +1779,9 @@ func _run_headless_test() -> void:
 				mmoven += 1
 	fails += _expect("mustache follows mouth", mmoven > 0 and mmove / float(mmoven) > 0.003)
 	reset_face_sculpt(&"MouthPout")
-	fails += _expect("beard jaw restores", (get_node_or_null("Avatar/Beard/Beard") as MeshInstance3D).mesh == _avatar._face_pristine["Beard"])
+	fails += _expect("beard jaw restores", (_avatar.get_node_or_null("Beard/Beard") as MeshInstance3D).mesh == _avatar._face_pristine["Beard"])
 	adjust_face_sculpt(&"EyeDepth", 8)
-	fails += _expect("beard ignores eyes", (get_node_or_null("Avatar/Beard/Beard") as MeshInstance3D).mesh == _avatar._face_pristine["Beard"])
+	fails += _expect("beard ignores eyes", (_avatar.get_node_or_null("Beard/Beard") as MeshInstance3D).mesh == _avatar._face_pristine["Beard"])
 	reset_face_sculpt(&"EyeDepth")
 	reset_beard()
 	# 17c. EarSize spares the head (09/10 live: growing the ears grew the
@@ -2116,7 +2154,7 @@ func _run_headless_test() -> void:
 	fails += _expect("beard color empty no-op", not is_color_open())
 	adjust_beard(1)
 	fails += _expect("beard style shown", beard_display() == "Beard")
-	var bmi := get_node_or_null("Avatar/Beard/Beard") as MeshInstance3D
+	var bmi := _avatar.get_node_or_null("Beard/Beard") as MeshInstance3D
 	fails += _expect("beard mounted", bmi != null and bmi.mesh != null)
 	fails += _expect("beard on master", bmi != null and hmaster != null and bmi.get_node_or_null(bmi.skeleton) == hmaster)
 	open_color(&"Beard")
@@ -2130,7 +2168,7 @@ func _run_headless_test() -> void:
 	_dresser._confirm()
 	fails += _expect("beard color stored", _avatar._color_params.has(&"Beard"))
 	reset_beard()
-	fails += _expect("beard reset clean", beard_display() == "None" and get_node_or_null("Avatar/Beard/Beard") == null)
+	fails += _expect("beard reset clean", beard_display() == "None" and _avatar.get_node_or_null("Beard/Beard") == null)
 	_menu._push(CharacterMenu.LEVEL_BEARD)
 	fails += _expect("menu beard rows", _menu._entries.size() == 3)
 	fails += _expect("face cam on beard", face_active())
@@ -2169,8 +2207,16 @@ func _run_headless_test() -> void:
 	fails += _expect("menu root restores", _menu._level == CharacterMenu.LEVEL_ROOT and _menu._cursor == 5)
 	# 11c. Face view stability (09/10): submenu hops never move the camera;
 	# rebuilds re-aim the pivot but keep the user's zoom; leaving restores.
-	var cam := get_node_or_null("CamPivot/SpringArm3D/Camera3D") as Camera3D
+	var cam := _world().get_node_or_null("CamPivot/SpringArm3D/Camera3D") as Camera3D
 	fails += _expect("editor camera centered", cam != null and is_zero_approx(cam.position.x))
+	# 11d. Preview world (10/10): mannequin + camera live in the right-of-menu
+	# SubViewport, sized to the visible area (crisp 1:1, no stretch skew).
+	var w := _world()
+	var cont := get_node_or_null("ViewportContainer") as SubViewportContainer
+	fails += _expect("world right of menu", w != null and cont != null and is_equal_approx(cont.offset_left, WORLD_MENU_WIDTH))
+	fails += _expect("world sized visible", w != null and w.size.x >= 320 and w.size.y >= 240)
+	fails += _expect("avatar in world", _avatar != null and _avatar.get_parent() == w)
+	fails += _expect("camera in world", cam != null and cam.get_viewport() == w)
 	_menu._push(CharacterMenu.LEVEL_FACE)
 	var arm2 := (pivot.get_node_or_null("SpringArm3D") as SpringArm3D) if pivot != null else null
 	if arm2 != null:
@@ -2524,7 +2570,7 @@ func _apply_xray() -> void:
 		_draw_volumes(_avatar.last_volumes(), _avatar.last_cdata())
 	else:
 		_clear_volumes()
-	var vp := get_viewport()
+	var vp := _world()
 	_wire = _xray == 3
 	if vp != null:
 		vp.debug_draw = Viewport.DEBUG_DRAW_WIREFRAME if _wire else Viewport.DEBUG_DRAW_DISABLED
@@ -2576,17 +2622,17 @@ func _run_capture_test() -> void:
 		_apply_nude()
 		_rebuild_avatar()
 	if "--sunflip" in args:
-		var sun := get_node_or_null("Sun") as DirectionalLight3D
+		var sun := _world().get_node_or_null("Sun") as DirectionalLight3D
 		if sun != null:
 			sun.rotation.y += PI
 	if "--noground" in args:
-		var ground := get_node_or_null("Ground")
+		var ground := _world().get_node_or_null("Ground")
 		if ground != null:
 			(ground as Node3D).visible = false
 	for f in 90:
 		await get_tree().process_frame
 	await RenderingServer.frame_post_draw
-	var img := get_viewport().get_texture().get_image()
+	var img := _world().get_texture().get_image()
 	var err := img.save_png(path)
 	print("[CaptureTest] saved %s (%dx%d err=%s)" % [path, img.get_width(), img.get_height(), str(err)])
 	get_tree().quit()
