@@ -659,7 +659,7 @@ func reset_face(key: StringName) -> void:
 ## center fixed — no bunching, no fold); the X half-extent comes from the
 ## baked points.
 const SCULPT_PATH := "res://data/characters/face_sculpt.json"
-const SCULPT_KEYS: Array[StringName] = [&"NoseL", &"NoseW", &"MouthW", &"Chin", &"NoseBridge", &"NoseTip", &"NostrilFlare", &"NoseLength", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseTipSize", &"NoseTipAngle", &"NoseCurve", &"MouthPout", &"EyelidHeavy", &"EyeDepth", &"EyeHeight", &"EyeSpacing", &"EyeSize", &"EyeAngle", &"BrowHeight", &"BrowThick", &"BrowAngle", &"BrowDepth", &"JawWidth", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft", &"CheekboneWidth", &"CheekboneHeight", &"CheekFullness", &"FaceFullness", &"ForeheadHeight", &"ForeheadWidth", &"BrowRidgeDepth", &"EarSize", &"EarRotation", &"EarlobeLength", &"EarPoint"]
+const SCULPT_KEYS: Array[StringName] = [&"NoseL", &"NoseW", &"MouthW", &"Chin", &"NoseBridge", &"NoseTip", &"NostrilFlare", &"NoseLength", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseTipSize", &"NoseTipAngle", &"NoseCurve", &"MouthPout", &"EyelidHeavy", &"EyeDepth", &"EyeHeight", &"EyeSpacing", &"EyeSize", &"EyeAngle", &"BrowHeight", &"BrowThick", &"BrowAngle", &"BrowDepth", &"JawWidth", &"JawDefinition", &"JawAngle", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft", &"CheekboneWidth", &"CheekboneHeight", &"CheekFullness", &"FaceFullness", &"ForeheadHeight", &"ForeheadWidth", &"BrowRidgeDepth", &"EarSize", &"EarRotation", &"EarlobeLength", &"EarPoint"]
 const SCULPT_STEP := 0.1
 const SCULPT_SPEC := {
 	&"NoseL": {"region": "Nose", "menu": "nose", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 1.0},
@@ -691,6 +691,8 @@ const SCULPT_SPEC := {
 	&"BrowAngle": {"region": "Brows", "menu": "eyes", "mode": "siderot", "axis": Vector3(0, 0, 1), "deg": 10.0, "mirror": false, "max_cm": 0.8},
 	&"BrowDepth": {"region": "BrowRidge", "menu": "eyes", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 0.4},
 	&"JawWidth": {"region": "Jaw", "menu": "jaw", "axis": Vector3(1, 0, 0), "mirror": true, "max_cm": 0.8},
+	&"JawDefinition": {"region": "Jaw", "menu": "jaw", "mode": "siderot", "axis": Vector3(0, 0, 1), "deg": 7.0, "mirror": false, "max_cm": 0.8, "rings": 1},
+	&"JawAngle": {"region": "Jaw", "menu": "jaw", "mode": "tip", "along": Vector3(0, 1, 0), "end": "min", "axis": Vector3(0, 1, 0), "rate": 1.0, "mirror": false, "max_cm": 0.8, "rings": 1},
 	&"ChinLength": {"region": "Chin", "menu": "jaw", "axis": Vector3(0, -1, 0), "mirror": false, "max_cm": 1.0},
 	&"ChinWidth": {"region": "Chin", "menu": "jaw", "axis": Vector3(1, 0, 0), "mirror": true, "max_cm": 0.8},
 	&"ChinProject": {"region": "Chin", "menu": "jaw", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 1.0},
