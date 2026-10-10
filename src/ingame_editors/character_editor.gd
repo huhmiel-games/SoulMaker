@@ -133,10 +133,9 @@ func _on_color_closed(applied: bool) -> void:
 	_color_slot = &""
 
 
-## Idle preview: same manual-advance player as the probe but HELD AT REST
-## (live request 10/10: the constant idle sway annoyed sculpt judging).
-## The take stays mounted so playback can resume; the face-submenu pause
-## machinery is untouched (still gates advance).
+## Idle preview: same manual-advance player as the probe, but the opening
+## pose HOLDS (live request 10/10: rest pose reads T-pose, the idle take
+## reads natural — frozen, no sway). _process only advances the probe.
 func _idle_setup() -> void:
 	_animtest_teardown()
 	_anim_frame = 0
@@ -163,9 +162,9 @@ func _idle_setup() -> void:
 		print("[Idle] %s missing, fallback %s" % [IDLE_TAKE, bare])
 	libs.add_animation(bare, _animtest_remap(pack.get_animation(bare), master))
 	_anim_player.add_animation_library("rig", libs)
-	# No play(): the preview rests in bind pose (no sway). The take stays
-	# mounted under "rig" for a future resume.
-	print("[Idle] %s mounted, held at rest on %s" % [IDLE_TAKE, master.get_path()])
+	_anim_player.play(IDLE_TAKE)
+	_anim_player.seek(0.0, true) # opening pose; _process never advances it
+	print("[Idle] %s held at opening pose on %s" % [IDLE_TAKE, master.get_path()])
 	_anim_master = master
 	_anim_active = true
 	_idle_only = true
@@ -1219,10 +1218,7 @@ func _run_headless_test() -> void:
 	fails += _expect("menu physics 6+back", _menu._entries.size() == 7)
 	_menu._pop()
 	var want_take := _animtest_take() if _animtest_wanted() else IDLE_TAKE
-	if _animtest_wanted():
-		fails += _expect("preview anim playing", _anim_player != null and _anim_player.current_animation == want_take)
-	else:
-		fails += _expect("preview rests at idle", _anim_player != null and not _anim_player.is_playing() and _anim_player.has_animation(want_take))
+	fails += _expect("preview anim playing", _anim_player != null and _anim_player.current_animation == want_take)
 	fails += _expect("color body mapped", not _slot_mats(&"Body").is_empty())
 	fails += _expect("color skin mapped", not _slot_mats(&"Skin").is_empty())
 	open_color(&"Head")
@@ -2749,7 +2745,9 @@ func _process(delta: float) -> void:
 		return
 	if not is_instance_valid(_anim_master):
 		return
-	if _anim_player.is_playing() and not _anim_paused:
+	# Idle preview holds its opening pose (no sway, live request): only the
+	# animtest probe advances here; the face-submenu pause still gates it.
+	if _anim_player.is_playing() and not _anim_paused and _animtest_wanted():
 		_anim_player.advance(delta)
 	_anim_frame += 1
 	if _anim_frame == 60:
