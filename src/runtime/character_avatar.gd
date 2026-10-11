@@ -667,17 +667,17 @@ func reset_face(key: StringName) -> void:
 ## center fixed — no bunching, no fold); the X half-extent comes from the
 ## baked points.
 const SCULPT_PATH := "res://data/characters/face_sculpt.json"
-const SCULPT_KEYS: Array[StringName] = [&"NoseL", &"NoseW", &"MouthW", &"Chin", &"NoseBridge", &"NoseTip", &"NostrilFlare", &"NoseLength", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseTipSize", &"NoseTipAngle", &"NoseCurve", &"MouthPout", &"EyelidHeavy", &"EyeDepth", &"EyeHeight", &"EyeSpacing", &"EyeSize", &"EyeAngle", &"BrowHeight", &"BrowThick", &"BrowAngle", &"BrowDepth", &"JawWidth", &"JawDefinition", &"JawAngle", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft", &"CheekboneWidth", &"CheekboneHeight", &"CheekFullness", &"FaceFullness", &"ForeheadHeight", &"ForeheadWidth", &"BrowRidgeDepth", &"EarSize", &"EarRotation", &"EarlobeLength", &"EarPoint"]
+const SCULPT_KEYS: Array[StringName] = [&"NoseLength", &"NoseWidth", &"MouthW", &"Chin", &"NoseBridge", &"NostrilFlare", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseCurve", &"NoseTip", &"NoseTipLength", &"NoseTipSize", &"NoseTipAngle", &"MouthPout", &"EyelidHeavy", &"EyeDepth", &"EyeHeight", &"EyeSpacing", &"EyeSize", &"EyeAngle", &"BrowHeight", &"BrowThick", &"BrowAngle", &"BrowDepth", &"JawWidth", &"JawDefinition", &"JawAngle", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft", &"CheekboneWidth", &"CheekboneHeight", &"CheekFullness", &"FaceFullness", &"ForeheadHeight", &"ForeheadWidth", &"BrowRidgeDepth", &"EarSize", &"EarRotation", &"EarlobeLength", &"EarPoint"]
 const SCULPT_STEP := 0.1
 const SCULPT_SPEC := {
-	&"NoseL": {"region": "Nose", "menu": "nose", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 1.0},
-	&"NoseW": {"region": "Nose", "menu": "nose", "axis": Vector3(1, 0, 0), "mirror": true, "max_cm": 0.8},
+	&"NoseLength": {"region": "Nose", "menu": "nose", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 1.0},
+	&"NoseWidth": {"region": "Nose", "menu": "nose", "axis": Vector3(1, 0, 0), "mirror": true, "max_cm": 0.8},
 	&"MouthW": {"region": "Mouth", "menu": "mouth", "axis": Vector3(1, 0, 0), "mirror": true, "max_cm": 0.8},
 	&"Chin": {"region": "Chin", "menu": "jaw", "axis": Vector3(0, -0.55, 1), "mirror": false, "max_cm": 1.0},
 	&"NoseBridge": {"region": "NoseBridge", "menu": "nose", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 1.0},
 	&"NoseTip": {"region": "NoseTip", "menu": "nose", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 0.8},
 	&"NostrilFlare": {"region": "NostrilFlare", "menu": "nose", "axis": Vector3(1, 0, 0), "mirror": true, "max_cm": 0.8},
-	&"NoseLength": {"region": "NoseTip", "menu": "nose", "axis": Vector3(0, -1, 0), "mirror": false, "max_cm": 1.0},
+	&"NoseTipLength": {"region": "NoseTip", "menu": "nose", "axis": Vector3(0, -1, 0), "mirror": false, "max_cm": 1.0},
 	&"NosePosition": {"region": "Nose", "menu": "nose", "axis": Vector3(0, 1, 0), "mirror": false, "max_cm": 0.8},
 	&"LipUpper": {"region": "UpperLip", "menu": "mouth", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 0.8},
 	&"LipLower": {"region": "LowerLip", "menu": "mouth", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 0.8},
@@ -686,7 +686,7 @@ const SCULPT_SPEC := {
 	&"MouthForward": {"region": "Mouth", "menu": "mouth", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 0.8},
 	&"NoseTipSize": {"region": "NoseTip", "menu": "nose", "mode": "scale", "rate": 0.15, "mirror": false, "max_cm": 1.0},
 	&"NoseTipAngle": {"region": "NoseTip", "menu": "nose", "mode": "rot", "axis": Vector3(1, 0, 0), "deg": 12.0, "mirror": false, "max_cm": 1.0},
-	&"NoseCurve": {"region": "NoseBridge", "menu": "nose", "mode": "falloff", "axis": Vector3(0, 0, 1), "along": Vector3(0, 1, 0), "mirror": false, "max_cm": 1.0},
+	&"NoseCurve": {"region": "NoseBridge", "menu": "nose", "mode": "falloff_n", "axis": Vector3(0, 0, 1), "along": Vector3(0, 1, 0), "mirror": false, "max_cm": 1.0},
 	&"MouthPout": {"region": "UpperLip", "menu": "mouth", "mode": "falloff", "axis": Vector3(0, 0, 1), "along": Vector3(1, 0, 0), "mirror": false, "max_cm": 0.8},
 	&"EyelidHeavy": {"region": "UpperEyelid", "menu": "eyes", "axis": Vector3(0, -1, 0), "mirror": false, "max_cm": 0.4},
 	&"EyeDepth": {"region": "Eyelids", "menu": "eyes", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 0.8},
@@ -1000,7 +1000,7 @@ func _sculpt_fused() -> void:
 			var fsmart := {} # falloff key -> smoothed t per vert
 			for fkey in active:
 				var fspec: Dictionary = SCULPT_SPEC[fkey]
-				if String(fspec.get("mode", "")) != "falloff":
+				if not String(fspec.get("mode", "")).begins_with("falloff"):
 					continue
 				var fr: Dictionary = regions.get(String(fspec["region"]), {})
 				if fr.is_empty():
@@ -1040,7 +1040,7 @@ func _sculpt_fused() -> void:
 			# own off + mask, diffuses through verts masked for NOBODY ELSE,
 			# then adds in. The old shared wmax let any overlapping region
 			# (Nose over the bridge halo) flip halo verts to mask and snap
-			# their diffused offset back to ~0 — one NoseW step visibly
+			# their diffused offset back to ~0 — one NoseWidth step visibly
 			# flattened NoseCurve. Rows now superpose without interaction.
 			for key in active:
 				var spec: Dictionary = SCULPT_SPEC[key]
@@ -1157,6 +1157,26 @@ func _sculpt_fused() -> void:
 							if fsmart.has(key):
 								t = (fsmart[key] as PackedFloat32Array)[i]
 							koff[i] += (spec["axis"] as Vector3).normalized() * v * sin(PI * t)
+						elif mode == "falloff_n":
+							# Normal-following bend (NoseCurve, live 11/10:
+							# clearly better than fixed-axis at the tip):
+							# same sin profile, but the push rotates with the surface —
+							# straight wall goes `axis` like today, the tip
+							# kick-up inflates instead of shearing. Facing-
+							# weighted (flanks keep the rigid axis, so no
+							# lateral step opens at the mask sides). Normals
+							# missing = plain-axis fallback (never guess).
+							var adir: Vector3 = (spec["axis"] as Vector3).normalized()
+							var tn := 0.5
+							if fsmart.has(key):
+								tn = (fsmart[key] as PackedFloat32Array)[i]
+							var push := adir
+							var an2: PackedVector3Array = a[Mesh.ARRAY_NORMAL]
+							if an2.size() == n:
+								var nh: Vector3 = (head_inv.basis * an2[i]).normalized()
+								var facing := clampf(nh.dot(adir), 0.0, 1.0)
+								push = (adir * (1.0 - facing) + nh * facing).normalized()
+							koff[i] += push * v * sin(PI * tn)
 						else:
 							koff[i] += (spec["axis"] as Vector3).normalized() * v
 				_sculpt_diffuse(koff, kwmax, _sculpt_adj(src_mesh, s, verts, a[Mesh.ARRAY_INDEX]), int(spec.get("rings", SCULPT_RINGS)))
