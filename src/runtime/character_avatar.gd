@@ -183,16 +183,24 @@ var _skin_pristine: ArrayMesh = null
 var _face_pristine := {}
 ## Shell-follow glue (09/10): nearest-skin correspondence. _glue_qs = combined
 ## Head-local pristine Skin verts (first Skin MI, eye surfaces excluded, same
-## order as the retained fields); _glue_fields = per-key combined offsets of
-## the current bake; _glue_grid maps 10mm cells to combined indices (rebuilt
-## when the skin mesh changes); _glue_map caches hair-mesh rid -> nearest
-## skin index per hair vert (both sides pristine, so static).
+## order as the retained fields); _glue_ns = their Head-local normals (same
+## order; empty when the skin carries none); _glue_fields = per-key combined
+## offsets of the current bake; _glue_grid maps 10mm cells to combined indices
+## (rebuilt when the skin mesh changes); _glue_map caches hair-mesh rid ->
+## nearest skin index per hair vert (both sides pristine, so static);
+## _glue_depth caches rid -> signed rest burial depth per shell vert (meters,
+## negative = under the skin, signed on the anchor normal). Beard roots
+## (deep) skip the follow so expression never drags them out (11/10).
 const GLUE_CELL := 0.01
+const GLUE_SKIN_M := 0.002 # shallower than this: full follow (surface shell)
+const GLUE_ROOT_M := 0.003 # deeper than this: frozen root (never dragged out)
 var _glue_qs := PackedVector3Array()
+var _glue_ns := PackedVector3Array()
 var _glue_fields := {}
 var _glue_grid := {}
 var _glue_grid_rid := -1
 var _glue_map := {}
+var _glue_depth := {}
 
 
 func _snap_pristine() -> void:
@@ -1355,21 +1363,29 @@ func _glue_ensure(src_mesh: ArrayMesh, mmi: MeshInstance3D, head_inv: Transform3
 		return
 	_glue_grid = {}
 	_glue_qs = PackedVector3Array()
+	_glue_ns = PackedVector3Array()
 	_glue_map = {}
+	_glue_depth = {}
 	var idx := 0
 	for s in src_mesh.get_surface_count():
 		var src := String(_avatar_src_for(mmi, s)).to_lower()
 		if src.contains("eye") and not src.contains("brow"):
 			continue
 		var vv: PackedVector3Array = src_mesh.surface_get_arrays(s)[Mesh.ARRAY_VERTEX]
+		var nn: PackedVector3Array = src_mesh.surface_get_arrays(s)[Mesh.ARRAY_NORMAL]
+		var has_n := nn.size() == vv.size()
 		for i in vv.size():
 			var q: Vector3 = head_inv * vv[i]
 			_glue_qs.append(q)
+			if has_n:
+				_glue_ns.append((head_inv.basis * nn[i]).normalized())
 			var cell := Vector3i(floori(q.x / GLUE_CELL), floori(q.y / GLUE_CELL), floori(q.z / GLUE_CELL))
 			if not _glue_grid.has(cell):
 				_glue_grid[cell] = []
 			(_glue_grid[cell] as Array).append(idx)
 			idx += 1
+	if _glue_ns.size() != idx:
+		_glue_ns = PackedVector3Array() # partial normals = unusable order
 	_glue_grid_rid = rid
 
 
@@ -1407,6 +1423,31 @@ func _glue_build_map(pristine: ArrayMesh, head_inv: Transform3D) -> PackedInt32A
 	return out
 
 
+## Signed rest burial depth per shell vert (meters; negative = under the skin,
+## signed on the anchor normal). Same flat order as _glue_build_map. Empty
+## when the skin carries no normals (caller falls back to full follow).
+func _glue_build_depth(pristine: ArrayMesh, gmap: PackedInt32Array, head_inv: Transform3D) -> PackedFloat32Array:
+	var out := PackedFloat32Array()
+	if _glue_ns.is_empty():
+		return out
+	for s in pristine.get_surface_count():
+		var vv: PackedVector3Array = pristine.surface_get_arrays(s)[Mesh.ARRAY_VERTEX]
+		for i in vv.size():
+			var gi: int = gmap[mini(out.size(), gmap.size() - 1)]
+			var q: Vector3 = head_inv * vv[i]
+			out.append((q - _glue_qs[gi]).dot(_glue_ns[gi]))
+	return out
+
+
+## Rest burial depths for a mounted shell slot (empty when unmeasurable).
+## Chartest probe for the root-freeze gate below.
+func glue_depth(slot: String) -> PackedFloat32Array:
+	var pristine := _face_pristine.get(slot) as ArrayMesh
+	if pristine == null:
+		return PackedFloat32Array()
+	return _glue_depth.get(pristine.get_rid().get_id(), PackedFloat32Array())
+
+
 ## Shell-part follow ("glue", 09/10): each vert copies the sculpt offset of
 ## its NEAREST skin vert (retained per-key fields of this bake), so the shell
 ## preserves its rest gap exactly — both directions, every driving key, no
@@ -1431,7 +1472,14 @@ func _face_glue_bake(slot: String, flist: Array, head_world: Transform3D, head_i
 	var rid := pristine.get_rid().get_id()
 	if not _glue_map.has(rid):
 		_glue_map[rid] = _glue_build_map(pristine, head_inv)
+		_glue_depth[rid] = _glue_build_depth(pristine, _glue_map[rid], head_inv)
 	var gmap: PackedInt32Array = _glue_map[rid]
+	var gdep: PackedFloat32Array = _glue_depth.get(rid, PackedFloat32Array())
+	# Beard-only root freeze (11/10): buried verts must stay buried — the
+	# expression offset would drag them through the skin where the stretch
+	# gradient is steep (mouth corner). Hair is a surface cap: its roots
+	# riding the skull is correct, so it keeps full follow.
+	var gated := slot == &"Beard" and gdep.size() == gmap.size()
 	var keys: Array = []
 	for fd in flist:
 		var fk: StringName = (fd as Dictionary)["key"]
@@ -1457,6 +1505,8 @@ func _face_glue_bake(slot: String, flist: Array, head_world: Transform3D, head_i
 					var sk: int = gmap[gi]
 					for k in keys:
 						off += ((_glue_fields as Dictionary)[k] as PackedVector3Array)[sk]
+					if gated:
+						off *= clampf((gdep[gi] + GLUE_ROOT_M) / (GLUE_ROOT_M - GLUE_SKIN_M), 0.0, 1.0)
 				pverts[i] = head_world * (head_inv * pverts[i] + off)
 				gi += 1
 			a[Mesh.ARRAY_VERTEX] = pverts

@@ -1778,6 +1778,27 @@ func _run_headless_test() -> void:
 				mmove += dzz
 				mmoven += 1
 	fails += _expect("mustache follows mouth", mmoven > 0 and mmove / float(mmoven) > 0.003)
+	# 9g. Root freeze (live theory 11/10: buried verts must stay buried —
+	# glue dragged them through the skin where the stretch gradient is steep).
+	# Signed rest depths: deep roots exist AND surface shell exists; under the
+	# same Pout the deep set holds still while the surface rides the lips.
+	var bdep := _avatar.glue_depth("Beard")
+	var bdeepn := 0
+	var bsurfn := 0
+	for bd in bdep:
+		if bd <= -_avatar.GLUE_ROOT_M:
+			bdeepn += 1
+		elif bd > -_avatar.GLUE_SKIN_M:
+			bsurfn += 1
+	fails += _expect("beard roots exist", bdeepn > 0 and bsurfn > 0)
+	var bstalk := 0.0
+	var bstalkn := 0
+	if bdep.size() == bbefore.size() and bbefore.size() == bafterm.size():
+		for i in bbefore.size():
+			if bdep[i] <= -_avatar.GLUE_ROOT_M:
+				bstalk += bbefore[i].distance_to(bafterm[i])
+				bstalkn += 1
+	fails += _expect("beard roots stay buried", bstalkn > 0 and bstalk / float(bstalkn) < 0.0002)
 	reset_face_sculpt(&"MouthPout")
 	fails += _expect("beard jaw restores", (_avatar.get_node_or_null("Beard/Beard") as MeshInstance3D).mesh == _avatar._face_pristine["Beard"])
 	adjust_face_sculpt(&"EyeDepth", 8)
