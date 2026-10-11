@@ -667,13 +667,13 @@ func reset_face(key: StringName) -> void:
 ## center fixed — no bunching, no fold); the X half-extent comes from the
 ## baked points.
 const SCULPT_PATH := "res://data/characters/face_sculpt.json"
-const SCULPT_KEYS: Array[StringName] = [&"NoseLength", &"NoseWidth", &"MouthW", &"Chin", &"NoseBridge", &"NostrilFlare", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseCurve", &"NoseTip", &"NoseTipLength", &"NoseTipSize", &"NoseTipAngle", &"MouthPout", &"EyelidHeavy", &"EyeDepth", &"EyeHeight", &"EyeSpacing", &"EyeSize", &"EyeAngle", &"BrowHeight", &"BrowThick", &"BrowAngle", &"BrowDepth", &"JawWidth", &"JawDefinition", &"JawAngle", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft", &"CheekboneWidth", &"CheekboneHeight", &"CheekFullness", &"FaceFullness", &"ForeheadHeight", &"ForeheadWidth", &"BrowRidgeDepth", &"EarSize", &"EarRotation", &"EarlobeLength", &"EarPoint"]
+const SCULPT_KEYS: Array[StringName] = [&"NoseLength", &"NoseWidth", &"MouthW", &"NoseBridge", &"NostrilFlare", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseCurve", &"NoseTip", &"NoseTipLength", &"NoseTipSize", &"NoseTipAngle", &"MouthPout", &"EyelidHeavy", &"EyeDepth", &"EyeHeight", &"EyeSpacing", &"EyeSize", &"EyeAngle", &"BrowHeight", &"BrowThick", &"BrowAngle", &"BrowDepth", &"JawWidth", &"JawDefinition", &"JawAngle", &"ChinShift", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft", &"CheekboneWidth", &"CheekboneHeight", &"CheekFullness", &"FaceFullness", &"ForeheadHeight", &"ForeheadWidth", &"BrowRidgeDepth", &"EarSize", &"EarRotation", &"EarlobeLength", &"EarPoint"]
 const SCULPT_STEP := 0.1
 const SCULPT_SPEC := {
 	&"NoseLength": {"region": "Nose", "menu": "nose", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 1.0},
 	&"NoseWidth": {"region": "Nose", "menu": "nose", "axis": Vector3(1, 0, 0), "mirror": true, "max_cm": 0.8},
 	&"MouthW": {"region": "Mouth", "menu": "mouth", "axis": Vector3(1, 0, 0), "mirror": true, "max_cm": 0.8},
-	&"Chin": {"region": "Chin", "menu": "jaw", "axis": Vector3(0, -0.55, 1), "mirror": false, "max_cm": 1.0},
+	&"ChinShift": {"region": "Chin", "menu": "jaw", "axis": Vector3(0, -0.55, 1), "mirror": false, "max_cm": 1.0},
 	&"NoseBridge": {"region": "NoseBridge", "menu": "nose", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 1.0},
 	&"NoseTip": {"region": "NoseTip", "menu": "nose", "axis": Vector3(0, 0, 1), "mirror": false, "max_cm": 0.8},
 	&"NostrilFlare": {"region": "NostrilFlare", "menu": "nose", "axis": Vector3(1, 0, 0), "mirror": true, "max_cm": 0.8},
@@ -733,7 +733,7 @@ const SCULPT_FOLLOW := {
 	&"Eyelashes": [&"EyeDepth", &"EyeHeight", &"EyelidHeavy", &"EyeSpacing", &"EyeSize", &"EyeAngle"],
 	&"Eyebrows": [&"BrowDepth", &"BrowRidgeDepth", &"BrowHeight", &"BrowThick", &"BrowAngle"],
 	&"Hair": {"keys": [&"ForeheadHeight", &"ForeheadWidth"], "glue": true},
-	&"Beard": {"keys": [&"JawWidth", &"JawDefinition", &"JawAngle", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft", &"MouthW", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"MouthPout"], "glue": true},
+	&"Beard": {"keys": [&"JawWidth", &"JawDefinition", &"JawAngle", &"ChinShift", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft", &"MouthW", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"MouthPout"], "glue": true},
 }
 ## Follow keys whose means split per side (EyeSpacing: one global mean would
 ## cancel to ~0 across the symmetric orbits). Split at the driving region's

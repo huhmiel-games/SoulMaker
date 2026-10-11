@@ -1765,7 +1765,7 @@ func _run_headless_test() -> void:
 			bdropn += 1
 	fails += _expect("beard follows chin down", bdropn > 0 and bdrop / float(bdropn) < -0.0025)
 	reset_face_sculpt(&"ChinLength")
-	for bk in [&"JawWidth", &"JawDefinition", &"JawAngle", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft", &"MouthW", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"MouthPout"]:
+	for bk in [&"JawWidth", &"JawDefinition", &"JawAngle", &"ChinShift", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft", &"MouthW", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"MouthPout"]:
 		adjust_face_sculpt(bk, 8)
 		fails += _expect("beard wired %s" % String(bk), (_avatar.get_node_or_null("Beard/Beard") as MeshInstance3D).mesh != _avatar._face_pristine["Beard"])
 		reset_face_sculpt(bk)
@@ -2341,7 +2341,7 @@ func _run_headless_test() -> void:
 	# 12. Face sculpt (JSON regions, live on fused Skin, defaults no-op).
 	fails += _expect("sculpt json male", not (_avatar._sculpt_regions() as Dictionary).is_empty())
 	fails += _expect("sculpt nose mask", int(((_avatar._sculpt_regions() as Dictionary).get("Nose", {}) as Dictionary).get("n", 0)) > 0)
-	fails += _expect("sculpt defaults zero", face_sculpt_display(&"NoseLength") == "+0mm" and face_sculpt_display(&"Chin") == "+0mm")
+	fails += _expect("sculpt defaults zero", face_sculpt_display(&"NoseLength") == "+0mm" and face_sculpt_display(&"ChinShift") == "+0mm")
 	var tip0 := _nose_tip_z()
 	adjust_face_sculpt(&"NoseLength", 5) # +5mm forward, tip rides at full weight
 	fails += _expect("sculpt nose shown", face_sculpt_display(&"NoseLength") == "+5mm")
@@ -2353,9 +2353,9 @@ func _run_headless_test() -> void:
 	reset_face_sculpt(&"NoseLength")
 	reset_face_sculpt(&"NoseWidth")
 	fails += _expect("sculpt reset restores", is_equal_approx(_nose_tip_z(), tip0))
-	adjust_face_sculpt(&"Chin", 200) # clamp to +10mm
-	fails += _expect("sculpt chin clamped", face_sculpt_display(&"Chin") == "+10mm")
-	reset_face_sculpt(&"Chin")
+	adjust_face_sculpt(&"ChinShift", 200) # clamp to +10mm
+	fails += _expect("sculpt chin clamped", face_sculpt_display(&"ChinShift") == "+10mm")
+	reset_face_sculpt(&"ChinShift")
 	adjust_face_sculpt(&"MouthW", -200) # clamp to -8mm
 	fails += _expect("sculpt mouth clamped", face_sculpt_display(&"MouthW") == "-8mm")
 	reset_face_sculpt(&"MouthW")
@@ -2369,18 +2369,18 @@ func _run_headless_test() -> void:
 	var mouth_pair := _sculpt_deltas(&"MouthW", -5)
 	fails += _expect("sculpt mouth narrows", _gated_narrow(mouth_pair[0], mouth_pair[1], "Mouth"))
 	fails += _expect("sculpt mouth no cross", _no_center_cross(mouth_pair[0], mouth_pair[1]))
-	var chin_back_pair := _sculpt_deltas(&"Chin", -5) # weak chin recedes+rises
+	var chin_back_pair := _sculpt_deltas(&"ChinShift", -5) # weak chin recedes+rises
 	fails += _expect("sculpt chin back", _chin_moved(chin_back_pair[0], chin_back_pair[1], -1.0))
-	var chin_pair := _sculpt_deltas(&"Chin", 10)
+	var chin_pair := _sculpt_deltas(&"ChinShift", 10)
 	fails += _expect("sculpt chin drops", _chin_moved(chin_pair[0], chin_pair[1], 1.0))
 	# 14. Sculpt round 3: outline follows (live Chin plateau 07/10 — the old
 	# mean-based asserts passed while the contour froze at -2).
 	var chin_f0 := _chin_front_z()
-	adjust_face_sculpt(&"Chin", -2)
+	adjust_face_sculpt(&"ChinShift", -2)
 	var chin_f2 := _chin_front_z()
-	adjust_face_sculpt(&"Chin", -3) # total -5 from pristine (single pass, no path)
+	adjust_face_sculpt(&"ChinShift", -3) # total -5 from pristine (single pass, no path)
 	var chin_f5 := _chin_front_z()
-	reset_face_sculpt(&"Chin")
+	reset_face_sculpt(&"ChinShift")
 	fails += _expect("sculpt chin no plateau", chin_f5 < chin_f2 - 0.001 and chin_f2 < chin_f0 - 0.0005)
 	var nose_f0 := _nose_tip_z()
 	adjust_face_sculpt(&"NoseLength", -8)
@@ -2394,7 +2394,7 @@ func _run_headless_test() -> void:
 	fails += _expect("sculpt mouth core widens", mouth_core.size() == 2 and mouth_core[1] > mouth_core[0] + 0.001)
 	# 15. Sculpt diffusion (08/10: crevasses at extremes — the rim must
 	# follow instead of cliffing at the box edge).
-	for ce in [[&"NoseLength", -10], [&"NoseWidth", 8], [&"Chin", -10], [&"MouthW", -8], [&"MouthW", 8], [&"NoseTipLength", 10], [&"NosePosition", 8], [&"LipUpper", 8], [&"LipLower", 8], [&"MouthCorners", 8], [&"MouthPosition", 8], [&"MouthForward", 8], [&"NoseTipSize", 10], [&"NoseTipAngle", 10], [&"NoseCurve", 10], [&"MouthPout", 8], [&"EyelidHeavy", 8], [&"EyeDepth", 8], [&"EyeHeight", 8], [&"EyeSpacing", 8], [&"EyeSize", 8], [&"EyeAngle", 8], [&"BrowAngle", 8], [&"BrowDepth", 8], [&"JawWidth", 8], [&"JawDefinition", 8], [&"JawAngle", 8], [&"ChinLength", 10], [&"ChinWidth", 8], [&"ChinProject", 10], [&"ChinCleft", 5], [&"CheekboneWidth", 8], [&"CheekboneHeight", 8], [&"CheekFullness", 8], [&"FaceFullness", 8], [&"ForeheadHeight", 8], [&"ForeheadWidth", 8], [&"BrowRidgeDepth", 8], [&"EarSize", 8], [&"EarRotation", 8], [&"EarlobeLength", 8], [&"EarPoint", 8]]:
+	for ce in [[&"NoseLength", -10], [&"NoseWidth", 8], [&"ChinShift", -10], [&"MouthW", -8], [&"MouthW", 8], [&"NoseTipLength", 10], [&"NosePosition", 8], [&"LipUpper", 8], [&"LipLower", 8], [&"MouthCorners", 8], [&"MouthPosition", 8], [&"MouthForward", 8], [&"NoseTipSize", 10], [&"NoseTipAngle", 10], [&"NoseCurve", 10], [&"MouthPout", 8], [&"EyelidHeavy", 8], [&"EyeDepth", 8], [&"EyeHeight", 8], [&"EyeSpacing", 8], [&"EyeSize", 8], [&"EyeAngle", 8], [&"BrowAngle", 8], [&"BrowDepth", 8], [&"JawWidth", 8], [&"JawDefinition", 8], [&"JawAngle", 8], [&"ChinLength", 10], [&"ChinWidth", 8], [&"ChinProject", 10], [&"ChinCleft", 5], [&"CheekboneWidth", 8], [&"CheekboneHeight", 8], [&"CheekFullness", 8], [&"FaceFullness", 8], [&"ForeheadHeight", 8], [&"ForeheadWidth", 8], [&"BrowRidgeDepth", 8], [&"EarSize", 8], [&"EarRotation", 8], [&"EarlobeLength", 8], [&"EarPoint", 8]]:
 		reset_face_sculpt(ce[0])
 		adjust_face_sculpt(ce[0], ce[1])
 		var cl := _avatar.sculpt_max_cliff()
