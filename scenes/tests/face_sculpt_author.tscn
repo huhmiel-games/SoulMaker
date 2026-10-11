@@ -2,8 +2,11 @@
 
 [ext_resource type="PackedScene" uid="uid://uedsfngbxgvc" path="res://assets/meshes/characters/Superhero_Male_FullBody.gltf" id="1"]
 [ext_resource type="Script" uid="uid://d3jjnbr3dx71h" path="res://scenes/tests/face_sculpt_paint.gd" id="2"]
+[ext_resource type="PackedScene" uid="uid://cxpobxowjjwox" path="res://assets/meshes/characters/Superhero_Female_FullBody.gltf" id="3"]
 
 [node name="FaceSculptAuthor" type="Node3D" unique_id=1564760260]
 script = ExtResource("2")
 
 [node name="MalePreview" parent="." unique_id=102357712 instance=ExtResource("1")]
+
+[node name="FemalePreview" parent="." visible = false instance=ExtResource("3")]

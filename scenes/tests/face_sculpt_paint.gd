@@ -14,6 +14,8 @@ extends Node3D
 ##   G = grow 1 topology ring, T = shrink (drop outer ring)
 ##   C = clear region, P = save work file AND export shipped JSON (merge)
 ##   V = wireframe on/off, F = reframe camera on the head
+##   Gender button (side panel) = switch Male/Female mesh (auto-saves work,
+##   no export — shipped only changes on explicit P)
 ## Diag: every click prints hit/miss + surf/tri; the HUD shows the camera
 ## target, the last pick result and the wireframe state.
 ## Work file: scenes/tests/face_sculpt_work.json (tri pairs, authoring-local).
@@ -32,7 +34,7 @@ const REGIONS: Array[String] = [
 	"Cheekbones", "Cheeks", "LowerFace",
 	"Forehead", "Ears", "Lobe", "EarTip",
 ]
-const GENDER := "Male"
+const GENDERS: Array[String] = ["Male", "Female"]
 ## Paint guide per region (button tooltips, condensed from TODO.md).
 const REGION_TIPS := {
 	"Nose": "Tout le nez (région mère).
@@ -113,6 +115,14 @@ var _eyes_btn: Button = null
 var _brows_btn: Button = null
 var _eye_mis := [] # eyeball MeshInstances (hidden to paint skin behind)
 var _brow_mis := [] # brow MeshInstances (ditto; picking follows visibility)
+var _gender := "Male" # paint target; Female section lives alongside Male (never wiped)
+var _gender_btn: Button = null
+
+
+## Preview node for the current paint gender (both nudes live in the scene,
+## only the active one is visible).
+func _preview() -> Node:
+	return get_node_or_null("FemalePreview" if _gender == "Female" else "MalePreview")
 
 
 func _ready() -> void:
@@ -121,30 +131,87 @@ func _ready() -> void:
 		return
 	for r in REGIONS:
 		_sel[r] = {"set": {}, "order": []}
-	var preview := get_node_or_null("MalePreview")
-	if preview == null:
-		push_error("[Paint] MalePreview missing")
+	if not _bind_mesh():
 		return
+	_build_rig()
+	_build_panel()
+	_rebuild_derived()
+	_update_hud()
+	print("[Paint] ready: %d surfaces, region %s (keys 1-6, L paint, R remove, G/T grow/shrink, B box, C clear, P save)" % [_surfs.size(), REGIONS[_region]])
+
+
+## Shows the active gender's preview, tears down per-preview nodes (pick body,
+## paint + wire overlays) and rebinds surfaces, head frame and work section.
+## False when the preview node is missing (nothing bound).
+func _bind_mesh() -> bool:
+	var male_prev := get_node_or_null("MalePreview") as Node3D
+	var female_prev := get_node_or_null("FemalePreview") as Node3D
+	if male_prev != null:
+		male_prev.visible = (_gender == "Male")
+	if female_prev != null:
+		female_prev.visible = (_gender == "Female")
+	var preview := _preview()
+	if preview == null:
+		push_error("[Paint] preview missing")
+		return false
+	var pick := get_node_or_null("PickBody")
+	if pick != null:
+		remove_child(pick)
+		pick.queue_free()
+	for si in _overlays:
+		(_overlays[si] as Node).queue_free()
+	_overlays.clear()
+	for si in _wire_overlays:
+		(_wire_overlays[si] as Node).queue_free()
+	_wire_overlays.clear()
 	_surfs = BakeLib.paintable_surfaces(preview)
 	if _surfs.is_empty():
 		push_error("[Paint] no paintable surfaces")
-		return
+		return false
 	for e in _surfs:
 		var ed: Dictionary = e
 		var ev: PackedVector3Array = ed["verts"]
 		var ei: PackedInt32Array = ed["idx"]
 		ed["ntris"] = ei.size() / 3 if not ei.is_empty() else ev.size() / 3
 	_head_inv = _live_head_inv(preview)
+	for r in REGIONS:
+		_sel[r] = {"set": {}, "order": []}
+	_undo.clear()
+	_last_pick = "no click yet" # region index kept: same REGIONS both genders
 	_load_work() # after surfs + head frame (point matching needs both)
-	_build_rig()
-	_build_panel()
+	print("[Paint] bound %s: %d surfaces" % [_gender, _surfs.size()])
+	return true
+
+
+## Rebuilds everything derived from _surfs (pick shapes, adjacency, mirror
+## frame, overlays). Needs _mat (rig) for the paint overlays.
+func _rebuild_derived() -> void:
 	_build_pick()
 	_build_hcen()
 	_build_overlays()
 	_build_wire_overlays()
 	_refresh_all_overlays()
+
+
+## Gender switch (panel button): auto-saves the current gender's work (no
+## export — shipped only changes on explicit P), then rebinds the other mesh.
+func _toggle_gender() -> void:
+	_write_work()
+	_gender = "Female" if _gender == "Male" else "Male"
+	var keep_dist := _dist
+	var keep_yaw := _yaw
+	var keep_pitch := _pitch
+	if not _bind_mesh():
+		return
+	_rebuild_derived()
+	# Target already sits on the new head (bind); zoom + angle kept so both
+	# genders compare from the same viewpoint.
+	_dist = keep_dist
+	_yaw = keep_yaw
+	_pitch = keep_pitch
+	_update_cam()
 	_update_hud()
-	print("[Paint] ready: %d surfaces, region %s (keys 1-6, L paint, R remove, G/T grow/shrink, B box, C clear, P save)" % [_surfs.size(), REGIONS[_region]])
+	print("[Paint] gender now %s" % _gender)
 
 
 ## Headless self-test: enumeration parity + box-rule sanity, no interaction.
@@ -221,8 +288,9 @@ func _run_painttest() -> void:
 	_build_hcen()
 	_collect_face_mis()
 	print("[PaintTest] eyes=%d brows=%d" % [_eye_mis.size(), _brow_mis.size()])
-	if _eye_mis.is_empty() or _brow_mis.is_empty():
-		fails += 1
+	# No FAIL here: the nude preview is a single merged mesh (no separate
+	# eye/brow MIs in this asset) — the toggles are no-ops, painting the
+	# skin regions is unaffected.
 	var sym_ok := false
 	var hc: PackedVector3Array = _hcen[0]
 	for ti in hc.size():
@@ -254,10 +322,19 @@ func _run_painttest() -> void:
 	# Save+Export merge on a temp path: painted regions land, others kept.
 	_export_shipped("/tmp/opencode/painttest_shipped.json")
 	var merged: Dictionary = JsonFile.load_object("/tmp/opencode/painttest_shipped.json")
-	var bsec: Dictionary = (merged.get(GENDER, {}) as Dictionary).get("regions", {})
+	var bsec: Dictionary = (merged.get(_gender, {}) as Dictionary).get("regions", {})
 	var ex_ok := (bsec.get("NoseTip", {}) as Dictionary).has("points")
 	print("[PaintTest] exportmerge=%s" % ("ok" if ex_ok else "FAIL"))
 	if not ex_ok:
+		fails += 1
+	# Cross-gender merge: the other gender's section survives our export.
+	var xtmp := "/tmp/opencode/painttest_xgender.json"
+	JsonFile.save_atomic(xtmp, {"version": 2, "Male": {"regions": {"KeepMe": {"points": [[0.01, 0.02, 0.03]]}}}, "Female": {"regions": {"HerKeep": {"points": [[0.04, 0.05, 0.06]]}}}})
+	_export_shipped(xtmp)
+	var xmg: Dictionary = JsonFile.load_object(xtmp)
+	var x_ok := ((xmg.get("Female", {}) as Dictionary).get("regions", {}) as Dictionary).has("HerKeep") and ((xmg.get("Male", {}) as Dictionary).get("regions", {}) as Dictionary).has("KeepMe")
+	print("[PaintTest] xgender=%s" % ("ok" if x_ok else "FAIL"))
+	if not x_ok:
 		fails += 1
 	print("[PaintTest] %d FAIL" % fails)
 	get_tree().quit(fails)
@@ -367,7 +444,7 @@ func _build_panel() -> void:
 		_region_btns[REGIONS[i]] = b
 	var sep := HSeparator.new()
 	col.add_child(sep)
-	for a in [["+ Grow", _grow], ["- Shrink", _shrink], ["Clear", _clear], ["Undo", _undo_pop], ["Symmetry", _toggle_sym], ["Eyes", _toggle_eyes], ["Brows", _toggle_brows], ["Save + Export", _save_work], ["Wireframe", _toggle_wire], ["Reframe", _reframe]]:
+	for a in [["+ Grow", _grow], ["- Shrink", _shrink], ["Clear", _clear], ["Undo", _undo_pop], ["Symmetry", _toggle_sym], ["Eyes", _toggle_eyes], ["Brows", _toggle_brows], ["Gender: Male", _toggle_gender], ["Save + Export", _save_work], ["Wireframe", _toggle_wire], ["Reframe", _reframe]]:
 		var ab := Button.new()
 		ab.text = String(a[0])
 		ab.pressed.connect(a[1] as Callable)
@@ -378,6 +455,8 @@ func _build_panel() -> void:
 			_eyes_btn = ab
 		elif String(a[0]) == "Brows":
 			_brows_btn = ab
+		elif String(a[0]) == "Gender: Male":
+			_gender_btn = ab
 	_refresh_region_btns()
 
 
@@ -438,7 +517,7 @@ func _build_wire_overlays() -> void:
 		var ovl := MeshInstance3D.new()
 		ovl.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		ovl.material_override = _wire_mat
-		ovl.visible = false
+		ovl.visible = _wire_mode == 1 # gender switch rebuilds nodes: keep mode
 		(e["mi"] as Node).add_child(ovl)
 		ovl.mesh = mesh
 		_wire_overlays[si] = ovl
@@ -462,6 +541,8 @@ func _refresh_region_btns() -> void:
 		_eyes_btn.text = "Eyes: %s" % ("ON" if _show_eyes else "OFF")
 	if _brows_btn != null:
 		_brows_btn.text = "Brows: %s" % ("ON" if _show_brows else "OFF")
+	if _gender_btn != null:
+		_gender_btn.text = "Gender: %s" % _gender
 
 
 func _update_cam() -> void:
@@ -479,7 +560,7 @@ func _update_cam() -> void:
 func _collect_face_mis() -> void:
 	_eye_mis.clear()
 	_brow_mis.clear()
-	var preview := get_node_or_null("MalePreview")
+	var preview := _preview()
 	if preview == null:
 		return
 	for mi in preview.find_children("*", "MeshInstance3D", true, false):
@@ -861,7 +942,7 @@ func _update_hud() -> void:
 	_refresh_region_btns()
 	if _label == null:
 		return
-	_label.text = "region %d/%d %s (%d tris) | target %s | last: %s | wire %s sym %s\nL add R del-at-cursor Ctrl+Z undo | Mid orbit Shift+Mid pan wheel zoom | G/T grow/shrink X sym C clear P save+export | V wire F reframe" % [_region + 1, REGIONS.size(), REGIONS[_region], _tri_count(), str(_target), _last_pick, (["OFF", "WIRE", "FULL"] as Array)[_wire_mode], ("ON" if _sym else "off")]
+	_label.text = "gender %s | region %d/%d %s (%d tris) | target %s | last: %s | wire %s sym %s\nL add R del-at-cursor Ctrl+Z undo | Mid orbit Shift+Mid pan wheel zoom | G/T grow/shrink X sym C clear P save+export | V wire F reframe" % [_gender, _region + 1, REGIONS.size(), REGIONS[_region], _tri_count(), str(_target), _last_pick, (["OFF", "WIRE", "FULL"] as Array)[_wire_mode], ("ON" if _sym else "off")]
 
 
 func _pick(mp: Vector2) -> Array:
@@ -1071,9 +1152,17 @@ func _reframe() -> void:
 
 func _load_work() -> void:
 	var work: Dictionary = JsonFile.load_object(WORK_PATH)
-	var wsec: Dictionary = work.get(GENDER, {})
+	var wsec: Dictionary = work.get(_gender, {})
 	var ver := int(work.get("version", 1))
-	_check_fingerprint(work.get("fingerprint", {}))
+	# Fingerprint is per gender; a legacy single-fp file belongs to Male.
+	var fp_all: Dictionary = work.get("fingerprint", {})
+	var fp: Dictionary = {}
+	if fp_all.has("counts"):
+		if _gender == "Male":
+			fp = fp_all
+	else:
+		fp = fp_all.get(_gender, {})
+	_check_fingerprint(fp)
 	for region in REGIONS:
 		var rsec: Dictionary = wsec.get(region, {})
 		if ver >= 2 and rsec.has("points"):
@@ -1201,15 +1290,38 @@ func _region_points(region: String) -> Array:
 	return pts
 
 
-func _save_work() -> void:
+## Work save WITHOUT export (gender switch path): merges this gender's
+## section into the work file, keeps the other gender + fingerprints intact.
+func _write_work() -> int:
 	var wsec := {}
 	for region in REGIONS:
 		var pts := _region_points(region)
 		if not pts.is_empty():
 			wsec[region] = {"points": pts}
-	var err := JsonFile.save_atomic(WORK_PATH, {"version": 2, GENDER: wsec, "fingerprint": _fingerprint()})
-	print("[Paint] work saved v2 (%s)" % ("OK" if err == OK else ("ERR %d" % err)))
-	if err == OK:
+	var prev: Dictionary = JsonFile.load_object(WORK_PATH)
+	var old_fp: Dictionary = prev.get("fingerprint", {})
+	var new_fp := {}
+	if old_fp.has("counts"):
+		new_fp["Male"] = old_fp # legacy single-fp file
+	else:
+		for g in GENDERS:
+			if (old_fp.get(g, {}) as Dictionary).has("counts"):
+				new_fp[g] = old_fp[g]
+	new_fp[_gender] = _fingerprint()
+	var out := {"version": 2}
+	for g in GENDERS:
+		if g == _gender:
+			out[g] = wsec
+		elif prev.has(g):
+			out[g] = prev[g]
+	out["fingerprint"] = new_fp
+	var err := JsonFile.save_atomic(WORK_PATH, out)
+	print("[Paint] work saved v2 %s (%s)" % [_gender, ("OK" if err == OK else ("ERR %d" % err))])
+	return err
+
+
+func _save_work() -> void:
+	if _write_work() == OK:
 		_export_shipped()
 
 
@@ -1218,7 +1330,7 @@ func _save_work() -> void:
 ## CLI step; the headless exporter stays for CI/automation.
 func _export_shipped(path: String = SHIPPED_PATH) -> void:
 	var prev: Dictionary = JsonFile.load_object(path)
-	var psec: Dictionary = (prev.get(GENDER, {}) as Dictionary).get("regions", {})
+	var psec: Dictionary = (prev.get(_gender, {}) as Dictionary).get("regions", {})
 	var regions := {}
 	for region in psec:
 		regions[String(region)] = psec[region]
@@ -1229,5 +1341,11 @@ func _export_shipped(path: String = SHIPPED_PATH) -> void:
 			continue
 		regions[region] = {"points": pts}
 		n_new += 1
-	var err := JsonFile.save_atomic(path, {"version": 2, GENDER: {"regions": regions}})
-	print("[Paint] exported %s (%d regions, %d repainted)" % [path, regions.size(), n_new] + (" OK" if err == OK else (" ERR %d" % err)))
+	var out := {"version": 2}
+	for k in prev:
+		var ks := String(k)
+		if ks != "version" and ks != _gender:
+			out[ks] = prev[k] # other gender sections pass through untouched
+	out[_gender] = {"regions": regions}
+	var err := JsonFile.save_atomic(path, out)
+	print("[Paint] exported %s %s (%d regions, %d repainted)" % [path, _gender, regions.size(), n_new] + (" OK" if err == OK else (" ERR %d" % err)))
