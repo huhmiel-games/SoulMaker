@@ -1809,6 +1809,230 @@ func _run_headless_test() -> void:
 	fails += _expect("beard ignores eyes", (_avatar.get_node_or_null("Beard/Beard") as MeshInstance3D).mesh == _avatar._face_pristine["Beard"])
 	reset_face_sculpt(&"EyeDepth")
 	reset_beard()
+	# 9h. Beard combo pins (live: ChinShift+10 + ChinProject clipped at the
+	# chin front). Key-scoped gate: mouth keys freeze buried roots, jaw/chin
+	# keys ride full. Bars: center-band shell shear in singles < 8mm (was a
+	# 10mm gate cliff), zero fresh skin penetration in singles. The double
+	# extreme combo keeps a known mask-boundary residual (accepted live).
+	adjust_beard(1)
+	reset_face_sculpt(&"ChinShift")
+	reset_face_sculpt(&"ChinProject")
+	var csk := _avatar_skeleton()
+	var cbi := csk.find_bone(&"Head") if csk != null else -1
+	var crest := _face_part_verts("Beard")
+	var cpris := _avatar._face_pristine.get("Beard") as ArrayMesh
+	if cbi != -1 and not crest.is_empty() and cpris != null:
+		var cinv: Transform3D = _avatar._bone_rest_world(csk, cbi).affine_inverse()
+		var bcp_proj := 0.0
+		var bcs_shift := 0.0
+		var bks_sp := 0
+		for cfg in [&"combo", &"shift", &"project"]:
+			if cfg == &"combo" or cfg == &"shift":
+				adjust_face_sculpt(&"ChinShift", 10)
+			if cfg == &"combo" or cfg == &"project":
+				adjust_face_sculpt(&"ChinProject", 10)
+			var cbaked := _face_part_verts("Beard")
+			# Re-fetch after the bake: fusion drops grid+map on every skin
+			# rebuild (new rid), the glue bake rebuilds them lazily.
+			var cgmap: PackedInt32Array = (_avatar._glue_map.get(cpris.get_rid().get_id(), PackedInt32Array()) as PackedInt32Array)
+			var cdep: PackedFloat32Array = _avatar.glue_depth("Beard")
+			var cqs: PackedVector3Array = _avatar._glue_qs
+			var cns: PackedVector3Array = _avatar._glue_ns
+			var cf: Dictionary = _avatar._glue_fields
+			var pn := 0
+			var pworst := 0.0
+			var pdeep := 0
+			var pramp := 0
+			var psurf := 0
+			var pax := Vector3.ZERO
+			var askn := 0.0
+			var btr := 0.0
+			var tdeep := 0
+			var tramp := 0
+			var tsurf := 0
+			var ldeep := 0
+			var lramp := 0
+			var lsurf := 0
+			var wdeep := 0.0
+			var wramp := 0.0
+			var wsurf := 0.0
+			var sax := Vector3.ZERO
+			var sn := 0
+			var qrest := PackedVector3Array()
+			var coffs := PackedVector3Array()
+			if cbaked.size() == crest.size() and cgmap.size() == crest.size() and cdep.size() == crest.size() and cns.size() == cqs.size() and not cqs.is_empty():
+				# Anchor-gap map (no pin: feeds qrest/coffs for the shear pass
+				# below; zone/loss tallies kept as diagnostic scaffolding).
+				for i in crest.size():
+					if cdep[i] <= -_avatar.GLUE_ROOT_M:
+						tdeep += 1
+					elif cdep[i] <= -_avatar.GLUE_SKIN_M:
+						tramp += 1
+					else:
+						tsurf += 1
+					var ski: int = cgmap[i]
+					var q: Vector3 = cinv * crest[i]
+					var offb: Vector3 = (cinv * cbaked[i]) - q
+					qrest.append(q)
+					coffs.append(offb)
+					if ski < 0 or ski >= cqs.size():
+						continue
+					var offs := Vector3.ZERO
+					for gk in cf:
+						offs += (cf[gk] as PackedVector3Array)[ski]
+					var gapb: float = cdep[i] + (offb - offs).dot(cns[ski])
+					var loss: float = (offb - offs).dot(cns[ski])
+					if loss < -0.001:
+						if cdep[i] <= -_avatar.GLUE_ROOT_M:
+							ldeep += 1
+							wdeep = minf(wdeep, loss)
+						elif cdep[i] <= -_avatar.GLUE_SKIN_M:
+							lramp += 1
+							wramp = minf(wramp, loss)
+						else:
+							lsurf += 1
+							wsurf = minf(wsurf, loss)
+							sax += cqs[ski]
+							sn += 1
+					if gapb < -0.001:
+						pn += 1
+						pworst = minf(pworst, gapb)
+						pax += cqs[ski]
+						askn += offs.length()
+						btr += offb.length()
+						if cdep[i] <= -_avatar.GLUE_ROOT_M:
+							pdeep += 1
+						elif cdep[i] <= -_avatar.GLUE_SKIN_M:
+							pramp += 1
+						else:
+							psurf += 1
+				if pn > 0:
+					pax /= float(pn)
+				# Intra-shell shear + flipped tris (what the anchor gap can't
+				# see: the shell tearing between static and dragged verts).
+				var fliptot := 0
+				var shearmax := 0.0
+				var shearat := Vector3.ZERO
+				var flipat := Vector3.ZERO
+				var cshmax := 0.0
+				var cshat := Vector3.ZERO
+				var fbase := 0
+				for fs in cpris.get_surface_count():
+					var fsa: Array = cpris.surface_get_arrays(fs)
+					var fsv: PackedVector3Array = fsa[Mesh.ARRAY_VERTEX]
+					var fidx: PackedInt32Array = fsa[Mesh.ARRAY_INDEX]
+					var ftris := PackedInt32Array()
+					if fidx.is_empty():
+						for fvv in fsv.size():
+							ftris.append(fbase + fvv)
+					else:
+						for fvv in fidx.size():
+							ftris.append(fbase + fidx[fvv])
+					var ft := 0
+					while ft + 2 < ftris.size():
+						var fa := ftris[ft]
+						var fb := ftris[ft + 1]
+						var fc2 := ftris[ft + 2]
+						if fa < qrest.size() and fb < qrest.size() and fc2 < qrest.size():
+							var ab0: Vector3 = qrest[fb] - qrest[fa]
+							var ac0: Vector3 = qrest[fc2] - qrest[fa]
+							var ab1: Vector3 = ab0 + coffs[fb] - coffs[fa]
+							var ac1: Vector3 = ac0 + coffs[fc2] - coffs[fa]
+							var fn0: Vector3 = ab0.cross(ac0)
+							var fn1: Vector3 = ab1.cross(ac1)
+							if fn0.length_squared() > 0.0 and fn1.length_squared() > 0.0 and fn0.normalized().dot(fn1.normalized()) < 0.0:
+								if fliptot == 0:
+									flipat = (qrest[fa] + qrest[fb] + qrest[fc2]) / 3.0
+								fliptot += 1
+							var fsh: float = maxf((coffs[fa] - coffs[fb]).length(), maxf((coffs[fb] - coffs[fc2]).length(), (coffs[fc2] - coffs[fa]).length()))
+							if fsh > shearmax:
+								shearmax = fsh
+								shearat = (qrest[fa] + qrest[fb] + qrest[fc2]) / 3.0
+							var fmid: Vector3 = (qrest[fa] + qrest[fb] + qrest[fc2]) / 3.0
+							if absf(fmid.x) < 0.015 and fsh > cshmax:
+								cshmax = fsh
+								cshat = fmid
+						ft += 3
+					fbase += fsv.size()
+				# True clip test: surface beard verts vs NEAREST baked skin
+				# (catches anchor mismatch — static fringe over moved skin).
+				var kmi := _avatar_skin_mi()
+				var kpr := _avatar._skin_pristine as ArrayMesh
+				var kclipn := 0
+				var kclipw := 0.0
+				var kclipat := Vector3.ZERO
+				var kdone := false
+				if kmi != null and kmi.mesh != null and kpr != null and kmi.mesh.get_surface_count() == kpr.get_surface_count():
+					var kbb := PackedVector3Array()
+					var kbn := PackedVector3Array()
+					var kok := true
+					for ks in kmi.mesh.get_surface_count():
+						var kba: Array = kmi.mesh.surface_get_arrays(ks)
+						var kpa: Array = kpr.surface_get_arrays(ks)
+						var kbv: PackedVector3Array = kba[Mesh.ARRAY_VERTEX]
+						var kbn2: PackedVector3Array = kba[Mesh.ARRAY_NORMAL]
+						if kbv.size() != (kpa[Mesh.ARRAY_VERTEX] as PackedVector3Array).size() or kbn2.size() != kbv.size():
+							kok = false
+							break
+						kbb.append_array(kbv)
+						kbn.append_array(kbn2)
+					if kok and not kbb.is_empty():
+						kdone = true
+						var kgrid := {}
+						for kgi in kbb.size():
+							var kcell := Vector3i(floori(kbb[kgi].x / 0.01), floori(kbb[kgi].y / 0.01), floori(kbb[kgi].z / 0.01))
+							if not kgrid.has(kcell):
+								kgrid[kcell] = []
+							(kgrid[kcell] as Array).append(kgi)
+						for ki in crest.size():
+							if cdep[ki] <= -0.001:
+								continue # buried at rest: not movement-caused
+							var kbq: Vector3 = cbaked[ki]
+							var kbc := Vector3i(floori(kbq.x / 0.01), floori(kbq.y / 0.01), floori(kbq.z / 0.01))
+							var kbd := 1e18
+							var kbi := -1
+							var kr := 0
+							while kr <= 15:
+								for kdx in range(-kr, kr + 1):
+									for kdy in range(-kr, kr + 1):
+										for kdz in range(-kr, kr + 1):
+											if maxi(maxi(absi(kdx), absi(kdy)), absi(kdz)) != kr:
+												continue
+											var klst: Array = kgrid.get(kbc + Vector3i(kdx, kdy, kdz), [])
+											for kcand in klst:
+												var kdd: float = kbb[int(kcand)].distance_squared_to(kbq)
+												if kdd < kbd:
+													kbd = kdd
+													kbi = int(kcand)
+								if kbi != -1 and sqrt(kbd) <= float(kr) * 0.01:
+									break
+								kr += 1
+							if kbi != -1:
+								var kgap: float = (kbq - kbb[kbi]).dot(kbn[kbi].normalized())
+								if kgap < -0.001:
+									kclipn += 1
+									kclipw = minf(kclipw, kgap)
+									kclipat += kbq
+						if kclipn > 0:
+							kclipat = cinv * (kclipat / float(kclipn))
+				if not kdone:
+					print("[CharTest] beard skinclip %s: unmeasurable" % String(cfg))
+				if cfg == &"project":
+					bcp_proj = cshmax
+				if cfg == &"shift":
+					bcs_shift = cshmax
+				if cfg == &"shift" or cfg == &"project":
+					bks_sp += kclipn
+			else:
+				print("[CharTest] beard %s: unmeasurable" % String(cfg))
+			reset_face_sculpt(&"ChinShift")
+			reset_face_sculpt(&"ChinProject")
+		fails += _expect("beard chin rides project", bcp_proj < 0.008)
+		fails += _expect("beard chin rides shift", bcs_shift < 0.008)
+		fails += _expect("beard singles no clip", bks_sp == 0)
+	else:
+		print("[CharTest] beard combo: unmeasurable (no beard/head)")
+	reset_beard()
 	# 17c. EarSize spares the head (09/10 live: growing the ears grew the
 	# skull side and clipped the hair). Tight Ears mask (flap only) + 1
 	# diffusion ring: the skull (|x| < 65mm) barely moves, the flap does.

@@ -1495,17 +1495,26 @@ func _face_glue_bake(slot: String, flist: Array, head_world: Transform3D, head_i
 		_glue_depth[rid] = _glue_build_depth(pristine, _glue_map[rid], head_inv)
 	var gmap: PackedInt32Array = _glue_map[rid]
 	var gdep: PackedFloat32Array = _glue_depth.get(rid, PackedFloat32Array())
-	# Beard-only root freeze (11/10): buried verts must stay buried — the
-	# expression offset would drag them through the skin where the stretch
-	# gradient is steep (mouth corner). Hair is a surface cap: its roots
-	# riding the skull is correct, so it keeps full follow.
+	# Beard-only root freeze (11/10, key-scoped 12/10): buried verts must
+	# stay buried under MOUTH keys — the expression offset would drag them
+	# through the skin where the stretch gradient is steep (mouth corner).
+	# Jaw/chin keys ride full: their field is smooth at the chin front, and
+	# freezing it opened a 10mm shear cliff inside the shell (live clip at
+	# ChinShift+10 + ChinProject, centershear 10mm, no penetration). Hair
+	# is a surface cap: its roots riding the skull is correct, so it keeps
+	# full follow.
 	var gated := slot == &"Beard" and gdep.size() == gmap.size()
-	var keys: Array = []
+	var keys: Array = [] # ride keys (jaw/chin: full follow, gate or not)
+	var mkeys: Array = [] # mouth keys (freeze applies when gated)
 	for fd in flist:
 		var fk: StringName = (fd as Dictionary)["key"]
 		if (_glue_fields as Dictionary).has(fk):
-			keys.append(fk)
-	if keys.is_empty():
+			var fks := String(fk)
+			if fks.begins_with("Mouth") or fks.begins_with("Lip"):
+				mkeys.append(fk)
+			else:
+				keys.append(fk)
+	if keys.is_empty() and mkeys.is_empty():
 		return
 	for ch in holder.get_children():
 		var mi := ch as MeshInstance3D
@@ -1525,8 +1534,13 @@ func _face_glue_bake(slot: String, flist: Array, head_world: Transform3D, head_i
 					var sk: int = gmap[gi]
 					for k in keys:
 						off += ((_glue_fields as Dictionary)[k] as PackedVector3Array)[sk]
-					if gated:
-						off *= clampf((gdep[gi] + GLUE_ROOT_M) / (GLUE_ROOT_M - GLUE_SKIN_M), 0.0, 1.0)
+					if gated and not mkeys.is_empty():
+						var fz := clampf((gdep[gi] + GLUE_ROOT_M) / (GLUE_ROOT_M - GLUE_SKIN_M), 0.0, 1.0)
+						for mk in mkeys:
+							off += ((_glue_fields as Dictionary)[mk] as PackedVector3Array)[sk] * fz
+					else:
+						for mk in mkeys:
+							off += ((_glue_fields as Dictionary)[mk] as PackedVector3Array)[sk]
 				pverts[i] = head_world * (head_inv * pverts[i] + off)
 				gi += 1
 			a[Mesh.ARRAY_VERTEX] = pverts
