@@ -192,7 +192,7 @@ func _idle_setup() -> void:
 		print("[Idle] %s missing, fallback %s" % [IDLE_TAKE, bare])
 	libs.add_animation(bare, _animtest_remap(pack.get_animation(bare), master))
 	_anim_player.add_animation_library("rig", libs)
-	_anim_player.play(IDLE_TAKE)
+	_anim_player.play(IDLE_TAKE, -1, 0.5)
 	_anim_player.seek(0.0, true) # opening pose; _process never advances it
 	print("[Idle] %s held at opening pose on %s" % [IDLE_TAKE, master.get_path()])
 	_anim_master = master
@@ -509,6 +509,18 @@ func adjust_phys(key: StringName, dir: int) -> void:
 
 func reset_phys(key: StringName) -> void:
 	_avatar.reset_phys(key)
+
+
+func bproj_display() -> String:
+	return _avatar.bproj_display()
+
+
+func adjust_bproj(dir: int) -> void:
+	_avatar.adjust_bproj(dir)
+
+
+func reset_bproj() -> void:
+	_avatar.reset_bproj()
 
 
 ## Avatar data access for the probe/overlay/capture tools + chartest.
@@ -1163,6 +1175,16 @@ func _run_headless_test() -> void:
 	fails += _expect("male gauntlets absent", part_file("Male", "RangerG", &"Accessories").is_empty())
 	fails += _expect("female body B", part_file("Female", "PeasantB", &"Body").ends_with("Female_Peasant_Body_B.gltf"))
 	fails += _expect("male body B absent", part_file("Male", "PeasantB", &"Body").is_empty())
+	# Default slots are nude ("--" everywhere until dressed explicitly).
+	var nude_ok := true
+	for sl in CharacterAvatar.SLOTS:
+		if slot_display(sl) != "--":
+			nude_ok = false
+	fails += _expect("default nude", nude_ok)
+	for sl in CharacterAvatar.SLOTS:
+		_avatar._outfit[sl] = 0
+	_avatar.full_rebuild()
+	fails += _expect("dressed peasant", slot_display(&"Body") == "Peasant")
 	# Fused avatar: one skeleton + two meshes (Skin / Cloths, X-ray toggle).
 	fails += _expect("avatar skeleton", _avatar_skeleton() != null)
 	fails += _expect("avatar two meshes", _avatar_skin_mi() != null and _avatar_cloth_mi() != null)
@@ -1185,6 +1207,265 @@ func _run_headless_test() -> void:
 	fails += _expect("female brow no file", eyebrow_file("Female", &"Default").is_empty())
 	fails += _expect("female eyes no file", eye_file("Female", &"Default").is_empty())
 	fails += _expect("female lashes no file", eyelash_file("Female", &"Default").is_empty())
+	# Breast bones (procedural, female only, appended end of vendor order).
+	var fsk := _avatar_skeleton()
+	fails += _expect("female bones 67", fsk != null and fsk.get_bone_count() == 67)
+	var fbl := fsk.find_bone(&"LeftBreast") if fsk != null else -1
+	var fbr := fsk.find_bone(&"RightBreast") if fsk != null else -1
+	fails += _expect("breast bones appended", fbl == 65 and fbr == 66)
+	fails += _expect("breast vendor prefix", fsk.get_bone_name(0) == &"Root" and fsk.get_bone_name(64) == &"ball_leaf_r")
+	var fch := fsk.find_bone(&"Chest")
+	fails += _expect("breast parent chest", fch != -1 and fsk.get_bone_parent(fbl) == fch and fsk.get_bone_parent(fbr) == fch)
+	var frl: Vector3 = fsk.get_bone_rest(fbl).origin
+	var frr: Vector3 = fsk.get_bone_rest(fbr).origin
+	fails += _expect("breast rests mirrored", frl.x < -0.01 and absf(frl.x + frr.x) < 0.001 and absf(frl.y - frr.y) < 0.001 and absf(frl.z - frr.z) < 0.001)
+	# Weights on the fused skin: sums 1.0, apex strongly held, L/R symmetric.
+	var bw_dev := 0.0
+	var bw_max := 0.0
+	var bw_l := 0.0
+	var bw_r := 0.0
+	var bw_n := 0
+	var bsmi := _avatar_skin_mi()
+	if bsmi != null and bsmi.mesh != null:
+		for bws in (bsmi.mesh as ArrayMesh).get_surface_count():
+			var btool := MeshDataTool.new()
+			if btool.create_from_surface(bsmi.mesh, bws) != OK:
+				continue
+			for bwi in btool.get_vertex_count():
+				var bbb := btool.get_vertex_bones(bwi)
+				var bww := btool.get_vertex_weights(bwi)
+				var btot := 0.0
+				var bpart := 0.0
+				for bwk in bbb.size():
+					btot += bww[bwk]
+					if bbb[bwk] == fbl or bbb[bwk] == fbr:
+						bpart += bww[bwk]
+				bw_dev = maxf(bw_dev, absf(btot - 1.0))
+				bw_max = maxf(bw_max, bpart)
+				if bpart > 0.01:
+					bw_n += 1
+					if (btool.get_vertex(bwi)).x < 0.0:
+						bw_l += bpart
+					else:
+						bw_r += bpart
+	fails += _expect("breast weights sum", bw_n > 50 and bw_dev < 0.001)
+	fails += _expect("breast apex weighted", bw_max > 0.5)
+	fails += _expect("breast weights symmetric", bw_n > 0 and absf(bw_l - bw_r) / float(bw_n) < 0.05)
+	# Cloth follows (Ranger body covers the chest): apex verts weighted there too.
+	var bcmi := _avatar_cloth_mi()
+	var bcli_max := 0.0
+	if bcmi != null and bcmi.mesh != null:
+		for bcs in (bcmi.mesh as ArrayMesh).get_surface_count():
+			var bctool := MeshDataTool.new()
+			if bctool.create_from_surface(bcmi.mesh, bcs) != OK:
+				continue
+			for bci in bctool.get_vertex_count():
+				var bcb := bctool.get_vertex_bones(bci)
+				var bcw := bctool.get_vertex_weights(bci)
+				for bck in bcb.size():
+					if bcb[bck] == fbl or bcb[bck] == fbr:
+						bcli_max = maxf(bcli_max, bcw[bck])
+	fails += _expect("breast cloth weighted", bcli_max > 0.2)
+	# Fusion rigs parts (index-prefix fallback): cloth spans many bones,
+	# not Root-bound (12/10: 52/65 unmapped froze UE garments at Root).
+	var br_used := {}
+	var brcmi := _avatar_cloth_mi()
+	if brcmi != null and brcmi.mesh != null:
+		for brs in (brcmi.mesh as ArrayMesh).get_surface_count():
+			var brb: PackedInt32Array = (brcmi.mesh as ArrayMesh).surface_get_arrays(brs)[Mesh.ARRAY_BONES]
+			for brk in brb.size():
+				br_used[brb[brk]] = true
+	fails += _expect("female cloth rigged", br_used.size() >= 10)
+	# Breast rows: Droop rigid offset + Firmness wiggle (scale rows cut 12/10).
+	adjust_phys(&"BreastDroop", 10)
+	fails += _expect("breastdroop display", phys_display(&"BreastDroop") == "110%")
+	fails += _expect("breastdroop offset", fsk.get_bone_pose_position(fbl).is_equal_approx(Vector3(0.0, -0.005, 0.0)) and fsk.get_bone_pose_position(fbr).is_equal_approx(Vector3(0.0, -0.005, 0.0)))
+	reset_phys(&"BreastDroop")
+	fails += _expect("breastdroop reset", fsk.get_bone_pose_position(fbl).is_equal_approx(Vector3.ZERO))
+	adjust_phys(&"BreastFirmness", 10)
+	fails += _expect("breastfirmness display", phys_display(&"BreastFirmness") == "110%")
+	fails += _expect("breastfirmness mapped", absf(CharacterAvatar.BREAST_WIGGLE.stiffness - 1.0) < 0.001 and absf(CharacterAvatar.BREAST_WIGGLE.damping - 0.95) < 0.001 and absf(CharacterAvatar.BREAST_WIGGLE.max_distance - 0.01563) < 0.002)
+	reset_phys(&"BreastFirmness")
+	fails += _expect("breastfirmness reset", absf(CharacterAvatar.BREAST_WIGGLE.stiffness - 1.0) < 0.001 and absf(CharacterAvatar.BREAST_WIGGLE.damping - 0.95) < 0.001 and absf(CharacterAvatar.BREAST_WIGGLE.max_distance - 0.01778) < 0.002)
+	fails += _expect("firmforce curve", is_equal_approx(CharacterAvatar._firm_eff(1.0), 1.5) and is_equal_approx(CharacterAvatar._firm_force(1.0), 1.0) and absf(CharacterAvatar._firm_force(1.5) - 0.575) < 0.001 and absf(CharacterAvatar._firm_force(2.0) - 0.15) < 0.001)
+	# Pivot sits back/down from the painted skin apex (anti-obus, 12/10).
+	var lm0 := _avatar._breast_landmarks()
+	var pa0: Array = lm0.get("apex", [])
+	var gsmi0 := _avatar_skin_mi()
+	if pa0.size() == 2 and gsmi0 != null and gsmi0.mesh != null:
+		var aw0: Vector3 = (gsmi0 as Node3D).global_transform * (pa0[0] as Vector3)
+		var rw0: Vector3 = fsk.get_bone_global_rest(fbl).origin
+		fails += _expect("breast pivot backdown", rw0.y < aw0.y and rw0.z < aw0.z)
+		fails += _expect("breast pivot near", rw0.distance_to(aw0) < 0.035)
+		fails += _expect("breast gravity light", CharacterAvatar.BREAST_WIGGLE.gravity.is_equal_approx(Vector3(0.0, -0.4, 0.0)))
+	else:
+		fails += _expect("breast pivot backdown", false)
+		fails += _expect("breast pivot near", false)
+		fails += _expect("breast gravity light", CharacterAvatar.BREAST_WIGGLE.gravity.is_equal_approx(Vector3(0.0, -0.4, 0.0)))
+	# Painted landmarks (override injection): rests follow the painted apex,
+	# radius comes from the mask (not the blind sphere).
+	var auto_apex: Array = _avatar._breast_apex(bsmi.mesh) if bsmi != null and bsmi.mesh != null else []
+	if auto_apex.size() == 2:
+		var ov := [(auto_apex[0] as Vector3) + Vector3(0.0, 0.0, 0.02), (auto_apex[1] as Vector3) + Vector3(0.0, 0.0, 0.02)]
+		var rw0: Vector3 = fsk.get_bone_global_rest(fbl).origin
+		var ovfoot := minf((ov[0] as Vector3).y, (ov[1] as Vector3).y) - 0.02
+		_avatar._breast_override = {"apex": ov, "radius": 0.06, "foot": ovfoot}
+		_avatar.full_rebuild()
+		var fsk2 := _avatar_skeleton()
+		var fbl2 := fsk2.find_bone(&"LeftBreast") if fsk2 != null else -1
+		var fbr2 := fsk2.find_bone(&"RightBreast") if fsk2 != null else -1
+		var rw1: Vector3 = fsk2.get_bone_global_rest(fbl2).origin
+		var gsmi2 := _avatar_skin_mi()
+		var exp1: Vector3 = (gsmi2 as Node3D).global_transform * (ov[0] as Vector3) + Vector3(0.0, -CharacterAvatar.BREAST_PIVOT_DOWN, -CharacterAvatar.BREAST_PIVOT_BACK)
+		fails += _expect("breast override apex", rw1.distance_to(exp1) < 0.002)
+		var lm2 := _avatar._breast_landmarks()
+		fails += _expect("breast override radius", absf(float(lm2.get("radius", 0.0)) - 0.06) < 0.0001 and String(lm2.get("source", "")) == "override")
+		fails += _expect("breast override mirrored", fsk2.get_bone_rest(fbl2).origin.x < -0.01 and fsk2.get_bone_rest(fbr2).origin.x > 0.01)
+		fails += _expect("breast override gatevals", lm2.has("cny") and lm2.has("cfoot"))
+		_avatar._breast_override = {}
+		_avatar.full_rebuild()
+		# Live paint is the source now (user painted 12/10): JSON read pinned
+		# permanently — a wiped paint trips this on purpose.
+		var lm3 := _avatar._breast_landmarks()
+		fails += _expect("breast painted live", String(lm3.get("source", "")) == "painted")
+		fails += _expect("breast painted radius", float(lm3.get("radius", 0.0)) >= 0.04 and float(lm3.get("radius", 0.0)) <= 0.15)
+		var pa3: Array = lm3.get("apex", [])
+		fails += _expect("breast painted apex", pa3.size() == 2 and (pa3[0] as Vector3).x < -0.01 and absf((pa3[0] as Vector3).x + (pa3[1] as Vector3).x) < 0.01)
+	else:
+		fails += _expect("breast override apex", false)
+		fails += _expect("breast override radius", false)
+		fails += _expect("breast override mirrored", false)
+		fails += _expect("breast override gatevals", false)
+		fails += _expect("breast painted live", false)
+		fails += _expect("breast painted radius", false)
+		fails += _expect("breast painted apex", false)
+	# Vertical gate: no breast weight below the footprint bottom (under-breast
+	# skin stays on the torso bones — no balloon underneath).
+	var bgate := _avatar._breast_last_gate
+	var bviol := 0
+	var bwtot := 0
+	var gsmi := _avatar_skin_mi()
+	var gsk := _avatar_skeleton()
+	var gfbl := gsk.find_bone(&"LeftBreast") if gsk != null else -1
+	var gfbr := gsk.find_bone(&"RightBreast") if gsk != null else -1
+	var gm2c: Transform3D = bgate.get("m2c", Transform3D.IDENTITY)
+	var gfoot := float(bgate.get("foot", -1e9))
+	if gsmi != null and gsmi.mesh != null and not bgate.is_empty():
+		for bgs in (gsmi.mesh as ArrayMesh).get_surface_count():
+			var bgtool := MeshDataTool.new()
+			if bgtool.create_from_surface(gsmi.mesh, bgs) != OK:
+				continue
+			for bgi in bgtool.get_vertex_count():
+				var bgb := bgtool.get_vertex_bones(bgi)
+				var bgw := bgtool.get_vertex_weights(bgi)
+				var bpart := 0.0
+				for bgk in bgb.size():
+					if bgb[bgk] == gfbl or bgb[bgk] == gfbr:
+						bpart += bgw[bgk]
+				if bpart > 0.01:
+					bwtot += 1
+					if (gm2c * bgtool.get_vertex(bgi)).y < gfoot - 0.001:
+						bviol += 1
+	fails += _expect("breast gate floor", bviol == 0 and bwtot > 50)
+	# Breast sculpt (Projection): normal push through the painted field on
+	# Skin + Cloths, gated below the footprint floor, exact restore on reset.
+	var lm4 := _avatar._breast_landmarks()
+	var pa4: Array = lm4.get("apex", [])
+	var gsmi4 := _avatar_skin_mi()
+	var gcmi4 := _avatar_cloth_mi()
+	if pa4.size() == 2 and gsmi4 != null and gsmi4.mesh != null:
+		var smesh := gsmi4.mesh as ArrayMesh
+		var ni_si := -1
+		var ni_vi := -1
+		var nd := 1e9
+		for ssi in smesh.get_surface_count():
+			var svv: PackedVector3Array = smesh.surface_get_arrays(ssi)[Mesh.ARRAY_VERTEX]
+			for vvi in svv.size():
+				var dd: float = svv[vvi].distance_squared_to(pa4[0])
+				if dd < nd:
+					nd = dd
+					ni_si = ssi
+					ni_vi = vvi
+		var gate4 := _avatar._breast_last_gate
+		var m2c4: Transform3D = gate4.get("m2c", Transform3D.IDENTITY)
+		var foot4 := float(gate4.get("foot", -1e9))
+		var pre := []
+		for ssi in smesh.get_surface_count():
+			pre.append((smesh.surface_get_arrays(ssi)[Mesh.ARRAY_VERTEX] as PackedVector3Array).duplicate())
+		var ci_si := -1
+		var ci_vi := -1
+		var cpre := []
+		if gcmi4 != null and gcmi4.mesh != null:
+			var cmesh := gcmi4.mesh as ArrayMesh
+			var capex: Vector3 = (gcmi4 as Node3D).global_transform.affine_inverse() * ((gsmi4 as Node3D).global_transform * (pa4[0] as Vector3))
+			var cd := 1e9
+			for csi in cmesh.get_surface_count():
+				var cvv: PackedVector3Array = cmesh.surface_get_arrays(csi)[Mesh.ARRAY_VERTEX]
+				for cvi in cvv.size():
+					var dd2: float = cvv[cvi].distance_squared_to(capex)
+					if dd2 < cd:
+						cd = dd2
+						ci_si = csi
+						ci_vi = cvi
+			for csi in cmesh.get_surface_count():
+				cpre.append((cmesh.surface_get_arrays(csi)[Mesh.ARRAY_VERTEX] as PackedVector3Array).duplicate())
+		adjust_bproj(5)
+		fails += _expect("bproj display", bproj_display() == "+5mm")
+		var spost: PackedVector3Array = (smesh.surface_get_arrays(ni_si)[Mesh.ARRAY_VERTEX] as PackedVector3Array)
+		fails += _expect("bproj nipple push", ni_vi >= 0 and spost[ni_vi].distance_to((pre[ni_si] as PackedVector3Array)[ni_vi]) > 0.003)
+		var bmax := 0.0
+		for ssi in smesh.get_surface_count():
+			var svv2: PackedVector3Array = smesh.surface_get_arrays(ssi)[Mesh.ARRAY_VERTEX]
+			for vvi in svv2.size():
+				if (m2c4 * (pre[ssi] as PackedVector3Array)[vvi]).y < foot4 - 0.005:
+					bmax = maxf(bmax, svv2[vvi].distance_to((pre[ssi] as PackedVector3Array)[vvi]))
+		fails += _expect("bproj floor still", bmax < 1e-9)
+		if ci_vi >= 0 and gcmi4 != null and gcmi4.mesh != null:
+			var cvv2: PackedVector3Array = ((gcmi4.mesh as ArrayMesh).surface_get_arrays(ci_si)[Mesh.ARRAY_VERTEX] as PackedVector3Array)
+			fails += _expect("bproj cloth follows", cvv2[ci_vi].distance_to((cpre[ci_si] as PackedVector3Array)[ci_vi]) > 0.001)
+		else:
+			fails += _expect("bproj cloth follows", false)
+		reset_bproj()
+		fails += _expect("bproj reset display", bproj_display() == "+0mm")
+		var rmax := 0.0
+		for ssi in smesh.get_surface_count():
+			var svv3: PackedVector3Array = smesh.surface_get_arrays(ssi)[Mesh.ARRAY_VERTEX]
+			for vvi in svv3.size():
+				rmax = maxf(rmax, svv3[vvi].distance_to((pre[ssi] as PackedVector3Array)[vvi]))
+		fails += _expect("bproj restore exact", rmax < 1e-9)
+		adjust_bproj(50)
+		fails += _expect("bproj clamp max", bproj_display() == "+%dmm" % int(round(CharacterAvatar.BPROJ_MAX_CM * 10.0)))
+		adjust_bproj(-50)
+		adjust_bproj(-50)
+		fails += _expect("bproj clamp min", bproj_display() == "-%dmm" % int(round(CharacterAvatar.BPROJ_MIN_CM * 10.0)))
+		reset_bproj()
+	else:
+		for bname in ["bproj display", "bproj nipple push", "bproj floor still", "bproj cloth follows", "bproj reset display", "bproj restore exact", "bproj clamp max", "bproj clamp min"]:
+			fails += _expect(bname, false)
+	_menu._push(CharacterMenu.LEVEL_PHYSICS)
+	fails += _expect("female physics breast rows", _menu._entries.size() == 10)
+	_menu._pop()
+	# Wiggle attaches live only — headless stays deterministic.
+	var wig_n := 0
+	for wch in fsk.get_children():
+		if wch is WiggleBone:
+			wig_n += 1
+	fails += _expect("no wiggle headless", wig_n == 0)
+	# No duplicated surfaces (12/10: MeshDataTool.commit appended a copy).
+	var dup_n := 0
+	for fmi in [_avatar_skin_mi(), _avatar_cloth_mi()]:
+		if fmi == null or (fmi as MeshInstance3D).mesh == null:
+			continue
+		var seen := {}
+		var fm := (fmi as MeshInstance3D).mesh as ArrayMesh
+		for fsdup in fm.get_surface_count():
+			var fv: PackedVector3Array = fm.surface_get_arrays(fsdup)[Mesh.ARRAY_VERTEX]
+			var fk := "%d:%s" % [fv.size(), str(fv[0]) if not fv.is_empty() else "e"]
+			if seen.has(fk):
+				dup_n += 1
+			else:
+				seen[fk] = true
+	fails += _expect("breast no surface dup", dup_n == 0)
 	_avatar._outfit[&"Body"] = 2
 	_apply_nude()
 	_rebuild_avatar()
@@ -1193,10 +1474,22 @@ func _run_headless_test() -> void:
 	reset_slot(&"Body")
 	reset_gender()
 	reset_slot(&"Body")
-	fails += _expect("back to male peasant", gender_display() == "Male" and slot_display(&"Body") == "Peasant")
+	fails += _expect("back to male nude", gender_display() == "Male" and slot_display(&"Body") == "--")
+	fails += _expect("male stays 65", _avatar_skeleton() != null and _avatar_skeleton().get_bone_count() == 65)
 	fails += _expect("male avatar fused", _avatar_mi() != null and _avatar_surf_count() > 1)
 	fails += _expect("male hands kept", _avatar_finger_verts() > 100)
 	fails += _expect("skin push on", _avatar_push("SuperHero") > 0.01)
+	# Explicit nude slot ("None" cycles last, shows "--", nude shows through).
+	_avatar._outfit[&"Body"] = _avatar._slot_outfits(&"Body").size() - 1
+	_avatar.full_rebuild()
+	fails += _expect("body none shows", slot_display(&"Body") == "--")
+	fails += _expect("body none fused", _avatar_mi() != null and _avatar_surf_count() > 1)
+	reset_slot(&"Body")
+	fails += _expect("body none restored", slot_display(&"Body") == "--")
+	for sl in CharacterAvatar.SLOTS:
+		_avatar._outfit[sl] = 0
+	_avatar.full_rebuild()
+	fails += _expect("peasant redressed", slot_display(&"Body") == "Peasant" and _avatar_cloth_mi() != null)
 	# Male nude skips brows/eyes at import: the mounted parts stand in.
 	fails += _expect("male brows mounted", _avatar.get_node_or_null("Eyebrows/Male_Eyebrows") != null)
 	fails += _expect("male eyes mounted", _avatar.get_node_or_null("Eyes/Male_Eyes") != null)
@@ -1235,7 +1528,7 @@ func _run_headless_test() -> void:
 		(body_entry["adjust"] as Callable).call(1)
 		fails += _expect("menu L/R cycles outfit", slot_display(&"Body") == "Ranger")
 		(body_entry["reset"] as Callable).call()
-		fails += _expect("menu A/E resets outfit", slot_display(&"Body") == "Peasant")
+		fails += _expect("menu A/E resets outfit", slot_display(&"Body") == "--")
 	_menu._pop()
 	# 5. Four-level menu (root/outfits/colors/physics) + idle preview.
 	var root_labels := []
@@ -1254,6 +1547,10 @@ func _run_headless_test() -> void:
 	_menu._pop()
 	var want_take := _animtest_take() if _animtest_wanted() else IDLE_TAKE
 	fails += _expect("preview anim playing", _anim_player != null and _anim_player.current_animation == want_take)
+	# Color rows need a dressed slot (default is nude since -- None).
+	for sl in CharacterAvatar.SLOTS:
+		_avatar._outfit[sl] = 0
+	_avatar.full_rebuild()
 	fails += _expect("color body mapped", not _slot_mats(&"Body").is_empty())
 	fails += _expect("color skin mapped", not _slot_mats(&"Skin").is_empty())
 	open_color(&"Head")

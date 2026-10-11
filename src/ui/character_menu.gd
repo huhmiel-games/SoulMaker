@@ -160,10 +160,17 @@ func _load_entries() -> Array:
 		var pout: Array = []
 		for key in CharacterAvatar.PHYS_KEYS:
 			var k := key
+			if String(k).begins_with("Breast") and _host.gender_display() != "Female":
+				continue # female-only rows (male has no breast bones)
 			pout.append({"label": String(k), "kind": "value",
 				"get": _host.phys_display.bind(k),
 				"adjust": func(dir: int) -> void: _host.adjust_phys(k, dir),
 				"reset": _host.reset_phys.bind(k)})
+		if _host.gender_display() == "Female":
+			pout.append({"label": "BreastProjection", "kind": "value",
+				"get": _host.bproj_display,
+				"adjust": _host.adjust_bproj,
+				"reset": _host.reset_bproj})
 		pout.append({"label": "[ ← Back ]", "call": _pop})
 		return pout
 	if _level == LEVEL_HAIR:

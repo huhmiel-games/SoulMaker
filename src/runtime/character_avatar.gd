@@ -57,14 +57,18 @@ const SLOT_SRC_KEYS := {
 ## Physics silhouette pack (v1): slider key -> bones + scaled axes (Standard
 ## bone names). Applied as absolute bone-pose scale on the fused master
 ## skeleton, reapplied after every rebuild (new skeleton each time).
-const PHYS_KEYS: Array[StringName] = [&"Height", &"Legs", &"Shoulders", &"Waist", &"Hips", &"Head"]
+const PHYS_KEYS: Array[StringName] = [&"Height", &"Legs", &"Shoulders", &"Waist", &"Hips", &"Head", &"BreastDroop", &"BreastFirmness"]
 const PHYS_STEP := 0.01
 ## Bounds per row (07/10, eye-tuned): limbs/height stay near the authored
 ## body (90-110); Waist is tighter (95-105, the nude is already muscular —
-## 90 puts hands inside the torso, 110+ reads non-human).
+## 90 puts hands inside the torso, 110+ reads non-human). BreastDroop 70-140
+## (140 = heavy/low, 70 = lifted), BreastFirmness 50-150 (soft..firm). The
+## old scale rows (Breast/Width/Depth) were cut 12/10: homothety only made
+## weird shapes, Projection sculpts better.
 const PHYS_LIMITS := {
 	&"Height": [0.9, 1.1], &"Legs": [0.9, 1.1], &"Shoulders": [0.9, 1.1],
 	&"Waist": [0.95, 1.05], &"Hips": [0.9, 1.1], &"Head": [0.9, 1.1],
+	&"BreastDroop": [0.7, 1.4], &"BreastFirmness": [0.5, 2.5],
 }
 const PHYS_BONES := {
 	&"Height": {"bones": [&"Root"], "axes": Vector3(1, 1, 1)},
@@ -73,7 +77,41 @@ const PHYS_BONES := {
 	&"Waist": {"bones": [&"Spine", &"Chest"], "axes": Vector3(1, 0, 1)},
 	&"Hips": {"bones": [&"Hips"], "axes": Vector3(1, 0, 1)},
 	&"Head": {"bones": [&"Head"], "axes": Vector3(1, 1, 1)},
+	## Droop is a rigid Y offset (not a scale) and Firmness drives the wiggle
+	## — both list the bones with zero axes so the scale pass is a no-op.
+	&"BreastDroop": {"bones": [&"LeftBreast", &"RightBreast"], "axes": Vector3(0, 0, 0)},
+	&"BreastFirmness": {"bones": [], "axes": Vector3(0, 0, 0)},
 }
+## BreastDroop mapping: rigid Y offset (m) at v=1.4/0.7. Higher value =
+## heavier (down); below 100% lifts up.
+const BREAST_SAG_RANGE := 0.05
+## Displayed firmness reads 50 points soft: the effective factor adds 0.5
+## (100% behaves like the old 150% = held, 200% like the old 250% = welded).
+static func _firm_eff(v: float) -> float:
+	return v + 0.5
+
+
+## Firmness -> wiggle output weight on the EFFECTIVE factor (pure, pinnable):
+## full jiggle at/below effective 1.0, near-rigid at 2.5+. Stiffness caps at
+## 1.0 (the solver oscillates above), so rigidity comes from the output.
+static func _firm_force(firm_v: float) -> float:
+	return clampf(1.85 - 0.85 * firm_v, 0.1, 1.0)
+## BreastFirmness mapping (factor on the .tres reference: stiffness 0.8,
+## max_distance 0.04, damping 0.5 at 100% — damping climbs to 0.95 and the
+## excursion falls quadratically, that is what kills the run-cycle bounce).
+const BREAST_FIRM_STIFF := 0.8
+const BREAST_FIRM_MAXD := 0.04
+## Pivot set back/down from the skin apex (m): near-nipple so XYZ growth
+## stays centered (round, never projectile); the slight down offset keeps the
+## up/forward bias. Pushing BACK out again re-makes obus (12/10 live).
+const BREAST_PIVOT_BACK := 0.01
+const BREAST_PIVOT_DOWN := 0.02
+## Procedural breast bones (female only, appended END of the vendor order so
+## the 65-bone prefix keeps its indices for parts + animtest pairing).
+const BREAST_BONES: Array[StringName] = [&"LeftBreast", &"RightBreast"]
+const BREAST_PARENT := &"Chest"
+const BREAST_FALLOFF_R := 0.11 # weight zone radius around each apex (m, live-tuned)
+static var BREAST_WIGGLE := preload("res://data/characters/wiggle_breast.tres")
 
 ## Build flags (set by the host before full_rebuild): FitKit conform on/off,
 ## pass-1 suppression on/off (--nosuppress eye recipe).
@@ -114,7 +152,7 @@ func _ready() -> void:
 	for slot in SLOTS:
 		_add_holder(String(slot))
 	for slot in SLOTS:
-		_outfit[slot] = 0
+		_outfit[slot] = outfit_none(slot)
 	for key in PHYS_KEYS:
 		_phys[key] = 1.0
 
@@ -158,6 +196,7 @@ func _post_build() -> void:
 	_apply_eyelashes()
 	_reapply_colors()
 	_apply_physics()
+	_breast_finalize()
 	_snap_pristine()
 	_sculpt_fused()
 	rebuilt.emit()
@@ -247,7 +286,7 @@ func adjust_slot(slot: StringName, dir: int) -> void:
 
 
 func reset_slot(slot: StringName) -> void:
-	_outfit[slot] = 0
+	_outfit[slot] = outfit_none(slot)
 	full_rebuild()
 
 
@@ -257,6 +296,8 @@ func reset_slot(slot: StringName) -> void:
 ## Ranger side names stay irregular (Feet_Boots, Head_Hood) until the user
 ## rename pass; a final existence guard keeps deleted files loud-free.
 func part_file(gender: String, outfit: String, slot: StringName) -> String:
+	if outfit == "None":
+		return "" # explicit nude slot (cycled last, shows "--")
 	var dir := "%s%s/%s/" % [OUTFIT_DIR, gender.to_lower(), String(SLOT_DIRS.get(slot, "bodies"))]
 	var path := ""
 	match slot:
@@ -284,9 +325,15 @@ func part_file(gender: String, outfit: String, slot: StringName) -> String:
 	return path
 
 
-## Outfit choices for a slot: base OUTFITS + test extras (variant files).
+## Outfit choices for a slot: base OUTFITS + test extras (variant files) +
+## "None" last (explicit nude — indices of the real outfits never shift).
 func _slot_outfits(slot: StringName) -> Array:
-	return OUTFITS + SLOT_EXTRA.get(slot, [])
+	return OUTFITS + SLOT_EXTRA.get(slot, []) + ["None"]
+
+
+## Default outfit index: "None" (avatar starts nude; dress explicitly).
+func outfit_none(slot: StringName) -> int:
+	return _slot_outfits(slot).size() - 1
 
 
 func _clear_holder(h: Node) -> void:
@@ -317,6 +364,7 @@ func _apply_slot(slot: StringName) -> void:
 		push_error("[Character] cannot load %s" % path)
 		return
 	holder.add_child(packed.instantiate())
+	_breast_bones_add(slot_skeleton(slot))
 	if want_fit:
 		if _nude_snap.get("ok", false):
 			# Cloth is kept 100% authored (03/10: fit_pushout removed — it
@@ -357,6 +405,7 @@ func _apply_nude() -> void:
 		push_error("[Character] cannot load %s" % nude_file(GENDERS[_gender]))
 		return
 	holder.add_child(packed.instantiate())
+	_breast_bones_add(slot_skeleton(&"Nude"))
 	_reset_dress(holder)
 	# The nude never casts shadows: buried cloth would otherwise sit in the
 	# torso's shadow and render near-black (dark pack textures + filmic).
@@ -911,6 +960,7 @@ var _adj_cache := {} # pristine mesh rid -> Array per surface of neighbor index 
 func _sculpt_fused() -> void:
 	var regions := _sculpt_regions()
 	if regions.is_empty():
+		_breast_sculpt()
 		return
 	var active := []
 	for key in SCULPT_KEYS:
@@ -922,6 +972,7 @@ func _sculpt_fused() -> void:
 			if mmi != null and mmi.name == &"Skin" and _skin_pristine != null and mmi.mesh != _skin_pristine:
 				mmi.mesh = _skin_pristine
 		_face_follow_restore()
+		_breast_sculpt()
 		return
 	var sk := master_skeleton()
 	if sk == null:
@@ -1293,6 +1344,7 @@ func _sculpt_fused() -> void:
 			fdrive[fslot2] = flist
 	for fslot2 in SCULPT_FOLLOW:
 		_face_follow_bake(String(fslot2), fdrive.get(fslot2, []), head_world, head_inv, bi, regions)
+	_breast_sculpt()
 
 
 ## Driving keys of a follow entry (plain Array, or Dict with a "keys" list
@@ -1724,23 +1776,557 @@ func sculpt_max_cliff() -> float:
 	return m
 
 
-## Absolute bone-pose scale on the fused master (single skeleton). Bones
-## missing from the rig are skipped with one line (chartest pins the v1 set).
+## Procedural breast bones (female only). Added END of the vendor order in
+## _apply_nude (master) + _apply_slot (parts, keeps the 67/67 animtest index
+## pairing); rests + skin weights land in _breast_finalize post-build, once
+## the fused apex is known. Rests/weights are absolute (idempotent across
+## rebuilds); the weighted-mesh set below skips cache-hit re-application.
+var _breast_weighted := {}
+
+
+## Adds LeftBreast/RightBreast parented to Chest (no-op when present).
+func _breast_bones_add(sk: Skeleton3D) -> void:
+	if sk == null or GENDERS[_gender] != "Female":
+		return
+	var parent := sk.find_bone(BREAST_PARENT)
+	if parent == -1:
+		return
+	for bn in BREAST_BONES:
+		if sk.find_bone(bn) != -1:
+			continue
+		sk.set_bone_parent(sk.add_bone(String(bn)), parent)
+
+
+## Painted breast landmarks (breast.json v2, Female only): Nipple clusters give
+## the per-side apexes, the Breast footprint gives the falloff radius — the
+## data-driven answer to the Width-outward issue (12/10: the blind 11cm
+## sphere moved the chest rim instead of growing the mound). Chest-frame
+## meters, converted to skin-mesh-local via the Chest rest world (same
+## convention as the sculpt masks: suppression deletes, never moves).
+## Returns {} when unpainted (caller falls back to auto apex + radius).
+## Test injection: _breast_override = {"apex": [L, R] skin-local, "radius": f,
+## "foot": y skin-local (default: min apex y - 3cm)}.
+const BREAST_JSON := "res://data/characters/breast.json"
+var _breast_cache := {} # gender -> doc dict (lazy)
+var _breast_override := {}
+var _breast_last_gate := {} # skin-mesh gate of the last finalize (pins)
+
+
+func _breast_landmarks() -> Dictionary:
+	var smi := _avatar_skin_mi()
+	var master := master_skeleton()
+	if smi == null or smi.mesh == null or master == null:
+		return {}
+	var chest := master.find_bone(BREAST_PARENT)
+	if chest == -1:
+		return {}
+	var chest_w := _bone_rest_world(master, chest)
+	var sinv: Transform3D = (smi as Node3D).global_transform.affine_inverse()
+	var m2c: Transform3D = chest_w.affine_inverse() * (smi as Node3D).global_transform
+	if not _breast_override.is_empty():
+		var oapex: Array = (_breast_override.get("apex", []) as Array).duplicate()
+		if oapex.size() < 2:
+			return {}
+		var ofoot := float(_breast_override.get("foot", minf((oapex[0] as Vector3).y, (oapex[1] as Vector3).y) - 0.03))
+		var ocny := [(m2c * (oapex[0] as Vector3)).y, (m2c * (oapex[1] as Vector3)).y]
+		return {"apex": oapex, "radius": float(_breast_override.get("radius", BREAST_FALLOFF_R)), "cny": ocny, "cfoot": (m2c * Vector3(0.0, ofoot, 0.0)).y, "cnip": [m2c * (oapex[0] as Vector3), m2c * (oapex[1] as Vector3)], "source": "override"}
+	if GENDERS[_gender] != "Female":
+		return {}
+	if not _breast_cache.has("doc"):
+		_breast_cache["doc"] = JsonFile.load_object(BREAST_JSON)
+	var doc: Dictionary = _breast_cache["doc"]
+	var sec: Dictionary = (doc.get("Female", {}) as Dictionary).get("regions", {})
+	var nip := ((sec.get("Nipple", {}) as Dictionary).get("points", []) as Array)
+	var foot := ((sec.get("Breast", {}) as Dictionary).get("points", []) as Array)
+	if nip.is_empty() and foot.is_empty():
+		return {}
+	# Painted footprint bottom (chest-frame min y): the gate floor under the
+	# nipple. Nipple-only paint falls back to 3cm under the nipples.
+	var foot_c := 1e9
+	var apex_c := [Vector3.ZERO, Vector3.ZERO]
+	var radius := BREAST_FALLOFF_R
+	if not nip.is_empty():
+		var pts := []
+		var cx := 0.0
+		for p in nip:
+			var pa: Array = p
+			var fp := Vector3(float(pa[0]), float(pa[1]), float(pa[2]))
+			pts.append(fp)
+			cx += fp.x
+		cx /= float(pts.size())
+		var cl := Vector3.ZERO
+		var cr := Vector3.ZERO
+		var nl := 0
+		var nr := 0
+		var spread := 0.0
+		for fp in pts:
+			if (fp as Vector3).x < cx:
+				cl += fp
+				nl += 1
+			else:
+				cr += fp
+				nr += 1
+		if nl == 0 or nr == 0:
+			cl = (cl + cr) / float(maxi(nl + nr, 1))
+			cr = cl
+		else:
+			cl /= float(nl)
+			cr /= float(nr)
+		for fp in pts:
+			spread = maxf(spread, (fp as Vector3).distance_to(cl if (fp as Vector3).x < cx else cr))
+		apex_c = [cl, cr]
+		if foot.is_empty():
+			radius = clampf(4.0 * spread, 0.04, 0.11)
+	if not foot.is_empty():
+		var fpts := []
+		for p in foot:
+			var pa2: Array = p
+			fpts.append(Vector3(float(pa2[0]), float(pa2[1]), float(pa2[2])))
+		for fp in fpts:
+			foot_c = minf(foot_c, (fp as Vector3).y)
+		if nip.is_empty():
+			# No nipples: per-side front-most mean of the footprint itself.
+			var lz := []
+			var rz := []
+			for fp in fpts:
+				((lz if (fp as Vector3).x < 0.0 else rz) as Array).append(fp)
+			for side in [lz, rz]:
+				(side as Array).sort_custom(func(a: Vector3, b: Vector3) -> bool: return a.z > b.z)
+			var take_side := func(arr: Array) -> Vector3:
+				if arr.is_empty():
+					return Vector3.ZERO
+				var take := mini(maxi(8, arr.size() / 100), arr.size())
+				var c := Vector3.ZERO
+				for i in take:
+					c += arr[i]
+				return c / float(take)
+			var al: Vector3 = take_side.call(lz)
+			var ar: Vector3 = take_side.call(rz)
+			if lz.is_empty():
+				al = ar
+			if rz.is_empty():
+				ar = al
+			apex_c = [al, ar]
+		var r := 0.0
+		for fp in fpts:
+			var side_apex: Vector3 = apex_c[0] if (fp as Vector3).x < (apex_c[0] as Vector3).x + ((apex_c[1] as Vector3).x - (apex_c[0] as Vector3).x) * 0.5 else apex_c[1]
+			r = maxf(r, (fp as Vector3).distance_to(side_apex))
+		radius = clampf(r, 0.04, 0.15)
+	else:
+		foot_c = minf((apex_c[0] as Vector3).y, (apex_c[1] as Vector3).y) - 0.03
+	var to_local := func(q: Vector3) -> Vector3:
+		return sinv * (chest_w * q)
+	return {"apex": [to_local.call(apex_c[0]), to_local.call(apex_c[1])], "radius": radius, "cny": [(apex_c[0] as Vector3).y, (apex_c[1] as Vector3).y], "cfoot": foot_c, "cnip": [apex_c[0], apex_c[1]], "source": "painted"}
+func _breast_apex(mesh: ArrayMesh) -> Array:
+	var allv := PackedVector3Array()
+	for s in mesh.get_surface_count():
+		allv.append_array((mesh.surface_get_arrays(s)[Mesh.ARRAY_VERTEX] as PackedVector3Array))
+	if allv.is_empty():
+		return []
+	var mn := Vector3(1e9, 1e9, 1e9)
+	var mx := Vector3(-1e9, -1e9, -1e9)
+	for v in allv:
+		mn = mn.min(v)
+		mx = mx.max(v)
+	var y0: float = mn.y + (mx.y - mn.y) * 0.5
+	var y1: float = mn.y + (mx.y - mn.y) * 0.78
+	var sides := [[], []]
+	for v in allv:
+		if v.y > y0 and v.y < y1:
+			(sides[0] if v.x < 0.0 else sides[1] as Array).append(v)
+	var out := []
+	for side in sides:
+		var verts: Array = side
+		if verts.is_empty():
+			return []
+		verts.sort_custom(func(a: Vector3, b: Vector3) -> bool: return a.z > b.z)
+		var take := maxi(8, verts.size() / 100)
+		var c := Vector3.ZERO
+		for i in mini(take, verts.size()):
+			c += verts[i]
+		out.append(c / float(mini(take, verts.size())))
+	return out
+
+
+## Assigns breast weights on one fused mesh (apex pair in that mesh's LOCAL
+## frame): smoothstep falloff steals proportionally from the vendor weights,
+## weakest slot takes the breast bone, sums renormalized to 1.0. The vertical
+## gate (chest frame: full at/above the nipple, zero at the painted footprint
+## bottom) keeps the under-breast skin on the torso bones — the mound grows
+## up/forward, never balloons underneath. Direct
+## PackedArray surgery + ordered rebuild: MeshDataTool.commit_to_surface
+## APPENDS a duplicate instead of updating in place (proven 12/10: 3->4
+## surfaces), and the fused meshes carry no morphs (probed: 0 everywhere —
+## loud guard below if that ever changes).
+func _breast_weight_mesh(mi: MeshInstance3D, local_apex: Array, bi_l: int, bi_r: int, falloff_r: float, gate: Dictionary) -> void:
+	var mesh := mi.mesh as ArrayMesh
+	if mesh == null or local_apex.size() < 2:
+		return
+	if mesh.get_blend_shape_count() > 0:
+		push_error("[Breast] blend shapes present, weights skipped (rebuild would drop morphs)")
+		return
+	var r := maxf(falloff_r, 0.01)
+	var r2 := r * r
+	var m2c: Transform3D = gate.get("m2c", Transform3D.IDENTITY)
+	var gfoot := float(gate.get("foot", -1e9))
+	var gny: Array = gate.get("ny", [])
+	var rebuilt := []
+	for s in mesh.get_surface_count():
+		var a := mesh.surface_get_arrays(s)
+		var mat := mesh.surface_get_material(s)
+		var prim := mesh.surface_get_primitive_type(s)
+		var sname := mesh.surface_get_name(s)
+		var bb: PackedInt32Array = a[Mesh.ARRAY_BONES]
+		var ww: PackedFloat32Array = a[Mesh.ARRAY_WEIGHTS]
+		var vv: PackedVector3Array = a[Mesh.ARRAY_VERTEX]
+		var stride := 0
+		if not bb.is_empty() and not ww.is_empty() and not vv.is_empty():
+			stride = bb.size() / vv.size()
+		if stride < 1 or bb.size() != vv.size() * stride or ww.size() != vv.size() * stride:
+			rebuilt.append([a, mat, prim, sname]) # unexpected layout: keep verbatim
+			continue
+		for i in vv.size():
+			var v: Vector3 = vv[i]
+			var dl2: float = v.distance_squared_to(local_apex[0])
+			var dr2: float = v.distance_squared_to(local_apex[1])
+			var d2: float = minf(dl2, dr2)
+			if d2 >= r2:
+				continue
+			var t := 1.0 - sqrt(d2) / r
+			var w: float = t * t * (3.0 - 2.0 * t)
+			# Vertical gate (per side, chest frame): full weight at/above
+			# the nipple, smooth to zero at the footprint bottom.
+			if gny.size() == 2:
+				var ny := float(gny[0] if dl2 <= dr2 else gny[1])
+				var qy := (m2c * v).y
+				if qy < ny:
+					if qy <= gfoot:
+						continue
+					var denom := ny - gfoot
+					if denom > 0.0001:
+						var gt := (qy - gfoot) / denom
+						w *= gt * gt * (3.0 - 2.0 * gt)
+			var weakest := 0
+			for k in range(1, stride):
+				if ww[i * stride + k] < ww[i * stride + weakest]:
+					weakest = k
+			var bidx := bi_l if dl2 <= dr2 else bi_r
+			var tot := 0.0
+			for k in stride:
+				var o := i * stride + k
+				if k == weakest:
+					ww[o] = w
+					bb[o] = bidx
+				else:
+					ww[o] = ww[o] * (1.0 - w)
+				tot += ww[o]
+			if tot > 0.0:
+				for k in stride:
+					ww[i * stride + k] = ww[i * stride + k] / tot
+		a[Mesh.ARRAY_BONES] = bb
+		a[Mesh.ARRAY_WEIGHTS] = ww
+		rebuilt.append([a, mat, prim, sname])
+	mesh.clear_surfaces()
+	for e in rebuilt:
+		var arr: Array = e[0]
+		mesh.add_surface_from_arrays(e[2], arr)
+		var si := mesh.get_surface_count() - 1
+		mesh.surface_set_material(si, e[1])
+		mesh.surface_set_name(si, String(e[3]))
+
+
+## Post-build breast pass (female only): apex + radius from the painted
+## landmarks (breast.json) or the legacy auto sphere when unpainted; rests at
+## the apexes (scale + wiggle pivot), weights on fused Skin + Cloths, then
+## WiggleBone attach (live only — headless stays deterministic for pins).
+func _breast_finalize() -> void:
+	if GENDERS[_gender] != "Female":
+		return
+	var master := master_skeleton()
+	var smi := _avatar_skin_mi()
+	if master == null or smi == null or smi.mesh == null:
+		return
+	var bi_l := master.find_bone(BREAST_BONES[0])
+	var bi_r := master.find_bone(BREAST_BONES[1])
+	if bi_l == -1 or bi_r == -1:
+		return
+	var chest := master.find_bone(BREAST_PARENT)
+	if chest == -1:
+		return
+	var chest_w := _bone_rest_world(master, chest)
+	var m2c_skin: Transform3D = chest_w.affine_inverse() * (smi as Node3D).global_transform
+	# Painted landmarks win (nipple apexes + footprint radius + gate floor);
+	# unpainted = legacy auto apex + blind radius + 3cm gate.
+	var apex := []
+	var radius := BREAST_FALLOFF_R
+	var cny := []
+	var cfoot := 0.0
+	var lm := _breast_landmarks()
+	if lm.is_empty():
+		apex = _breast_apex(smi.mesh)
+		if (apex as Array).size() == 2:
+			cny = [(m2c_skin * ((apex as Array)[0] as Vector3)).y, (m2c_skin * ((apex as Array)[1] as Vector3)).y]
+			cfoot = minf(float(cny[0]), float(cny[1])) - 0.03
+	else:
+		apex = lm["apex"]
+		radius = float(lm["radius"])
+		cny = lm["cny"]
+		cfoot = float(lm["cfoot"])
+	if (apex as Array).size() < 2 or (cny as Array).size() < 2:
+		return
+	var aw := [(smi as Node3D).global_transform * ((apex as Array)[0] as Vector3), (smi as Node3D).global_transform * ((apex as Array)[1] as Vector3)]
+	# Pivot set back/down from the skin apex (chest-wall side): uniform
+	# growth pushes forward/outward instead of climbing. Weights untouched.
+	var ap := [(aw[0] as Vector3) + Vector3(0.0, -BREAST_PIVOT_DOWN, -BREAST_PIVOT_BACK), (aw[1] as Vector3) + Vector3(0.0, -BREAST_PIVOT_DOWN, -BREAST_PIVOT_BACK)]
+	master.set_bone_rest(bi_l, Transform3D(Basis(), chest_w.affine_inverse() * (ap[0] as Vector3)))
+	master.set_bone_rest(bi_r, Transform3D(Basis(), chest_w.affine_inverse() * (ap[1] as Vector3)))
+	var gate_skin := {"m2c": m2c_skin, "foot": cfoot, "ny": cny}
+	_breast_last_gate = gate_skin
+	var cmi := _avatar_cloth_mi()
+	var key := "%d:%d" % [(smi.mesh as ArrayMesh).get_rid().get_id(), (cmi.mesh as ArrayMesh).get_rid().get_id() if cmi != null and cmi.mesh != null else 0]
+	if not _breast_weighted.has(key):
+		_breast_weight_mesh(smi, apex, bi_l, bi_r, radius, gate_skin)
+		if cmi != null and cmi.mesh != null:
+			var cinv: Transform3D = (cmi as Node3D).global_transform.affine_inverse()
+			var m2c_cloth: Transform3D = chest_w.affine_inverse() * (cmi as Node3D).global_transform
+			_breast_weight_mesh(cmi, [cinv * (aw[0] as Vector3), cinv * (aw[1] as Vector3)], bi_l, bi_r, radius, {"m2c": m2c_cloth, "foot": cfoot, "ny": cny})
+		_breast_weighted[key] = true
+	if DisplayServer.get_name() != "headless":
+		for bn in BREAST_BONES:
+			var wb := WiggleBone.new()
+			wb.bone_name = String(bn)
+			wb.properties = BREAST_WIGGLE
+			wb.force = _firm_force(_firm_eff(float(_phys.get(&"BreastFirmness", 1.0))))
+			master.add_child(wb)
+
+
+## Breast sculpt verbs (Physics menu, female only — same cm contract as the
+## face rows: pushed along the authored normals, displayed in mm).
+const BPROJ := &"BreastProjection"
+const BPROJ_STEP := 0.1
+const BPROJ_MIN_CM := 2.0
+const BPROJ_MAX_CM := 3.0
+var _bsculpt := {BPROJ: 0.0}
+var _bsnap := {} # mi name -> {"rid": int, "verts": Array of PackedVector3Array}
+var _bdirty := false
+
+
+func bproj_display() -> String:
+	return "%+dmm" % int(round(float(_bsculpt.get(BPROJ, 0.0)) * 10.0))
+
+
+func adjust_bproj(dir: int) -> void:
+	_bsculpt[BPROJ] = clampf(float(_bsculpt.get(BPROJ, 0.0)) + float(dir) * BPROJ_STEP, -BPROJ_MIN_CM, BPROJ_MAX_CM)
+	_breast_sculpt()
+
+
+func reset_bproj() -> void:
+	_bsculpt[BPROJ] = 0.0
+	_breast_sculpt()
+
+
+## Continuous breast field (mesh-independent chest-frame parameters): nipple
+## centers + radius + gate floor. Painted wins; unpainted falls back to the
+## auto apex (same fallbacks as the weights). {} when unusable or male.
+func _breast_field() -> Dictionary:
+	var lm := _breast_landmarks()
+	if not lm.is_empty():
+		return {"nip": (lm.get("cnip", []) as Array).duplicate(), "radius": float(lm.get("radius", BREAST_FALLOFF_R)), "cfoot": float(lm.get("cfoot", 0.0))}
+	if GENDERS[_gender] != "Female":
+		return {}
+	var smi := _avatar_skin_mi()
+	var master := master_skeleton()
+	if smi == null or smi.mesh == null or master == null:
+		return {}
+	var chest := master.find_bone(BREAST_PARENT)
+	if chest == -1:
+		return {}
+	var m2c: Transform3D = _bone_rest_world(master, chest).affine_inverse() * (smi as Node3D).global_transform
+	var apex := _breast_apex(smi.mesh)
+	if apex.size() < 2:
+		return {}
+	var nl: Vector3 = m2c * (apex[0] as Vector3)
+	var nr: Vector3 = m2c * (apex[1] as Vector3)
+	return {"nip": [nl, nr], "radius": BREAST_FALLOFF_R, "cfoot": minf(nl.y, nr.y) - 0.03}
+
+
+## Breast sculpt (Projection): displaces Skin AND Cloths along the authored
+## normals through the painted field (radial smoothstep about the nearer
+## nipple × vertical gate to the footprint floor — the under-breast stays).
+## Snapshots make live adjusts idempotent (restore-then-push); rebuilds bring
+## fresh meshes so snapshots refresh by RID. Runs at the end of every
+## _sculpt_fused path so face + breast compose.
+func _breast_sculpt() -> void:
+	var skin := _avatar_skin_mi()
+	var cloth := _avatar_cloth_mi()
+	var mis := []
+	for mi in [skin, cloth]:
+		if mi != null and (mi as MeshInstance3D).mesh != null:
+			mis.append(mi)
+			_bsnap_ensure(mi)
+	var val := float(_bsculpt.get(BPROJ, 0.0))
+	if is_zero_approx(val):
+		if _bdirty:
+			for mi in mis:
+				_bsnap_restore(mi)
+			_bdirty = false
+		return
+	if GENDERS[_gender] != "Female":
+		return
+	var field := _breast_field()
+	if field.is_empty() or (field.get("nip", []) as Array).size() < 2:
+		return
+	var master := master_skeleton()
+	if master == null:
+		return
+	var chest := master.find_bone(BREAST_PARENT)
+	if chest == -1:
+		return
+	var chest_w := _bone_rest_world(master, chest)
+	var nip: Array = field["nip"]
+	var r := maxf(float(field["radius"]), 0.01)
+	var r2 := r * r
+	var foot := float(field["cfoot"])
+	var v := val / 100.0
+	for mi in mis:
+		_bsnap_restore(mi) # idempotent base (snapshot predates any push)
+		var mesh := (mi as MeshInstance3D).mesh as ArrayMesh
+		var m2c: Transform3D = chest_w.affine_inverse() * ((mi as MeshInstance3D) as Node3D).global_transform
+		var rebuilt := []
+		for s in mesh.get_surface_count():
+			var a := mesh.surface_get_arrays(s)
+			var mat := mesh.surface_get_material(s)
+			var prim := mesh.surface_get_primitive_type(s)
+			var sname := mesh.surface_get_name(s)
+			var vv: PackedVector3Array = a[Mesh.ARRAY_VERTEX]
+			var nn: PackedVector3Array = a[Mesh.ARRAY_NORMAL]
+			if vv.is_empty() or nn.size() != vv.size():
+				rebuilt.append([a, mat, prim, sname])
+				continue
+			for i in vv.size():
+				var q: Vector3 = m2c * vv[i]
+				var dl: float = q.distance_squared_to(nip[0])
+				var dr: float = q.distance_squared_to(nip[1])
+				var d2: float = minf(dl, dr)
+				if d2 >= r2:
+					continue
+				var nc: Vector3 = nip[0] if dl <= dr else nip[1]
+				var g := 1.0
+				if q.y < nc.y:
+					if q.y <= foot:
+						continue
+					var denom := nc.y - foot
+					if denom > 0.0001:
+						var gt := (q.y - foot) / denom
+						g = gt * gt * (3.0 - 2.0 * gt)
+				var t := 1.0 - sqrt(d2) / r
+				var w: float = t * t * (3.0 - 2.0 * t) * g
+				if w > 0.0:
+					vv[i] = vv[i] + nn[i].normalized() * (v * w)
+			a[Mesh.ARRAY_VERTEX] = vv
+			rebuilt.append([a, mat, prim, sname])
+		mesh.clear_surfaces()
+		for e in rebuilt:
+			var arr: Array = e[0]
+			mesh.add_surface_from_arrays(e[2], arr)
+			var si := mesh.get_surface_count() - 1
+			mesh.surface_set_material(si, e[1])
+			mesh.surface_set_name(si, String(e[3]))
+	_bdirty = true
+
+
+## Snapshot pristine verts per fused MI (refresh on mesh-object change, i.e.
+## every rebuild or face-sculpt rewrite — never mid-adjust).
+func _bsnap_ensure(mi: MeshInstance3D) -> void:
+	var mesh := mi.mesh as ArrayMesh
+	if mesh == null:
+		return
+	var rid := mesh.get_rid().get_id()
+	var e: Dictionary = _bsnap.get(String(mi.name), {})
+	if int(e.get("rid", -1)) == rid:
+		return
+	var vl := []
+	for s in mesh.get_surface_count():
+		vl.append((mesh.surface_get_arrays(s)[Mesh.ARRAY_VERTEX] as PackedVector3Array).duplicate())
+	_bsnap[String(mi.name)] = {"rid": rid, "verts": vl}
+
+
+## Restores snapshot verts (ordered rebuild: materials/names preserved).
+func _bsnap_restore(mi: MeshInstance3D) -> void:
+	var e: Dictionary = _bsnap.get(String(mi.name), {})
+	if e.is_empty():
+		return
+	var mesh := mi.mesh as ArrayMesh
+	if mesh == null:
+		return
+	var vl: Array = e["verts"]
+	if vl.size() != mesh.get_surface_count():
+		return
+	var rebuilt := []
+	for s in mesh.get_surface_count():
+		var a := mesh.surface_get_arrays(s)
+		a[Mesh.ARRAY_VERTEX] = (vl[s] as PackedVector3Array).duplicate()
+		rebuilt.append([a, mesh.surface_get_material(s), mesh.surface_get_primitive_type(s), mesh.surface_get_name(s)])
+	mesh.clear_surfaces()
+	for e2 in rebuilt:
+		var arr2: Array = e2[0]
+		mesh.add_surface_from_arrays(e2[2], arr2)
+		var si2 := mesh.get_surface_count() - 1
+		mesh.surface_set_material(si2, e2[1])
+		mesh.surface_set_name(si2, String(e2[3]))
+
+
+## Absolute bone-pose scale on the fused master (single skeleton). Scale rows
+## accumulate per bone (product); Droop adds a rigid Y offset; Firmness
+## drives the shared wiggle resource live. Missing bones are skipped with
+## one line (chartest pins the set).
 func _apply_physics() -> void:
 	var sk := master_skeleton()
 	if sk == null:
 		return
+	var acc := {} # bone idx -> Vector3 scale product
 	for key in PHYS_KEYS:
 		var spec: Dictionary = PHYS_BONES[key]
 		var v := float(_phys.get(key, 1.0))
 		var axes: Vector3 = spec["axes"]
-		var sc := Vector3(1.0 + (v - 1.0) * axes.x, 1.0 + (v - 1.0) * axes.y, 1.0 + (v - 1.0) * axes.z)
+		if axes == Vector3.ZERO:
+			continue # Sag/Firm: handled below, no scale
 		for bn in spec["bones"]:
 			var bi := sk.find_bone(StringName(bn))
 			if bi == -1:
-				print("[Phys] bone missing: %s" % String(bn))
+				# Breast bones exist on female builds only — silent there.
+				if not (BREAST_BONES as Array).has(StringName(bn)):
+					print("[Phys] bone missing: %s" % String(bn))
 				continue
-			sk.set_bone_pose_scale(bi, sc)
+			var cur: Vector3 = acc.get(bi, Vector3.ONE)
+			acc[bi] = Vector3(cur.x * (1.0 + (v - 1.0) * axes.x), cur.y * (1.0 + (v - 1.0) * axes.y), cur.z * (1.0 + (v - 1.0) * axes.z))
+	for bi in acc.keys():
+		sk.set_bone_pose_scale(bi, acc[bi])
+	# Rigid bones never touched by scale rows keep identity (reset semantics
+	# for the breast block: Width/Depth resets must clear their axis alone —
+	# accumulation from 1.0 defaults handles it, but a bone left over from a
+	# previous build (fresh skeleton each rebuild) starts at identity anyway).
+	# BreastDroop: rigid vertical offset, same on both sides (symmetric).
+	var sag_v := float(_phys.get(&"BreastDroop", 1.0))
+	var sag_off := (1.0 - sag_v) * BREAST_SAG_RANGE
+	for bn in BREAST_BONES:
+		var sbi := sk.find_bone(bn)
+		if sbi == -1:
+			continue
+		sk.set_bone_pose_position(sbi, Vector3(0.0, sag_off, 0.0))
+	# BreastFirmness: stiffness + damping + max_distance on the shared wiggle
+	# resource (live nodes reference it, so they follow; headless has no
+	# nodes but the resource still records the value for the next live
+	# attach). Damping climbs with firmness — that kills the run bounce.
+	var firm_v := _firm_eff(float(_phys.get(&"BreastFirmness", 1.0)))
+	BREAST_WIGGLE.stiffness = clampf(BREAST_FIRM_STIFF * firm_v, 0.05, 1.0)
+	BREAST_WIGGLE.damping = clampf(firm_v - 0.5, 0.1, 0.95)
+	BREAST_WIGGLE.max_distance = clampf(BREAST_FIRM_MAXD / (firm_v * firm_v), 0.01, 0.15)
+	# Output weight on the live nodes (headless has none — attach path sets
+	# it too, so rebuilds and adjusts agree).
+	for ch in sk.get_children():
+		if ch is WiggleBone:
+			(ch as WiggleBone).force = _firm_force(firm_v)
 	# Head stays out of Waist/Hips: bone scale inherits down the chain, so
 	# the neck counter-scales the ancestor XZ product (arms still inherit —
 	# known approximation until arm-local rows exist).

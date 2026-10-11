@@ -713,6 +713,14 @@ static func fuse_avatar(master: Skeleton3D, parts: Array) -> Dictionary:
 					nbad += 1
 			if nbad > 0:
 				print("[Merge] WARN %s: %d bones unmapped (->Root)" % [String(mi.name), nbad])
+			# Vendor parts share the master's bone ORDER under alien names
+			# (UE vs Standard): when the name map mostly fails, fall back to
+			# the index prefix (12/10: appended master bones flipped 65/65
+			# identity to name-map and froze every UE-named garment at Root).
+			if nbad * 2 > bmap.size() and src.get_bone_count() <= master.get_bone_count():
+				for b in bmap.size():
+					bmap[b] = b
+				print("[Merge] %s: index-prefix fallback (%d bones)" % [String(mi.name), bmap.size()])
 		if m.get_blend_shape_count() > 0 and not identity:
 			skipped += 1
 			continue

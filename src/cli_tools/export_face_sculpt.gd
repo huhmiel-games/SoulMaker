@@ -21,6 +21,9 @@ const QUANT := 100000.0 # 0.01mm grid: float dust-proof matching both sides
 
 func _init() -> void:
 	var err := _run()
+	var berr := _run_breast()
+	if err == OK:
+		err = berr
 	quit(0 if err == OK else 1)
 
 
@@ -49,6 +52,9 @@ func _run() -> Error:
 	_check_work_fingerprint(work.get("fingerprint", {}), surfs, head_inv)
 	var n_new := 0
 	for region in wsec:
+		if String(region) == "Breast" or String(region) == "Nipple":
+			print("[FaceSculpt] %s: chest-frame (breast.json owns it, skipped here)" % String(region))
+			continue
 		var rsec: Dictionary = wsec[region]
 		if (rsec.get("points", []) as Array).is_empty():
 			var tris: Array = [] # v1 fallback (tri indices, pre-migration)
@@ -76,6 +82,58 @@ func _run() -> Error:
 	if JsonFile.save_atomic(OUT_PATH, {"version": 2, gender: {"regions": regions}}) != OK:
 		return ERR_FILE_CANT_WRITE
 	print("[FaceSculpt] wrote %s (%s, %d regions, %d repainted)" % [OUT_PATH, gender, regions.size(), n_new])
+	return OK
+
+
+## Breast pass (Female, chest-frame): work Breast/Nipple -> breast.json MERGE
+## (painted regions overwrite, the rest passes through). No-op when the
+## Female section paints nothing (never wipes a hand mask).
+const BREAST_OUT := "res://data/characters/breast.json"
+const BREAST_STATE := ["Breast", "Nipple"]
+
+
+func _run_breast() -> Error:
+	var nude := nude_inst("Female")
+	if nude == null:
+		push_error("[Breast] cannot load nude Female")
+		return ERR_CANT_OPEN
+	var surfs := paintable_surfaces(nude)
+	if surfs.is_empty():
+		push_error("[Breast] no paintable surfaces")
+		return ERR_CANT_OPEN
+	var cw: Variant = chest_world_of(nude)
+	if cw == null:
+		push_error("[Breast] no Chest bone in nude")
+		return ERR_CANT_OPEN
+	var chest_inv: Transform3D = (cw as Transform3D).affine_inverse()
+	var prev: Dictionary = JsonFile.load_object(BREAST_OUT)
+	var psec: Dictionary = (prev.get("Female", {}) as Dictionary).get("regions", {})
+	var regions := {}
+	for region in psec:
+		regions[String(region)] = psec[region]
+	var work: Dictionary = JsonFile.load_object(WORK_PATH)
+	var wsec: Dictionary = work.get("Female", {})
+	var n_new := 0
+	for region in BREAST_STATE:
+		var rsec: Dictionary = wsec.get(region, {})
+		if (rsec.get("points", []) as Array).is_empty():
+			continue
+		var pts := []
+		for p in (rsec["points"] as Array):
+			var pa: Array = p
+			pts.append([float(pa[0]), float(pa[1]), float(pa[2])])
+		regions[region] = {"points": pts, "frame": "chest"}
+		n_new += 1
+		print("[Breast] %s: %d points (painted)" % [region, pts.size()])
+	var out := {"version": 2}
+	for k in prev:
+		var ks := String(k)
+		if ks != "version" and ks != "Female":
+			out[ks] = prev[k]
+	out["Female"] = {"regions": regions}
+	if JsonFile.save_atomic(BREAST_OUT, out) != OK:
+		return ERR_FILE_CANT_WRITE
+	print("[Breast] wrote %s (Female, %d regions, %d repainted)" % [BREAST_OUT, regions.size(), n_new])
 	return OK
 
 
@@ -166,6 +224,19 @@ static func head_world_of(inst: Node) -> Variant:
 		return null
 	var sk := found[0] as Skeleton3D
 	var bi := sk.find_bone(&"Head")
+	if bi == -1:
+		return null
+	return world_of(sk) * sk.get_bone_global_pose(bi)
+
+
+## Bind-pose world transform of the Chest bone (breast-region frame, same
+## walked-locals construction as the head frame).
+static func chest_world_of(inst: Node) -> Variant:
+	var found := inst.find_children("*", "Skeleton3D", true, false)
+	if found.is_empty():
+		return null
+	var sk := found[0] as Skeleton3D
+	var bi := sk.find_bone(&"Chest")
 	if bi == -1:
 		return null
 	return world_of(sk) * sk.get_bone_global_pose(bi)

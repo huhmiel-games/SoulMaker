@@ -12,10 +12,16 @@ extends Node3D
 ##   Middle-drag = orbit, Shift+middle-drag = pan, wheel = dolly (x0.93 / x1.08)
 ##   1..9 = jump to region (first nine), Tab / Shift+Tab = cycle all regions
 ##   G = grow 1 topology ring, T = shrink (drop outer ring)
-##   C = clear region, P = save work file AND export shipped JSON (merge)
-##   V = wireframe on/off, F = reframe camera on the head
+##   C = clear region, P = save work file AND export shipped JSONs (face +
+##   breast merge)
+##   V = wireframe on/off, F = reframe camera on the head (chest for
+##   Breast/Nipple regions)
 ##   Gender button (side panel) = switch Male/Female mesh (auto-saves work,
 ##   no export — shipped only changes on explicit P)
+## Breast/Nipple regions paint the Female chest in the CHEST frame and export
+## to data/characters/breast.json (Female only — skipped on Male); every
+## other region stays Head-frame -> face_sculpt.json (breast regions excluded
+## there, never wipe a hand mask either way).
 ## Diag: every click prints hit/miss + surf/tri; the HUD shows the camera
 ## target, the last pick result and the wireframe state.
 ## Work file: scenes/tests/face_sculpt_work.json (tri pairs, authoring-local).
@@ -33,7 +39,15 @@ const REGIONS: Array[String] = [
 	"Jaw", "Chin", "ChinCleft",
 	"Cheekbones", "Cheeks", "LowerFace",
 	"Forehead", "Ears", "Lobe", "EarTip",
+	"Breast", "Nipple",
 ]
+## Breast regions live in the CHEST frame (stable when the head moves/scales);
+## every other region lives in the HEAD frame. Export splits accordingly:
+## Breast/Nipple -> breast.json (Female only), the rest -> face_sculpt.json.
+const BREAST_REGIONS := {"Breast": true, "Nipple": true}
+## Mirror guards (squared): 5mm face (dense mesh), 15mm chest (coarser mesh).
+const HEAD_MIRROR_GUARD2 := 0.000025
+const CHEST_MIRROR_GUARD2 := 0.000225
 const GENDERS: Array[String] = ["Male", "Female"]
 ## Paint guide per region (button tooltips, condensed from TODO.md).
 const REGION_TIPS := {
@@ -79,11 +93,21 @@ de bouche à l'autre, coins inclus. Les sous-régions
 	"Ears": "Les oreilles.\nPrendre : les 2 pavillons en entier, lobe (bout mou en bas) inclus.\nLe lobe seul se peint à part (région Lobe).",
 	"Lobe": "Le lobe seul.\nPrendre : le bout mou en bas de chaque pavillon.\nSert à allonger le lobe.",
 	"EarTip": "La pointe de l'oreille.\nPrendre : le haut de l'ourlet (hélice), le repli du haut de chaque\npavillon.\nSert à tirer la pointe (elfe).",
+	"Breast": "La poitrine (FEMALE uniquement : bascule en Female).
+Prendre : les 2 monticules en entier, du sternum au flanc,
+du haut jusqu'au sillon en bas. Peindre un côté + X fait
+l'autre. C'est l'empreinte qui règle le diamètre des seins.",
+	"Nipple": "Les tétons (FEMALE uniquement, chevauche Breast).
+Prendre : quelques tris pile sur chaque pointe (symétrique :
+X fait les deux d'un coup). C'est le centre exact qui place
+les bones + le milieu du poids.",
 }
 
 var _surfs := [] # [{mi, verts, idx}] exporter enumeration on the live preview
 var _head_inv := Transform3D.IDENTITY
 var _head_pos := Vector3(0.0, 1.6, 0.1)
+var _chest_inv := Transform3D.IDENTITY # breast-region frame (Chest bone bind)
+var _chest_pos := Vector3(0.0, 1.3, 0.1)
 var _sel := {} # region -> {"set": Dictionary key->ring, "order": Array}
 var _undo := [] # stack of {"region": r, "add": [[si,ti]..]} / {"region": r, "del": [[si,ti,ring]..]}
 var _region := 0
@@ -103,6 +127,7 @@ var _wire := false
 var _wire_mode := 0 # 0 off, 1 edge overlay on skin, 2 full-viewport wireframe
 var _sym := false # mirror picks across the Head-frame x=0 plane
 var _hcen := [] # per surf: Head-frame tri centroids (mirror lookup)
+var _ccen := [] # per surf: Chest-frame tri centroids (breast mirror lookup)
 var _wire_mat: StandardMaterial3D = null
 var _wire_overlays := {} # surf index -> MeshInstance3D (all topology edges)
 var _last_pick := "no click yet"
@@ -174,6 +199,9 @@ func _bind_mesh() -> bool:
 		var ei: PackedInt32Array = ed["idx"]
 		ed["ntris"] = ei.size() / 3 if not ei.is_empty() else ev.size() / 3
 	_head_inv = _live_head_inv(preview)
+	_chest_inv = _live_chest_inv(preview)
+	# Reframe target follows the current region's frame (head vs chest).
+	_target = _chest_pos if BREAST_REGIONS.has(REGIONS[_region]) else _head_pos
 	for r in REGIONS:
 		_sel[r] = {"set": {}, "order": []}
 	_undo.clear()
@@ -188,6 +216,7 @@ func _bind_mesh() -> bool:
 func _rebuild_derived() -> void:
 	_build_pick()
 	_build_hcen()
+	_build_ccen()
 	_build_overlays()
 	_build_wire_overlays()
 	_refresh_all_overlays()
@@ -336,6 +365,60 @@ func _run_painttest() -> void:
 	print("[PaintTest] xgender=%s" % ("ok" if x_ok else "FAIL"))
 	if not x_ok:
 		fails += 1
+	# Chest frame (breast regions): Chest bone resolves on the nude.
+	var chest_hw: Variant = BakeLib.chest_world_of(preview)
+	print("[PaintTest] chest frame %s" % ("ok" if chest_hw != null else "FAIL"))
+	if chest_hw == null:
+		fails += 1
+	else:
+		_chest_inv = (chest_hw as Transform3D).affine_inverse()
+		_build_ccen()
+		# Chest round-trip: tris -> chest points -> match Breast -> same tris.
+		var cok_pts := []
+		for ti in [5, 6, 7]:
+			for kk in _tri_keys_in(0, ti, _chest_inv):
+				var qk: Vector3i = kk
+				cok_pts.append([float(qk.x) / WQUANT, float(qk.y) / WQUANT, float(qk.z) / WQUANT])
+		_match_points("Breast", cok_pts)
+		var cok := {}
+		for t in ((_sel["Breast"] as Dictionary)["order"] as Array):
+			cok["%d:%d" % [int(t[0]), int(t[1])]] = true
+		var cok_ok := cok.has("0:5") and cok.has("0:6") and cok.has("0:7")
+		print("[PaintTest] chestroundtrip=%s" % ("ok" if cok_ok else "FAIL " + str(cok)))
+		if not cok_ok:
+			fails += 1
+		# Chest mirror: an off-center tri mirrors across x=0 (15mm guard).
+		_region = REGIONS.find("Breast")
+		var cm_ok := false
+		var cc: PackedVector3Array = _ccen[0]
+		for ti in cc.size():
+			if absf(cc[ti].x) > 0.02:
+				var mj := _mirror_tri(0, ti)
+				if mj != ti and signf((_ccen[0] as PackedVector3Array)[mj].x) == -signf(cc[ti].x):
+					cm_ok = true
+				break
+		print("[PaintTest] chestmirror=%s" % ("ok" if cm_ok else "FAIL"))
+		if not cm_ok:
+			fails += 1
+		_region = 0
+	# Face export never carries breast regions (chest-frame pollution guard).
+	var btmp := "/tmp/opencode/painttest_breastguard.json"
+	_export_shipped(btmp)
+	var bmg: Dictionary = JsonFile.load_object(btmp)
+	var bsec2: Dictionary = (bmg.get(_gender, {}) as Dictionary).get("regions", {})
+	var bg_ok := not bsec2.has("Breast") and not bsec2.has("Nipple")
+	print("[PaintTest] breastguard=%s" % ("ok" if bg_ok else "FAIL"))
+	if not bg_ok:
+		fails += 1
+	# Breast export skips on Male (Female-only artifact).
+	var stmp := "/tmp/opencode/painttest_breastskip.json"
+	if FileAccess.file_exists(stmp):
+		DirAccess.remove_absolute(stmp)
+	_export_breast(stmp)
+	var sk_ok := not FileAccess.file_exists(stmp)
+	print("[PaintTest] breastskip=%s" % ("ok" if sk_ok else "FAIL"))
+	if not sk_ok:
+		fails += 1
 	print("[PaintTest] %d FAIL" % fails)
 	get_tree().quit(fails)
 
@@ -360,6 +443,32 @@ func _live_head_inv(preview: Node) -> Transform3D:
 	_head_pos = head_world.origin
 	print("[Paint] head target=%s" % str(_target))
 	return head_world.affine_inverse()
+
+
+## Bind-pose Chest frame (breast regions): same walked-locals construction as
+## the head frame. Null-safe: IDENTITY when the preview has no Chest bone.
+func _live_chest_inv(preview: Node) -> Transform3D:
+	var found := preview.find_children("*", "Skeleton3D", true, false)
+	if found.is_empty():
+		return Transform3D.IDENTITY
+	var sk := found[0] as Skeleton3D
+	var bi := sk.find_bone(&"Chest")
+	if bi == -1:
+		return Transform3D.IDENTITY
+	var t := Transform3D.IDENTITY
+	var cur: Node = sk
+	while cur is Node3D:
+		t = (cur as Node3D).transform * t
+		cur = cur.get_parent()
+	var chest_world: Transform3D = t * sk.get_bone_global_pose(bi)
+	_chest_pos = chest_world.origin
+	print("[Paint] chest target=%s" % str(_chest_pos))
+	return chest_world.affine_inverse()
+
+
+## Frame inverse for a region (chest for Breast/Nipple, head otherwise).
+func _frame_inv_for(region: String) -> Transform3D:
+	return _chest_inv if BREAST_REGIONS.has(region) else _head_inv
 
 
 func _build_rig() -> void:
@@ -664,13 +773,37 @@ func _build_hcen() -> void:
 		_hcen.append(cen)
 
 
-## Mirror tri across the Head-frame sagittal plane (nearest centroid to the
-## mirrored point, same surface). Returns ti itself when central/isolated.
+## Chest-frame tri centroids (breast mirror lookup + quantized keys share the
+## same frame). Built alongside _hcen (same cost class, ~12k tris).
+func _build_ccen() -> void:
+	_ccen.clear()
+	for si in _surfs.size():
+		var e: Dictionary = _surfs[si]
+		var verts: PackedVector3Array = e["verts"]
+		var idx: PackedInt32Array = e["idx"]
+		var mi := e["mi"] as Node3D
+		var cen := PackedVector3Array()
+		for ti in int(e["ntris"]):
+			var c := Vector3.ZERO
+			for k in 3:
+				var vi := ti * 3 + k
+				if not idx.is_empty():
+					vi = idx[ti * 3 + k]
+				c += verts[vi]
+			cen.append(_chest_inv * (mi.global_transform * (c / 3.0)))
+		_ccen.append(cen)
+
+
+## Mirror tri across the region frame's sagittal plane (nearest centroid to
+## the mirrored point, same surface). Chest guard is wider (coarser torso
+## mesh). Returns ti itself when central/isolated.
 func _mirror_tri(si: int, ti: int) -> int:
-	var cen: PackedVector3Array = _hcen[si]
+	var breast := BREAST_REGIONS.has(REGIONS[_region])
+	var cen: PackedVector3Array = _ccen[si] if breast else _hcen[si]
+	var guard := CHEST_MIRROR_GUARD2 if breast else HEAD_MIRROR_GUARD2
 	var m := Vector3(-cen[ti].x, cen[ti].y, cen[ti].z)
 	var best := ti
-	var best_d := 0.000025 # 5mm guard: no jump across the face
+	var best_d := guard
 	for cj in cen.size():
 		if cj == ti:
 			continue
@@ -942,7 +1075,9 @@ func _update_hud() -> void:
 	_refresh_region_btns()
 	if _label == null:
 		return
-	_label.text = "gender %s | region %d/%d %s (%d tris) | target %s | last: %s | wire %s sym %s\nL add R del-at-cursor Ctrl+Z undo | Mid orbit Shift+Mid pan wheel zoom | G/T grow/shrink X sym C clear P save+export | V wire F reframe" % [_gender, _region + 1, REGIONS.size(), REGIONS[_region], _tri_count(), str(_target), _last_pick, (["OFF", "WIRE", "FULL"] as Array)[_wire_mode], ("ON" if _sym else "off")]
+	_label.text = "gender %s | region %d/%d %s%s (%d tris) | target %s | last: %s | wire %s sym %s\nL add R del-at-cursor Ctrl+Z undo | Mid orbit Shift+Mid pan wheel zoom | G/T grow/shrink X sym C clear P save+export | V wire F reframe" % [_gender, _region + 1, REGIONS.size(), REGIONS[_region], (" (chest)" if BREAST_REGIONS.has(REGIONS[_region]) else ""), _tri_count(), str(_target), _last_pick, (["OFF", "WIRE", "FULL"] as Array)[_wire_mode], ("ON" if _sym else "off")]
+	if BREAST_REGIONS.has(REGIONS[_region]) and _gender != "Female":
+		_label.text += "\nBreast regions paint on Female — press the Gender button"
 
 
 func _pick(mp: Vector2) -> Array:
@@ -1138,9 +1273,18 @@ func _unhandled_input(event: InputEvent) -> void:
 				_reframe()
 
 
-## Re-anchors the orbit on the Head bone position (authoring frame): escape
-## hatch when panned/orbited into the void.
+## Re-anchors the orbit on the current region's frame (head, or chest for
+## Breast/Nipple): escape hatch when panned/orbited into the void.
 func _reframe() -> void:
+	if BREAST_REGIONS.has(REGIONS[_region]):
+		_target = _chest_pos
+		_dist = 0.55
+		_yaw = 0.0
+		_pitch = -0.05
+		_update_cam()
+		_update_hud()
+		print("[Paint] reframed on chest: %s" % str(_target))
+		return
 	_target = _head_pos
 	_dist = 0.30
 	_yaw = 0.0
@@ -1194,8 +1338,13 @@ static func _qkey(q: Vector3) -> Vector3i:
 	return Vector3i(int(round(q.x * WQUANT)), int(round(q.y * WQUANT)), int(round(q.z * WQUANT)))
 
 
-## Head-frame quantized keys of a tri's 3 verts (save + match share this).
+## Region-frame quantized keys of a tri's 3 verts (save + match share this).
 func _tri_keys(si: int, ti: int) -> Array:
+	return _tri_keys_in(si, ti, _frame_inv_for(REGIONS[_region]))
+
+
+## Same keys in an explicit frame (painttest round-trip pins the frame).
+func _tri_keys_in(si: int, ti: int, inv: Transform3D) -> Array:
 	var e: Dictionary = _surfs[si]
 	var verts: PackedVector3Array = e["verts"]
 	var idx: PackedInt32Array = e["idx"]
@@ -1205,14 +1354,16 @@ func _tri_keys(si: int, ti: int) -> Array:
 		var vi := ti * 3 + k
 		if not idx.is_empty():
 			vi = idx[ti * 3 + k]
-		out.append(_qkey(_head_inv * (mi.global_transform * verts[vi])))
+		out.append(_qkey(inv * (mi.global_transform * verts[vi])))
 	return out
 
 
-## Rebuilds a region selection from Head-frame points: a tri joins iff all 3
-## verts match (exact painted tri, no straddlers). Renumber-proof: only
-## positions matter, never indices.
+## Rebuilds a region selection from region-frame points: a tri joins iff all
+## 3 verts match (exact painted tri, no straddlers). Renumber-proof: only
+## positions matter, never indices. Frame comes from the loaded region (not
+## the current selection — load iterates all regions).
 func _match_points(region: String, points: Array) -> void:
+	var inv := _frame_inv_for(region)
 	var want := {}
 	for p in points:
 		var pa: Array = p
@@ -1222,7 +1373,7 @@ func _match_points(region: String, points: Array) -> void:
 		var e: Dictionary = _surfs[si]
 		var ntris := int(e["ntris"])
 		for ti in ntris:
-			var keys := _tri_keys(si, ti)
+			var keys := _tri_keys_in(si, ti, inv)
 			if want.has(keys[0]) and want.has(keys[1]) and want.has(keys[2]):
 				((_sel[region] as Dictionary)["order"] as Array).append([si, ti])
 				((_sel[region] as Dictionary)["set"] as Dictionary)[_key(si, ti)] = 0
@@ -1275,13 +1426,15 @@ func _check_fingerprint(fp: Dictionary) -> void:
 			print("[Paint] fingerprint ok (renumber-proof)")
 
 
-## Head-frame meter points of a region's selected tris (deduped). Single
-## resolve used by work save AND shipped export (never diverge).
+## Region-frame meter points of a region's selected tris (deduped). Single
+## resolve used by work save AND shipped export (never diverge). Frame comes
+## from the resolved region (save/export iterate all regions).
 func _region_points(region: String) -> Array:
+	var inv := _frame_inv_for(region)
 	var seen := {}
 	var pts := []
 	for t in ((_sel[region] as Dictionary)["order"] as Array):
-		for key in _tri_keys(int(t[0]), int(t[1])):
+		for key in _tri_keys_in(int(t[0]), int(t[1]), inv):
 			var kk: Vector3i = key
 			if seen.has(kk):
 				continue
@@ -1323,11 +1476,14 @@ func _write_work() -> int:
 func _save_work() -> void:
 	if _write_work() == OK:
 		_export_shipped()
+		_export_breast()
 
 
 ## Save+Export: work regions merge into the shipped artifact (unpainted regions
-## kept — never wipes a hand mask). Same resolve as _save_work, so P needs no
-## CLI step; the headless exporter stays for CI/automation.
+## kept — never wipes a hand mask). Breast regions are chest-frame: excluded
+## here (they would pollute the head-frame file), exported to breast.json by
+## _export_breast. Same resolve as _save_work, so P needs no CLI step; the
+## headless exporter stays for CI/automation.
 func _export_shipped(path: String = SHIPPED_PATH) -> void:
 	var prev: Dictionary = JsonFile.load_object(path)
 	var psec: Dictionary = (prev.get(_gender, {}) as Dictionary).get("regions", {})
@@ -1336,6 +1492,8 @@ func _export_shipped(path: String = SHIPPED_PATH) -> void:
 		regions[String(region)] = psec[region]
 	var n_new := 0
 	for region in REGIONS:
+		if BREAST_REGIONS.has(region):
+			continue # chest-frame: breast.json owns these
 		var pts := _region_points(region)
 		if pts.is_empty():
 			continue
@@ -1349,3 +1507,33 @@ func _export_shipped(path: String = SHIPPED_PATH) -> void:
 	out[_gender] = {"regions": regions}
 	var err := JsonFile.save_atomic(path, out)
 	print("[Paint] exported %s %s (%d regions, %d repainted)" % [path, _gender, regions.size(), n_new] + (" OK" if err == OK else (" ERR %d" % err)))
+
+
+## Breast export (chest-frame, Female only): work Breast/Nipple merge into
+## data/characters/breast.json, everything else passes through. Skipped on
+## Male (the Female section only changes on an explicit P while Female).
+const BREAST_PATH := "res://data/characters/breast.json"
+func _export_breast(path: String = BREAST_PATH) -> void:
+	if _gender != "Female":
+		print("[Paint] breast export skipped (paint on Female)")
+		return
+	var prev: Dictionary = JsonFile.load_object(path)
+	var psec: Dictionary = (prev.get("Female", {}) as Dictionary).get("regions", {})
+	var regions := {}
+	for region in psec:
+		regions[String(region)] = psec[region]
+	var n_new := 0
+	for region in ["Breast", "Nipple"]:
+		var pts := _region_points(region)
+		if pts.is_empty():
+			continue
+		regions[region] = {"points": pts, "frame": "chest"}
+		n_new += 1
+	var out := {"version": 2}
+	for k in prev:
+		var ks := String(k)
+		if ks != "version" and ks != "Female":
+			out[ks] = prev[k]
+	out["Female"] = {"regions": regions}
+	var err := JsonFile.save_atomic(path, out)
+	print("[Paint] exported %s Female (%d regions, %d repainted)" % [path, regions.size(), n_new] + (" OK" if err == OK else (" ERR %d" % err)))
