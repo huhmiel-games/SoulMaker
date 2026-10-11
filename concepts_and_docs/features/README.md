@@ -7,7 +7,7 @@
 | File | Domain |
 |---|---|
 | `01_player_combat.md` | Controller, camera, dodge/stamina, attacks, game feel (hitstop, shake, VFX, blade rebound, swept hitboxes), haptics |
-| `02_character.md` | Rig/skeleton, retargeting, animation library, attachments, morphs, 2D faces (atlas, talk loop, blink), config JSON, per-instance duplication, character perf |
+| `02_character.md` | Rig/skeleton, retargeting, animation library, attachments, morphs, geometric face sculpt + 3D part meshes, config JSON, per-instance duplication, character perf |
 | `03_progression.md` | 8 attributes + derived, cost curve, currency, bonfire, estus, starting template, death + soul orb, display overrides, respec/NG+ |
 | `04_inventory.md` | Slots, equipment on rig, quickbar, consumables, key items, drop tables, loot, min requirements, shops |
 | `05_enemies.md` | Archetypes, bounded morphs, AI (state machine, telegraphs, poise), data-driven patterns, bosses (phases/state machine), miniboss/gank |

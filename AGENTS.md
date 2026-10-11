@@ -30,7 +30,7 @@
 
 ## Folder structure
 
-- `concepts_and_docs/` — design docs (English); `features.md` is the master list.
+- `concepts_and_docs/` — design docs (English); `features.md` is the master list. Exception: `idea.txt` is the historical first doc, superseded by the structured docs — kept for history, never cited as reference.
 - `data/` — all game content as JSON (data-driven):
   - `schema/` world/character/prefab schemas (versioned), `catalog/` starter manifest + its schema, `items/` item instances, `characters/` base humanoid + morphs, `enemies/` definitions, `worlds/` world compositions, `localization/` `en` key table (later).
 - `src/` — GDScript organized by concept: `autoloads/`, `runtime/` (combat, bonfire, camera, streaming), `ingame_editors/` (maker in-game), `ui/`, `dataio/` (JSON load/validate), `cli_tools/` (headless: `import_check.gd`, `build_pck`, data validation), `editor_tools/` (`@tool` Godot-editor helpers, never in game).

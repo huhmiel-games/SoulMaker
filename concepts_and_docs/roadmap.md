@@ -112,7 +112,7 @@ A game that is not a game: a base that lets anyone create their own souls-like w
 - **Clothing layer** : outfit texture sets on the base UV layout (painted, fitted — cosmetic 0 stats/0 weight; picked at creation + **swappable in-game**, `02`/`04`)
 - **Armor overlay foundation** : the 4 armor sockets (helmet/chest armor/gauntlets/leggings) on the rig + shell-clearance fit rule vs max-morph body (armor *content* ships with the starter catalog, P10; base rig ready in P4)
 - Morphs as bounded blend shapes (generous but strict bounds, linked slider groups)
-- 2D face layers + bounded morphs (ADR-007) — the face is texture (ADR-019 look), geometry only for shape
+- Geometric face sculpt: bounded rows on painted regions + 3D part meshes (hair/brows/eyes/lashes/beard) with socket follow (decided 10/10/2026 — the 2D-layer/atlas plan is dropped; decals possible later)
 - **Face light treatment gray-box** (ADR-019, 🟡 settled in the P4 design pass)
 - **Character config JSON** exportable/importable + validation (graceful fallback on missing assets)
 - Same character usable as player **and** as NPC (config = source of truth)

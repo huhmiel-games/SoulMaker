@@ -42,7 +42,7 @@
 ## Dialogue graph (line / choice / conditional / exit)
 
 **Goal** — the first-class conversation editor, easy for non-developers.
-**Behaviors** — minimal node grammar: `line` (speaker, text), `choice` (options), `conditional` (branch on conditions), `exit`; `next`/`goto` links; choices with conditions (flag/item/boss-defeated); effects attachable to node entry/exit (set_flag, give_item...); full split dialogue/nodes JSON schema; NPC speech = **text only** (no voice, no lip-sync — resolved 13/09/2026): the `line` text carries the dialogue, the NPC plays a generic talk loop while a line is shown (face pose budget ~5-8 @ 12fps, unchanged — no visemes needed).
+**Behaviors** — minimal node grammar: `line` (speaker, text), `choice` (options), `conditional` (branch on conditions), `exit`; `next`/`goto` links; choices with conditions (flag/item/boss-defeated); effects attachable to node entry/exit (set_flag, give_item...); full split dialogue/nodes JSON schema; NPC speech = **text only** (no voice, no lip-sync — resolved 13/09/2026): the `line` text carries the dialogue, the NPC face stays still while a line is shown (talk loop dropped 10/10/2026 — no visemes needed).
 **Data / JSON** — dialogue resource + node graph, versioned.
 **Interactions** — NPCs (`08`), face animation (`02`), key items (`04`), shop (`08`).
 **Edge cases** — broken goto → validation error, orphan node, dialogue loop (goto back).

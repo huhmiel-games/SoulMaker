@@ -167,8 +167,9 @@ Legend per column: *Phase* refers to the roadmap phase (P0-P13); *Ref* points to
 | Attachment slots (hair, ears, equipment) | 🔒 | P4 | roadmap P4 | |
 | Clothing layer (painted fitted textures, 0 stats — creation + swappable in-game) | 🔒 | P4 | features/02, features/04 | Base-skin layering: clothing under every armor overlay |
 | Armor as 3D overlay (helmet/chest armor/gauntlets/leggings shells on rig sockets) | 🔒 | P8 | features/02, features/04 | Fit rule: starter shares base morphs, community = clearance vs max-morph (@ intake) |
-| Bounded morphs / blend shapes, linked sliders | 🔒 | P4 | ADR-007 | |
-| 2D face layers + blend shapes | 🔒 | P4 | idea.txt, features/02 | 5 overlay layers max (hair, brows, beard, scar, paint…) |
+| Bounded morphs / blend shapes, linked sliders | 🔒 | P4 | ADR-007 | Body/physics stay parametric; the face uses sculpt rows (see face row below), not asset blend shapes |
+| Geometric face sculpt (rows on painted regions + 3D part meshes with follow) | 🔒 | P4 | features/02 | Decided 10/10/2026 after conclusive in-editor modeling: replaces the 2D-layer plan (dropped — no atlas, no talk loop, no visemes; speech text-only, still face) |
+| Face decals (scars, freckles…) | 🟡 | P4 | features/02 | Possible detail layer, not scheduled |
 | NPC = base form + a few morphs (5 variants) | 🔒 | P4/P9 | features/08 | Same base as player |
 | Character perf budget (≤10 unique, hordes via MultiMesh) | 🔒 | P13 | features/02 | Monsters: low-poly + shared material |
 | Same base for player / NPC / enemy | 🔒 | P4 | roadmap P4 | Config = source of truth |
@@ -253,7 +254,7 @@ Legend per column: *Phase* refers to the roadmap phase (P0-P13); *Ref* points to
 | Cel/toon look mandatory on all 3D (base toon shader: `diffuse_toon` + shadow ramps) | 🔒 | P1 | ADR-019 | World, characters, enemies, effects; UI/screens stay standard |
 | Real shadow maps (entities + environment) — no blob shadows | 🔒 | P2 | ADR-019 | Low-end budget via quality tiers (§12); re-confirmed on the shadow bench |
 | Imposed palette + texture-mapping rules (front-unfold face UV, two-texture split) | 🔒 | P1 | ADR-019, features/10 | Applied at intake, both streams |
-| Anime face light treatment (SDF shadow, Genshin-like) | 🟡 | P4 | ADR-019, features/02 | Keeps the 2D face readable under cel light — ships with the P4 face system |
+| Anime face light treatment (SDF shadow, Genshin-like) | 🟡 | P4 | ADR-019, features/02 | Keeps the sculpted face readable under cel light — ships with the P4 face system |
 | Ink outlines (post-process / inverted hull) | 🔵 | — | ADR-019 | Excluded in V1 — fragile to get right |
 
 ## 14. Vault (Post-V1, non-priority)
@@ -302,7 +303,7 @@ Captured in `roadmap.md` → Open questions; mirrored here as status ❔/🟡 ro
 - ~~Two-handed grip scaling modifier (🟡 `§1` — P3 design pass)~~ — resolved: STR ×1.5 (min-req + scaling); stamina unchanged.
 - ~~Temporary buff/debuff duration bounds (🟡 `§3` — P7)~~ — **resolved 13/09/2026**: duration is a per-object config field, no global preset list; `has_buff` excluded from the V1 `08` condition grammar.
 
-- ~~NPC speech style (dubbed vs text, 🟡 §5/§13)~~ — **resolved 13/09/2026**: text only — no voice, no lip-sync; face keeps the generic talk loop (~5-8 poses @ 12fps), visemes dropped.
+- ~~NPC speech style (dubbed vs text, 🟡 §5/§13)~~ — **resolved 13/09/2026**: text only — no voice, no lip-sync; ~~face keeps the generic talk loop (~5-8 poses @ 12fps)~~ superseded 10/10/2026: still face, visemes dropped.
 - ~~Gamepad mapping detail (preset rows vs per-button, 🟡 §11/§16)~~ — **resolved 13/09/2026**: gamepad preset rows + keyboard per-key (see §11 default table).
 - ~~Elemental balance / resist philosophy (🟡 §1/§3)~~ — **resolved 13/09/2026**: armor-dominant 7-pool + per-type stat baseline + accessory `resist-push` additive; rosette 4-band tags ×0.5…×1.25, boss band ×0.85–×1.15.
 - ~~Buff icon footprint (🟡 §11/§16)~~ — **resolved 13/09/2026**: minimal catalog strip, 4 visible + "+N", depleting ring = time left; status meters separate.

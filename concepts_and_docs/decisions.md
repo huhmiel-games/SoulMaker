@@ -210,7 +210,7 @@
 - **Real shadow maps** on entities and environment — **no blob shadows** (the low-end blob-shadow hypothesis of `idea.txt` is dropped). The low-end budget is served by the existing **quality tiers** (ADR-002: render scale, per-zone light cap, auto-drop of heavy features), re-confirmed against the P2 bench (skinning + shadows).
 - **No ink outlines in V1** — post-process/inverted-hull outlines are fragile to get right; deferred to the vault. The look carries on ramps + palette.
 - **Imposed palette + texture-mapping rules** (front-unfold face UV, two-texture split) at intake for both streams — the cohesion lever (amends ADR-010/017's "style/palette" checklist item).
-- The **anime face light treatment** (SDF shadow, Genshin-like — keeps the 2D face readable under cel light) is 🟡, settled in the **P4** design pass (with the 2D face system — the treatment only matters once the face exists).
+- The **anime face light treatment** (SDF shadow, Genshin-like — keeps the sculpted face readable under cel light) is 🟡, settled in the **P4** design pass (with the geometric face system).
 - **Correction** : the "ADR fidelity" reference in `10_catalog.md` is now **ADR-019**.
 
 **History (trace)** : intra-discussion 13/09/2026 — user decisions: cel/toon mandatory on 3D only (UI standard); real shadow maps (curbing the early blob-shadow idea); `diffuse_toon` + ramps, **no outlines** (hard to render correctly).

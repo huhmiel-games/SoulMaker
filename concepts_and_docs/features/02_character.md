@@ -35,7 +35,18 @@
 **Open questions** — none major.
 **Sources** — idea.txt 122-164, 168-172, 186-192, 581-587, 461-466.
 
-## 2D face layers + atlas
+## Geometric face sculpt (decided 10/10/2026 — replaces the 2D-layer plan below)
+
+**Goal** — the anime face: clean, controlled, expressive via *geometry* (the texture-face plan was dropped after conclusive in-editor modeling results).
+**Behaviors** — rigless parametric sculpt: bounded rows drive procedural vertex displacement on hand-painted skin regions (nose, mouth, eyelids, brows, jaw, chin, cheeks, forehead, ears); separate 3D part meshes (eyebrows, eyes, eyelashes, hair, beard) mount on the head master and follow their socket (rigid per-side transforms + nearest-skin glue, rest gap preserved). No texture swapping, no atlas, no talk loop.
+**Parameters / bounds** — per-row amplitude caps + transition-band/cliff bars; regions versioned JSON (`data/characters/face_sculpt.json`).
+**Data / JSON** — face config: sculpt row values + part style ids + colors.
+**Interactions** — `13_presentation` (cutscene close-ups use this), ADR-019 (face light treatment keeps the sculpted face readable under cel light).
+**Edge cases** — mouth invisible at gameplay distance (helmet is the acceptable escape).
+**Open questions** — face decals (scars, freckles…) as a later detail layer — possible, not scheduled.
+**Sources** — WORKLOG face thread (09-10/10/2026).
+
+## 2D face layers + atlas (DROPPED 10/10/2026 — kept for history)
 
 **Goal** — the anime face: clean, controlled, expressive via *texture* not geometry.
 **Behaviors** — full rigless face; front-unfold UV (VRM-style) mandated from import; base skin + eyes + brows + mouth + accessories in one atlas; parts as quads or swapped textures; runtime shader does UV-offset sampling with **snapped frames** (floor), talk ≈ 5-8 poses at 12fps; eyes/brows/mouth animate via AnimationPlayer track on the shader param.
@@ -46,7 +57,8 @@
 **Open questions** — atlas packing (face gets 40-50% texel space).
 **Sources** — idea.txt 12-52, 425-462, 797-918, 995-1019.
 
-**Frontier decision** — Form vs Detail: **geometry (blend shapes) for shape**, **texture for color/detail**; all-texture morphs rejected. Face = 2 layers: form (hierarchical morphs skull/jaw/eyes/nose/mouth) + detail (composited overlays). No visemes: speech is text-only, the mouth animates a generic talk loop (`08`, resolved 13/09/2026). Sources 905-915, 849-877.
+**Frontier decision (SUPERSEDED 10/10/2026)** — Form vs Detail: **geometry (blend shapes) for shape**, **texture for color/detail**; all-texture morphs rejected. Face = 2 layers: form (hierarchical morphs skull/jaw/eyes/nose/mouth) + detail (composited overlays). No visemes: speech is text-only, the mouth animates a generic talk loop (`08`, resolved 13/09/2026). Sources 905-915, 849-877.
+**Current decision (10/10/2026)** — Face = geometric sculpt only (section above): the 2-layer form/detail split and the talk loop are dropped with the texture plan. Speech stays text-only with a still face.
 
 ## Texture & material strategy
 
@@ -61,7 +73,7 @@
 
 ## Character config JSON (exportable)
 
-**Goal** — a character is a **declarative config** (morphs, paint layers, attachments, talk poses, blink randomizer) that shares/replays across worlds and devices.
+**Goal** — a character is a **declarative config** (sculpt rows, face parts, attachments) that shares/replays across worlds and devices.
 **Behaviors** — versioned; graceful fallback on missing assets; importable/exportable pack player-to-player; same config powers player, NPC, enemy.
 **Parameters / bounds** — strict validation at import (ADR-009).
 **Data / JSON** — full config schema (`data/schema/character_v0.1.json`, fields above), versioned.
@@ -120,7 +132,7 @@
 **Parameters / bounds** — shell clearance minimum vs the **max-morph** body (fit rule below); triangle/texture bounds per catalog category (`10_catalog`); max 4 armor overlays per character.
 **Data / JSON** — armor items = catalog `equipment` meshes referenced by the character config `attachments` (`data/schema/character_v0.1.json`) or by the inventory slots at runtime; stats/weight in `04`.
 **Interactions** — sockets (below), clothing layer (under everything), `04` equipment slots + equip load, `10_catalog` bounds, `02` perf budget.
-**Edge cases** — armor+clothes clipping at extreme morphs (starter armor preserves topology → no clip; community armor forced-clearance → tiny gaps acceptable), helmet hides the 2D face (the accepted escape, ADR-019).
+**Edge cases** — armor+clothes clipping at extreme morphs (starter armor preserves topology → no clip; community armor forced-clearance → tiny gaps acceptable), helmet hides the sculpted face (the accepted escape, ADR-019).
 **Fit rule (morphs)** — **starter-catalog armor is derived from the base mesh topology** → it shares the relevant morph targets and deforms with the body; **community armor is validated at intake as a shell fitted to the median body with a minimum clearance against the max-morph mesh** (fits every bounded morph; a small gap on extreme sliders is accepted).
 **Open questions** — none.
 **Sources** — idea.txt 1513-1517, 883-899 (sockets), ADR-012.

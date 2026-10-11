@@ -47,7 +47,7 @@
 ## Character editor (player / NPC / enemy, shared base)
 
 **Goal** — the part-mixer: creators assemble from catalogs, never model.
-**Behaviors** — 3D preview; base template; attachment slots (hair, ears, equipment); **clothing slot (outfit texture set — painted layer, `02`/`04`); armor overlay preview** (4 sockets shown on the rig; armor is an in-game item, not set here — P8); bounded morph sliders (linked groups); 2D face layers + palette; preset gallery; **exportable character config** (JSON) with graceful fallback (`02`); same base for player/NPC/enemy; NPC binds a dialogue, enemy binds behavior pattern + drops (`04`/`05`).
+**Behaviors** — 3D preview; base template; attachment slots (hair, ears, equipment); **clothing slot (outfit texture set — painted layer, `02`/`04`); armor overlay preview** (4 sockets shown on the rig; armor is an in-game item, not set here — P8); bounded morph sliders (linked groups); geometric face sculpt + palette; preset gallery; **exportable character config** (JSON) with graceful fallback (`02`); same base for player/NPC/enemy; NPC binds a dialogue, enemy binds behavior pattern + drops (`04`/`05`).
 **Data / JSON** — character config, NPC config, enemy config (shared schema `data/schema/character_v0.1.json`).
 **Interactions** — `02` full character spec, `03` starting template, New game flow.
 **Sources** — idea.txt 883-935, 525-557; roadmap P4.

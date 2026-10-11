@@ -53,7 +53,7 @@
 ## Dialogue presentation (face + text)
 
 **Goal** — NPC talk is a face-visible moment (speech resolved 13/09/2026).
-**Behaviors** — **text-only speech** (no voice, no lip-sync): the dialogue box shows the `line` text, the NPC plays the generic talk loop (bounded ~5-8 talk poses @ 12fps, `02`).
+**Behaviors** — **text-only speech** (no voice, no lip-sync): the dialogue box shows the `line` text, the NPC face stays still (talk loop dropped 10/10/2026 with the texture-face plan, `02`).
 **Interactions** — `02` face anim, `08` dialogue.
 **Open questions** — none (speech resolved 13/09/2026: text only).
 **Sources** — idea.txt 72, 470, 797-811.
