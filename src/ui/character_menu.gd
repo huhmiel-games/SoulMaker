@@ -3,12 +3,13 @@ extends GenericMenu
 
 ## Left-panel menu of the character editor (swapped in place so the
 ## mannequin stays dressed): root = Gender value row + Outfits/Outfits Colors/
-## Physics/Hair/Eyebrows/Eyes/Beard/Face/Skin submenus + Back to hub; outfit level = one value
+## Physics/Face/Skin submenus + Back to hub; outfit level = one value
 ## row per slot; outfit-colors level = one color entry per outfit slot;
-## physics level = one value row per morph slider; hair/eyebrows/eyes/beard
-## levels = style + color; face hub = 7 submenus (Global = Width/Length head
-## multipliers, Nose/Mouth/Eyes/Jaw/Cheeks/Forehead = sculpt rows on
-## SCULPT_SPEC.menu, mm); skin level = color only (room for more).
+## physics level = one value row per morph slider; face hub = sculpt subs
+## (Global = Width/Length head multipliers, Nose/Mouth/Eyes/Eyebrows/Jaw/
+## Cheeks/Forehead = sculpt rows on SCULPT_SPEC.menu, mm) + part subs
+## (Hair/Beard = style + color, Eyes/Eyebrows head theirs); skin level =
+## color only (room for more).
 ## (menu grammar, no B). Value rows cycle live on L/R (tab_prev/tab_next)
 ## and reset on A/E; navigation is explicit rows only (B is inert in menus,
 ## same as MapMenu). The menu's own HUD is hidden (it would squash into the
@@ -40,20 +41,27 @@ const LEVEL_FACE_EARS := 17
 
 ## Face hub submenus (label + sculpt-spec group; global = FACE_KEYS Width/
 ## Length, the rest filter SCULPT_KEYS on spec.menu — a new spec row lands in
-## its submenu with no menu change). Eyes/Cheeks/Forehead hold Back only
-## until their rows are authored (same room-for-more as Skin).
+## its submenu with no menu change). Eyes/Eyebrows head their part Style +
+## Color above their sculpt rows (moved in from the old standalone levels).
 const FACE_SUBS := [
 	{"level": LEVEL_FACE_GLOBAL, "label": "Global >", "group": "global"},
 	{"level": LEVEL_FACE_NOSE, "label": "Nose >", "group": "nose"},
 	{"level": LEVEL_FACE_MOUTH, "label": "Mouth >", "group": "mouth"},
 	{"level": LEVEL_FACE_EYES, "label": "Eyes >", "group": "eyes"},
+	{"level": LEVEL_EYEBROWS, "label": "Eyebrows >", "group": "eyebrows"},
 	{"level": LEVEL_FACE_JAW, "label": "Jaw & Chin >", "group": "jaw"},
 	{"level": LEVEL_FACE_CHEEKS, "label": "Cheeks >", "group": "cheeks"},
 	{"level": LEVEL_FACE_FOREHEAD, "label": "Forehead >", "group": "forehead"},
 	{"level": LEVEL_FACE_EARS, "label": "Ears >", "group": "ears"},
 ]
 
-var _level := LEVEL_ROOT # 0 root, 1 outfits, 2 outfit colors, 3 physics, 4 hair, 5 brows, 6 skin, 7 eyes, 8 beard, 9 face hub, 10-17 face subs
+## Part subs under the Face hub (style + color only, own levels).
+const FACE_PARTS := [
+	{"level": LEVEL_HAIR, "label": "Hair >"},
+	{"level": LEVEL_BEARD, "label": "Beard >"},
+]
+
+var _level := LEVEL_ROOT # 0 root, 1 outfits, 2 outfit colors, 3 physics, 4 hair, 5 brows, 6 skin, 7 eyes, 8 beard, 9 face hub, 10-17 face subs (4/5/7/8 live under the hub)
 var _host: CharacterEditor = null
 ## Cursor memory (09/10): level -> cursor, restored on Back. Entering a level
 ## always starts at the top; Back returns to the previously chosen entry
@@ -113,9 +121,10 @@ func _menu_title() -> String:
 	return "CHARACTER"
 
 
-## Face hub + submenus share the close-up (whole face needs it).
+## Face hub + subs + head-part levels share the close-up (whole face needs
+## it) and the idle pause, and Back from any of them lands on the hub.
 static func is_face_level(level: int) -> bool:
-	return level == LEVEL_FACE or level == LEVEL_FACE_GLOBAL or level == LEVEL_FACE_NOSE or level == LEVEL_FACE_MOUTH or level == LEVEL_FACE_EYES or level == LEVEL_FACE_JAW or level == LEVEL_FACE_CHEEKS or level == LEVEL_FACE_FOREHEAD or level == LEVEL_FACE_EARS
+	return level == LEVEL_FACE or level == LEVEL_FACE_GLOBAL or level == LEVEL_FACE_NOSE or level == LEVEL_FACE_MOUTH or level == LEVEL_FACE_EYES or level == LEVEL_FACE_JAW or level == LEVEL_FACE_CHEEKS or level == LEVEL_FACE_FOREHEAD or level == LEVEL_FACE_EARS or level == LEVEL_HAIR or level == LEVEL_EYEBROWS or level == LEVEL_EYES or level == LEVEL_BEARD
 
 
 func _menu_hint() -> String:
@@ -166,27 +175,9 @@ func _load_entries() -> Array:
 			{"label": "Color", "call": _host.open_color.bind(&"Hair")},
 			{"label": "[ ← Back ]", "call": _pop},
 		]
-	if _level == LEVEL_EYEBROWS:
-		return [
-			{"label": "Style", "kind": "value",
-				"get": _host.eyebrow_display,
-				"adjust": _host.adjust_eyebrow,
-				"reset": _host.reset_eyebrow},
-			{"label": "Color", "call": _host.open_color.bind(&"Eyebrows")},
-			{"label": "[ ← Back ]", "call": _pop},
-		]
 	if _level == LEVEL_SKIN:
 		return [
 			{"label": "Color", "call": _host.open_color.bind(&"Skin")},
-			{"label": "[ ← Back ]", "call": _pop},
-		]
-	if _level == LEVEL_EYES:
-		return [
-			{"label": "Style", "kind": "value",
-				"get": _host.eye_display,
-				"adjust": _host.adjust_eye,
-				"reset": _host.reset_eye},
-			{"label": "Color", "call": _host.open_color.bind(&"Eyes")},
 			{"label": "[ ← Back ]", "call": _pop},
 		]
 	if _level == LEVEL_BEARD:
@@ -202,8 +193,14 @@ func _load_entries() -> Array:
 		var fout := []
 		for sub in FACE_SUBS:
 			fout.append({"label": String(sub["label"]), "call": _push.bind(int(sub["level"]))})
+		for part in FACE_PARTS:
+			fout.append({"label": String(part["label"]), "call": _push.bind(int(part["level"]))})
 		fout.append({"label": "[ ← Back ]", "call": _pop})
 		return fout
+	if _level == LEVEL_EYES:
+		return _face_rows("eyes")
+	if _level == LEVEL_EYEBROWS:
+		return _face_rows("eyebrows")
 	for sub in FACE_SUBS:
 		if _level == int(sub["level"]):
 			return _face_rows(String(sub["group"]))
@@ -215,20 +212,39 @@ func _load_entries() -> Array:
 		{"label": "Outfits >", "call": _push.bind(LEVEL_OUTFITS)},
 		{"label": "Outfits Colors >", "call": _push.bind(LEVEL_COLORS)},
 		{"label": "Physics >", "call": _push.bind(LEVEL_PHYSICS)},
-		{"label": "Hair >", "call": _push.bind(LEVEL_HAIR)},
-		{"label": "Eyebrows >", "call": _push.bind(LEVEL_EYEBROWS)},
-		{"label": "Eyes >", "call": _push.bind(LEVEL_EYES)},
-		{"label": "Beard >", "call": _push.bind(LEVEL_BEARD)},
 		{"label": "Face >", "call": _push.bind(LEVEL_FACE)},
 		{"label": "Skin >", "call": _push.bind(LEVEL_SKIN)},
 		{"label": "[ ← Back ]", "open": HUB_SCENE},
 	]
 
 
-## Rows of one face submenu: Global = FACE_KEYS (head multipliers), the rest =
-## SCULPT_KEYS filtered on spec.menu. Back closes every level.
+## Style + Color rows heading the Eyes/Eyebrows subs (absorbed from the old
+## standalone levels when everything head-related grouped under Face).
+func _part_head(group: String) -> Array:
+	if group == "eyes":
+		return [
+			{"label": "Style", "kind": "value",
+				"get": _host.eye_display,
+				"adjust": _host.adjust_eye,
+				"reset": _host.reset_eye},
+			{"label": "Color", "call": _host.open_color.bind(&"Eyes")},
+		]
+	if group == "eyebrows":
+		return [
+			{"label": "Style", "kind": "value",
+				"get": _host.eyebrow_display,
+				"adjust": _host.adjust_eyebrow,
+				"reset": _host.reset_eyebrow},
+			{"label": "Color", "call": _host.open_color.bind(&"Eyebrows")},
+		]
+	return []
+
+
+## Rows of one face submenu: Global = FACE_KEYS (head multipliers), Eyes /
+## Eyebrows = part Style + Color then sculpt rows, the rest = SCULPT_KEYS
+## filtered on spec.menu. Back closes every level.
 func _face_rows(group: String) -> Array:
-	var fout := []
+	var fout := _part_head(group)
 	if group == "global":
 		for key in CharacterAvatar.FACE_KEYS:
 			var k := key
