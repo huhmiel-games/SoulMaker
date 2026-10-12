@@ -535,6 +535,18 @@ func reset_bangle() -> void:
 	_avatar.reset_bangle()
 
 
+func bcurve_display() -> String:
+	return _avatar.bcurve_display()
+
+
+func adjust_bcurve(dir: int) -> void:
+	_avatar.adjust_bcurve(dir)
+
+
+func reset_bcurve() -> void:
+	_avatar.reset_bcurve()
+
+
 ## Avatar data access for the probe/overlay/capture tools + chartest.
 func _avatar_skeleton() -> Skeleton3D:
 	return _avatar.master_skeleton()
@@ -1467,8 +1479,81 @@ func _run_headless_test() -> void:
 	fails += _expect("bangle mirrored", absf(rad_to_deg(eul.y) - 10.0) < 0.01 and absf(rad_to_deg(eur.y) + 10.0) < 0.01)
 	reset_bangle()
 	fails += _expect("bangle reset", bangle_display() == "+0°" and fsk3.get_bone_pose_rotation(fbl3).is_equal_approx(Quaternion.IDENTITY))
+	# BreastCurve: display/clamp/reset in absolute mm.
+	reset_bproj()
+	reset_bcurve()
+	fails += _expect("bcurve display", bcurve_display() == "+0mm")
+	adjust_bcurve(10)
+	fails += _expect("bcurve plus", bcurve_display() == "+10mm")
+	adjust_bcurve(50)
+	fails += _expect("bcurve clamp", bcurve_display() == "+%dmm" % int(round(CharacterAvatar.BCURVE_MAX_CM * 10.0)))
+	reset_bcurve()
+	fails += _expect("bcurve reset", bcurve_display() == "+0mm")
+	var lm5 := _avatar._breast_landmarks()
+	var cnip5: Array = lm5.get("cnip", [])
+	var cny5: Array = lm5.get("cny", [0.0, 0.0])
+	var rad5 := float(lm5.get("radius", 0.11))
+	var foot5 := float(lm5.get("cfoot", 0.0))
+	var gate5 := _avatar._breast_last_gate
+	var m2c5: Transform3D = gate5.get("m2c", Transform3D.IDENTITY)
+	var gsmi5 := _avatar_skin_mi()
+	if cnip5.size() == 2 and gsmi5 != null and gsmi5.mesh != null:
+		var smesh5 := gsmi5.mesh as ArrayMesh
+		var mid_best := [-1, -1, 1e9]
+		var low_best := [-1, -1, 1e9]
+		var tip_best := [-1, -1, 1e9]
+		var high_best := [-1, -1, 1e9]
+		for ssi in smesh5.get_surface_count():
+			var svv: PackedVector3Array = smesh5.surface_get_arrays(ssi)[Mesh.ARRAY_VERTEX]
+			for vvi in svv.size():
+				var qq: Vector3 = m2c5 * svv[vvi]
+				var dd: float = minf(qq.distance_to(cnip5[0]), qq.distance_to(cnip5[1]))
+				var ny: float = float(cny5[0] if qq.x < 0.0 else cny5[1])
+				if qq.y > ny + 0.055 and dd > 0.3 * rad5 and dd < 0.7 * rad5 and absf(dd - 0.5 * rad5) < float(mid_best[2]):
+					mid_best = [ssi, vvi, absf(dd - 0.5 * rad5)]
+				if qq.y > ny + 0.002 and dd < float(tip_best[2]):
+					tip_best = [ssi, vvi, dd]
+				if qq.y > ny + 0.01 and dd >= rad5 and dd < 1.3 * rad5 and absf(dd - 1.15 * rad5) < float(high_best[2]):
+					high_best = [ssi, vvi, absf(dd - 1.15 * rad5)]
+				if qq.y > foot5 + 0.005 and qq.y < ny - 0.005 and dd < 0.8 * rad5 and absf(dd - 0.5 * rad5) < float(low_best[2]):
+					low_best = [ssi, vvi, absf(dd - 0.5 * rad5)]
+		if int(mid_best[0]) >= 0 and int(low_best[0]) >= 0 and int(tip_best[0]) >= 0 and int(high_best[0]) >= 0:
+			var pre5 := []
+			var nrm5 := []
+			for ssi in smesh5.get_surface_count():
+				pre5.append((smesh5.surface_get_arrays(ssi)[Mesh.ARRAY_VERTEX] as PackedVector3Array).duplicate())
+				nrm5.append((smesh5.surface_get_arrays(ssi)[Mesh.ARRAY_NORMAL] as PackedVector3Array).duplicate())
+			# Standalone: Projection stays 0 while Curve works.
+			adjust_bcurve(10)
+			fails += _expect("bcurve standalone", bproj_display() == "+0mm")
+			var p0t: Vector3 = (smesh5.surface_get_arrays(int(tip_best[0]))[Mesh.ARRAY_VERTEX] as PackedVector3Array)[int(tip_best[1])]
+			var nt0: Vector3 = (nrm5[int(tip_best[0])] as PackedVector3Array)[int(tip_best[1])].normalized()
+			fails += _expect("bcurve pointy", (p0t - (pre5[int(tip_best[0])] as PackedVector3Array)[int(tip_best[1])]).dot(nt0) > 0.005)
+			var ppm: Vector3 = (smesh5.surface_get_arrays(int(mid_best[0]))[Mesh.ARRAY_VERTEX] as PackedVector3Array)[int(mid_best[1])]
+			fails += _expect("bcurve pointy tight", ppm.distance_to((pre5[int(mid_best[0])] as PackedVector3Array)[int(mid_best[1])]) < 0.001)
+			adjust_bcurve(-20)
+			var pmt: Vector3 = (smesh5.surface_get_arrays(int(mid_best[0]))[Mesh.ARRAY_VERTEX] as PackedVector3Array)[int(mid_best[1])]
+			var nm0: Vector3 = (nrm5[int(mid_best[0])] as PackedVector3Array)[int(mid_best[1])].normalized()
+			fails += _expect("bcurve scoop", (pmt - (pre5[int(mid_best[0])] as PackedVector3Array)[int(mid_best[1])]).dot(nm0) < -0.002)
+			var lmax := 0.0
+			for ssi in smesh5.get_surface_count():
+				var svv4: PackedVector3Array = smesh5.surface_get_arrays(ssi)[Mesh.ARRAY_VERTEX]
+				for vvi in svv4.size():
+					if (m2c5 * (pre5[ssi] as PackedVector3Array)[vvi]).y < foot5 - 0.001:
+						lmax = maxf(lmax, svv4[vvi].distance_to((pre5[ssi] as PackedVector3Array)[vvi]))
+			fails += _expect("bcurve lower identical", lmax < 1e-9)
+			reset_bcurve()
+		else:
+			fails += _expect("bcurve pointy", false)
+			fails += _expect("bcurve pointy tight", false)
+			fails += _expect("bcurve standalone", false)
+			fails += _expect("bcurve scoop", false)
+			fails += _expect("bcurve lower identical", false)
+	else:
+		for bname in ["bcurve display", "bcurve plus", "bcurve clamp", "bcurve reset", "bcurve pointy", "bcurve pointy tight", "bcurve standalone", "bcurve scoop", "bcurve lower identical"]:
+			fails += _expect(bname, false)
 	_menu._push(CharacterMenu.LEVEL_PHYSICS)
-	fails += _expect("female physics breast rows", _menu._entries.size() == 11)
+	fails += _expect("female physics breast rows", _menu._entries.size() == 12)
 	_menu._pop()
 	# Wiggle attaches live only — headless stays deterministic.
 	var wig_n := 0

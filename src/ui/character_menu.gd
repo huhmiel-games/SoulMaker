@@ -175,6 +175,10 @@ func _load_entries() -> Array:
 				"get": _host.bangle_display,
 				"adjust": _host.adjust_bangle,
 				"reset": _host.reset_bangle})
+			pout.append({"label": "BreastCurve", "kind": "value",
+				"get": _host.bcurve_display,
+				"adjust": _host.adjust_bcurve,
+				"reset": _host.reset_bcurve})
 		pout.append({"label": "[ ← Back ]", "call": _pop})
 		return pout
 	if _level == LEVEL_HAIR:

@@ -2125,6 +2125,33 @@ func reset_bproj() -> void:
 	_breast_sculpt()
 
 
+## Breast curve (female only): ABSOLUTE signed sculpt, needs no Projection.
+## + pushes the mound out along the normals, concentrated at the tip
+## (perkier nipples); - pulls the UPPER slope inward (the authored upward
+## bulge flattens toward the opposite curve, tip included by blend). Below
+## the nipple nothing moves (bit-identical, same rule as the gate). Works on
+## Skin + Cloths through the painted field. cm, displayed in mm.
+const BCURVE := &"BreastCurve"
+const BCURVE_STEP := 0.1
+const BCURVE_MAX_CM := 4.0
+const BCURVE_UP_BAND := 0.055
+var _bcurve := 0.0
+
+
+func bcurve_display() -> String:
+	return "%+dmm" % int(round(float(_bcurve) * 10.0))
+
+
+func adjust_bcurve(dir: int) -> void:
+	_bcurve = clampf(float(_bcurve) + float(dir) * BCURVE_STEP, -BCURVE_MAX_CM, BCURVE_MAX_CM)
+	_breast_sculpt()
+
+
+func reset_bcurve() -> void:
+	_bcurve = 0.0
+	_breast_sculpt()
+
+
 ## Breast angle (female only): rigid mirrored yaw of the breast bones about
 ## their origin (near nipple, so the mound swings as a block and the nipple
 ## normal turns). Degrees, + = inward toward the midline, - = outward.
@@ -2188,7 +2215,8 @@ func _breast_sculpt() -> void:
 			mis.append(mi)
 			_bsnap_ensure(mi)
 	var val := float(_bsculpt.get(BPROJ, 0.0))
-	if is_zero_approx(val):
+	var cuv := float(_bcurve)
+	if is_zero_approx(val) and is_zero_approx(cuv):
 		if _bdirty:
 			for mi in mis:
 				_bsnap_restore(mi)
@@ -2211,6 +2239,7 @@ func _breast_sculpt() -> void:
 	var r2 := r * r
 	var foot := float(field["cfoot"])
 	var v := val / 100.0
+	var cv := float(_bcurve) / 100.0
 	for mi in mis:
 		_bsnap_restore(mi) # idempotent base (snapshot predates any push)
 		var mesh := (mi as MeshInstance3D).mesh as ArrayMesh
@@ -2243,9 +2272,26 @@ func _breast_sculpt() -> void:
 						var gt := (q.y - foot) / denom
 						g = gt * gt * (3.0 - 2.0 * gt)
 				var t := 1.0 - sqrt(d2) / r
-				var w: float = t * t * (3.0 - 2.0 * t) * g
-				if w > 0.0:
-					vv[i] = vv[i] + nn[i].normalized() * (v * w)
+				var base_r := 0.0
+				if t > 0.0:
+					base_r = t * t * (3.0 - 2.0 * t)
+				var push := v * base_r * g
+				# Absolute signed curve (no Projection needed). + = tight tip
+				# spike (gaussian: the tip perks with no forward growth);
+				# - = wide upper ring sinking inward (opposite curve). Below
+				# the nipple: exactly zero.
+				if not is_zero_approx(cv):
+					var dd := sqrt(d2)
+					if cv > 0.0:
+						push += cv * exp(-d2 / (0.09 * r2)) * g
+					elif dd < 1.3 * r:
+						var tu := 1.0 - dd / (1.3 * r)
+						var ring: float = tu * tu * (3.0 - 2.0 * tu)
+						var vu := clampf((q.y - nc.y) / BCURVE_UP_BAND, 0.0, 1.0)
+						vu = vu * vu * (3.0 - 2.0 * vu)
+						push += cv * ring * vu
+				if push != 0.0:
+					vv[i] = vv[i] + nn[i].normalized() * push
 			a[Mesh.ARRAY_VERTEX] = vv
 			rebuilt.append([a, mat, prim, sname])
 		mesh.clear_surfaces()
