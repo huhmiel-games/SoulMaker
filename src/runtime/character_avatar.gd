@@ -236,6 +236,10 @@ const GLUE_ROOT_M := 0.003 # deeper than this: frozen root (never dragged out)
 var _glue_qs := PackedVector3Array()
 var _glue_ns := PackedVector3Array()
 var _glue_fields := {}
+## Retained TOTAL skin offset (twin-equalized, combined take_glue order):
+## total-glue slots (brows/lashes) copy it at their nearest skin vert, so the
+## rest gap survives every key, driving or not. Reset every bake below.
+var _glue_total := PackedVector3Array()
 var _glue_grid := {}
 var _glue_grid_rid := -1
 var _glue_map := {}
@@ -768,12 +772,14 @@ const SCULPT_SPEC := {
 	&"EarlobeLength": {"region": "Lobe", "menu": "ears", "mode": "tip", "along": Vector3(0, 1, 0), "end": "min", "axis": Vector3(0, -1, 0), "rate": 0.6, "mirror": false, "max_cm": 0.8, "rings": 1},
 	&"EarPoint": {"region": "EarTip", "menu": "ears", "mode": "tip", "along": Vector3(0, 1, 0), "end": "max", "axis": Vector3(0, 1, 0), "rate": 0.6, "mirror": false, "max_cm": 4.8, "rings": 1},
 }
-## Face-part follow (09/10): holder slot -> driving sculpt keys. Compact rigid
-## parts (eyes, lashes, brows — 100% Head) bake the SUM of per-key mask means
-## into their verts (same Head-frame math as the skin), so socket rows never
-## strand them and rows superpose without diluting each other. Eyes track the
-## socket (Depth/Height) but NOT lid weight; lashes ride the lids; brows
-## ride the ridge (both menus' depth rows). Hair is a shell, not a lump
+## Face-part follow (09/10): holder slot -> driving sculpt keys. Eyes stay
+## analytic (compact rigid balls: SUM of per-key mask means + rigid
+## rotation/dilation — the globe must track the aperture, never deform with
+## the socket). Brows + lashes are thin shells: each vert copies the TOTAL
+## skin offset of its nearest skin vert ("total" glue, 12/10 — the means
+## lagged whenever non-driving keys moved the site via diffusion spillover,
+## burying the parts ~2mm under multi-key randoms on both genders). Hair is
+## a shell, not a lump
 ## (09/10 live: every proxy failed — z-ramp starved the temples at ~40%,
 ## full-width breathed the whole cap and dived inside the skin when
 ## narrowing, bbox-column starved verts just outside the paint): each hair
@@ -781,8 +787,8 @@ const SCULPT_SPEC := {
 ## preserves its rest gap exactly, both directions, for every driving key.
 const SCULPT_FOLLOW := {
 	&"Eyes": [&"EyeDepth", &"EyeHeight", &"EyeSpacing", &"EyeSize"],
-	&"Eyelashes": [&"EyeDepth", &"EyeHeight", &"EyelidHeavy", &"EyeSpacing", &"EyeSize", &"EyeAngle"],
-	&"Eyebrows": [&"BrowDepth", &"BrowRidgeDepth", &"BrowHeight", &"BrowThick", &"BrowAngle"],
+	&"Eyelashes": {"keys": [&"EyeDepth", &"EyeHeight", &"EyelidHeavy", &"EyeSpacing", &"EyeSize", &"EyeAngle"], "glue": true, "total": true},
+	&"Eyebrows": {"keys": [&"BrowDepth", &"BrowRidgeDepth", &"BrowHeight", &"BrowThick", &"BrowAngle"], "glue": true, "total": true},
 	&"Hair": {"keys": [&"ForeheadHeight", &"ForeheadWidth"], "glue": true},
 	&"Beard": {"keys": [&"JawWidth", &"JawDefinition", &"JawAngle", &"ChinShift", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft", &"MouthW", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"MouthPout"], "glue": true},
 }
@@ -790,14 +796,15 @@ const SCULPT_FOLLOW := {
 ## cancel to ~0 across the symmetric orbits). Split at the driving region's
 ## cx; each part vert takes its own side's mean.
 const SCULPT_FOLLOW_SIDES := [&"EyeSpacing"]
-## Follow keys applied as rigid per-side ROTATION (EyeAngle: lashes ride the
-## lid tilt — a translation mean would read ~0). Same angle/pivot convention
-## as the siderot skin mode. Balls stay out: the globe must not roll.
-const SCULPT_FOLLOW_ROT := [&"EyeAngle", &"BrowAngle"]
+## Follow keys applied as rigid per-side ROTATION (EyeAngle: the balls must
+## not roll — a translation mean would read ~0). Same angle/pivot convention
+## as the siderot skin mode. Eyes only (brows/lashes went total-glue 12/10).
+const SCULPT_FOLLOW_ROT := [&"EyeAngle"]
 ## Follow keys applied as per-side DILATION about the socket centroid
 ## (EyeSize: balls track the aperture with the skin rate, so a shrinking
 ## socket never clips the globe — and growing sockets grow the balls).
-const SCULPT_FOLLOW_SCALE := [&"EyeSize", &"BrowThick"]
+## Eyes only (brows went total-glue 12/10).
+const SCULPT_FOLLOW_SCALE := [&"EyeSize"]
 ## Shell-follow zoning (m, test contract only): the hairline column moves,
 ## everything past HAIR_HALO stays frozen.
 const HAIR_HALO := 0.025
@@ -1228,12 +1235,16 @@ func _sculpt_fused() -> void:
 	# fields are retained (combined across Skin surfaces, twin-equalized like
 	# the bake) so each shell vert can copy its nearest skin vert's offset.
 	var glue_keys := {}
+	var total_wanted := false
 	for fslot_g in SCULPT_FOLLOW:
 		var e_g = SCULPT_FOLLOW[fslot_g]
 		if e_g is Dictionary and bool((e_g as Dictionary).get("glue", false)):
 			for gk in _follow_keys(e_g):
 				glue_keys[gk] = true
+		if e_g is Dictionary and bool((e_g as Dictionary).get("total", false)):
+			total_wanted = true
 	var glue_fields := {} # key -> combined PackedVector3Array (this bake)
+	_glue_total = PackedVector3Array() # reset: stale totals never survive a bake
 	var glue_owner: MeshInstance3D = null # first Skin MI owns the glue order
 	for mi in _avatar_mis():
 		var mmi := mi as MeshInstance3D
@@ -1379,6 +1390,8 @@ func _sculpt_fused() -> void:
 					var gcomb: PackedVector3Array = glue_fields.get(gk, PackedVector3Array())
 					gcomb.append_array(_twin_eq(surf_koffs[gk], tgroups))
 					glue_fields[gk] = gcomb
+				if total_wanted:
+					_glue_total.append_array(off)
 			for i in n:
 				if off[i] != Vector3.ZERO:
 					verts[i] = head_world * (qs[i] + off[i])
@@ -1393,33 +1406,41 @@ func _sculpt_fused() -> void:
 	var fdrive := {}
 	for fslot2 in SCULPT_FOLLOW:
 		var flist: Array = []
-		for fkey2 in _follow_keys(SCULPT_FOLLOW[fslot2]):
-			if SCULPT_FOLLOW_ROT.has(fkey2) and active.has(fkey2):
-				# Rigid per-side rotation (lashes ride the tilt): analytic
-				# angle/pivot, same convention as the siderot skin mode.
-				var rspec: Dictionary = SCULPT_SPEC.get(fkey2, {})
-				var rreg: Dictionary = regions.get(String(rspec.get("region", "")), {})
-				if rreg.is_empty():
-					continue
-				var rkd := deg_to_rad(float(rspec.get("deg", 10.0)) * float(_sculpt.get(fkey2, 0.0)))
-				flist.append({"key": fkey2, "rot": true, "cx": float(rreg["cx"]), "axis": (rspec.get("axis", Vector3(0, 0, 1)) as Vector3).normalized(), "angL": rkd, "angR": -rkd, "pivL": rreg["cL"], "pivR": rreg["cR"]})
-			elif SCULPT_FOLLOW_SCALE.has(fkey2) and active.has(fkey2):
-				# Rigid per-side dilation (balls track the aperture): same
-				# pivot/rate as the sidescale skin mode, both directions.
-				# The spec axis masks the growth (BrowThick = Y only, like
-				# the skin "scale" mode) so part and skin stay consistent.
-				var sspec: Dictionary = SCULPT_SPEC.get(fkey2, {})
-				var sreg: Dictionary = regions.get(String(sspec.get("region", "")), {})
-				if sreg.is_empty():
-					continue
-				flist.append({"key": fkey2, "scale": true, "cx": float(sreg["cx"]), "factor": float(_sculpt.get(fkey2, 0.0)) * float(sspec.get("rate", 0.15)), "axis": sspec.get("axis", Vector3.ONE), "pivL": sreg["cL"], "pivR": sreg["cR"]})
-			elif follow_acc.has(fkey2):
-				var fa2: Dictionary = follow_acc[fkey2]
-				if bool(fa2.get("sides", false)):
-					if int(fa2["countL"]) > 0 and int(fa2["countR"]) > 0:
-						flist.append({"key": fkey2, "sides": true, "cx": float(fa2["cx"]), "meanL": (fa2["sumL"] as Vector3) / float(fa2["countL"]), "meanR": (fa2["sumR"] as Vector3) / float(fa2["countR"])})
-				elif int(fa2["count"]) > 0:
-					flist.append({"key": fkey2, "mean": (fa2["sum"] as Vector3) / float(fa2["count"])})
+		var e2 = SCULPT_FOLLOW[fslot2]
+		if e2 is Dictionary and bool((e2 as Dictionary).get("total", false)):
+			# Total glue (brows/lashes): ride the full skin offset at the
+			# nearest skin vert for EVERY active key, driving or not. Marker
+			# only — the bake gathers the retained total field.
+			if not active.is_empty():
+				flist.append({"total": true})
+		else:
+			for fkey2 in _follow_keys(SCULPT_FOLLOW[fslot2]):
+				if SCULPT_FOLLOW_ROT.has(fkey2) and active.has(fkey2):
+					# Rigid per-side rotation (lashes ride the tilt): analytic
+					# angle/pivot, same convention as the siderot skin mode.
+					var rspec: Dictionary = SCULPT_SPEC.get(fkey2, {})
+					var rreg: Dictionary = regions.get(String(rspec.get("region", "")), {})
+					if rreg.is_empty():
+						continue
+					var rkd := deg_to_rad(float(rspec.get("deg", 10.0)) * float(_sculpt.get(fkey2, 0.0)))
+					flist.append({"key": fkey2, "rot": true, "cx": float(rreg["cx"]), "axis": (rspec.get("axis", Vector3(0, 0, 1)) as Vector3).normalized(), "angL": rkd, "angR": -rkd, "pivL": rreg["cL"], "pivR": rreg["cR"]})
+				elif SCULPT_FOLLOW_SCALE.has(fkey2) and active.has(fkey2):
+					# Rigid per-side dilation (balls track the aperture): same
+					# pivot/rate as the sidescale skin mode, both directions.
+					# The spec axis masks the growth (BrowThick = Y only, like
+					# the skin "scale" mode) so part and skin stay consistent.
+					var sspec: Dictionary = SCULPT_SPEC.get(fkey2, {})
+					var sreg: Dictionary = regions.get(String(sspec.get("region", "")), {})
+					if sreg.is_empty():
+						continue
+					flist.append({"key": fkey2, "scale": true, "cx": float(sreg["cx"]), "factor": float(_sculpt.get(fkey2, 0.0)) * float(sspec.get("rate", 0.15)), "axis": sspec.get("axis", Vector3.ONE), "pivL": sreg["cL"], "pivR": sreg["cR"]})
+				elif follow_acc.has(fkey2):
+					var fa2: Dictionary = follow_acc[fkey2]
+					if bool(fa2.get("sides", false)):
+						if int(fa2["countL"]) > 0 and int(fa2["countR"]) > 0:
+							flist.append({"key": fkey2, "sides": true, "cx": float(fa2["cx"]), "meanL": (fa2["sumL"] as Vector3) / float(fa2["countL"]), "meanR": (fa2["sumR"] as Vector3) / float(fa2["countR"])})
+					elif int(fa2["count"]) > 0:
+						flist.append({"key": fkey2, "mean": (fa2["sum"] as Vector3) / float(fa2["count"])})
 		if not flist.is_empty():
 			fdrive[fslot2] = flist
 	for fslot2 in SCULPT_FOLLOW:
@@ -1449,10 +1470,15 @@ static func follow_halo_w(q: Vector3, mn: Vector3, mx: Vector3, halo: float) -> 
 
 ## Bakes the SUM of per-key mask means into a mounted compact part's verts
 ## (same Head-frame math as the skin, so probe/idle poses carry it
-## identically). Shell entries ("glue") route to _face_glue_bake instead.
-## No driving keys = restore pristine. Skips holders with nothing mounted.
+## identically). "total" entries (brows/lashes) route to _face_glue_total_bake
+## instead (full skin offset at the nearest skin vert, every active key).
+## Shell entries ("glue") route to _face_glue_bake. No driving keys = restore
+## pristine. Skips holders with nothing mounted.
 func _face_follow_bake(slot: String, flist: Array, head_world: Transform3D, head_inv: Transform3D, head_idx: int, regions: Dictionary) -> void:
 	var entry0 = SCULPT_FOLLOW.get(slot, [])
+	if entry0 is Dictionary and bool((entry0 as Dictionary).get("total", false)):
+		_face_glue_total_bake(slot, head_world, head_inv, head_idx)
+		return
 	if entry0 is Dictionary and bool((entry0 as Dictionary).get("glue", false)):
 		_face_glue_bake(slot, flist, head_world, head_inv, head_idx)
 		return
@@ -1673,6 +1699,56 @@ func _face_glue_bake(slot: String, flist: Array, head_world: Transform3D, head_i
 					else:
 						for mk in mkeys:
 							off += ((_glue_fields as Dictionary)[mk] as PackedVector3Array)[sk]
+				pverts[i] = head_world * (head_inv * pverts[i] + off)
+				gi += 1
+			a[Mesh.ARRAY_VERTEX] = pverts
+			pout.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, a)
+			pout.surface_set_material(s, pristine.surface_get_material(s))
+		mi.mesh = pout
+
+
+## Total-glue follow (12/10, brows/lashes): each vert copies the RETAINED
+## TOTAL skin offset of its nearest skin vert — the rest gap survives every
+## active key, driving or not (means lagged whenever diffusion spillover from
+## other keys moved the site). Same static pristine<->skin correspondence as
+## _face_glue_bake (map/depth caches shared); no mouth gating (brows/lashes
+## ride everything). Empty total = leave pristine alone (never guess).
+func _face_glue_total_bake(slot: String, head_world: Transform3D, head_inv: Transform3D, head_idx: int) -> void:
+	var holder := get_node_or_null(slot) as Node3D
+	if holder == null:
+		return
+	var pristine := _face_pristine.get(slot) as ArrayMesh
+	if pristine == null:
+		return
+	if _glue_total.is_empty() or _glue_qs.is_empty() or _glue_grid.is_empty():
+		for ch0 in holder.get_children():
+			var mi0 := ch0 as MeshInstance3D
+			if mi0 != null and mi0.mesh != null and mi0.mesh != pristine:
+				mi0.mesh = pristine
+		return
+	var rid := pristine.get_rid().get_id()
+	if not _glue_map.has(rid):
+		_glue_map[rid] = _glue_build_map(pristine, head_inv)
+		_glue_depth[rid] = _glue_build_depth(pristine, _glue_map[rid], head_inv)
+	var gmap: PackedInt32Array = _glue_map[rid]
+	for ch in holder.get_children():
+		var mi := ch as MeshInstance3D
+		if mi == null or mi.mesh == null:
+			continue
+		if not _face_mi_all_head(mi, pristine, head_idx):
+			print("[Character] follow skipped %s (non-Head weights)" % slot)
+			continue
+		var pout := ArrayMesh.new()
+		var gi := 0
+		for s in pristine.get_surface_count():
+			var a := pristine.surface_get_arrays(s)
+			var pverts: PackedVector3Array = a[Mesh.ARRAY_VERTEX]
+			for i in pverts.size():
+				var off := Vector3.ZERO
+				if gi < gmap.size():
+					var sk: int = gmap[gi]
+					if sk >= 0 and sk < _glue_total.size():
+						off = _glue_total[sk]
 				pverts[i] = head_world * (head_inv * pverts[i] + off)
 				gi += 1
 			a[Mesh.ARRAY_VERTEX] = pverts
