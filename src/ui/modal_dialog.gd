@@ -3,16 +3,16 @@ extends Control
 
 ## Reusable modal container (P1 map editor pause, quit-confirm, later
 ## editors' dialogs). Zero business logic: a dim backdrop + a centered panel
-## hosting one GenericMenu content at a time. The content owns its entries and
-## signals; the caller owns open/close and the semantics (see MapEditor).
-## B/Q handling lives in the content (pause = cancel, confirm = back), never
-## here — close() is explicit.
+## hosting one content at a time (GenericMenu page or ConfirmDialog). The
+## content owns its entries and signals; the caller owns open/close and the
+## semantics (see MapEditor). B/Q handling lives in the content (pause =
+## cancel, confirm = back), never here — close() is explicit.
 
 signal closed
 
 @onready var content_host: Control = get_node("Center/Panel/ContentHost")
 
-var _content: GenericMenu = null
+var _content: Control = null
 
 
 func _ready() -> void:
@@ -25,7 +25,7 @@ func is_open() -> bool:
 
 ## Shows content (takes ownership — freed on close/swap). Caller connects the
 ## content signals before/after open; both work (no emission happens here).
-func open(content: GenericMenu) -> void:
+func open(content: Control) -> void:
 	if _content != null and _content != content:
 		content_host.remove_child(_content)
 		_content.queue_free()

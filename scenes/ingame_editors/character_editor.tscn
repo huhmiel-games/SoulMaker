@@ -7,6 +7,7 @@
 [ext_resource type="Script" uid="uid://nal33cnp181a" path="res://src/ui/character_menu.gd" id="5"]
 [ext_resource type="PackedScene" path="res://scenes/ui/color_editor.tscn" id="6"]
 [ext_resource type="PackedScene" uid="uid://r3pi6du05b31" path="res://scenes/ui/editor_hud.tscn" id="7"]
+[ext_resource type="PackedScene" path="res://scenes/ui/modal_dialog.tscn" id="8"]
 
 [sub_resource type="PlaneMesh" id="ground_mesh"]
 size = Vector2(8, 8)
@@ -82,3 +83,5 @@ offset_bottom = 202.0
 grow_horizontal = 0
 
 [node name="HUD" parent="MenuLayer" unique_id=1369654397 instance=ExtResource("7")]
+
+[node name="ModalDialog" parent="MenuLayer" instance=ExtResource("8")]

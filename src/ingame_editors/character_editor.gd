@@ -51,11 +51,16 @@ var _anim_pairs: Array = [] # per target: Array of [master_idx, target_idx]
 var _anim_frame := 0
 var _idle_only := false # idle preview mode (vs full animtest probe)
 var _color_slot := &"" # slot currently open in the dresser
+var _modal: ModalDialog = null # face-confirm dialog (Random/Reset over manual edits)
+var _manual_sculpt := false # true once the player hand-edits a sculpt row (cleared by random/reset draws)
+var _modal_action := Callable() # pending OK action while the confirm is open
+const CONFIRM_DIALOG_SCENE := preload("res://scenes/ui/confirm_dialog.tscn")
 
 
 func _ready() -> void:
 	_dresser = get_node_or_null("MenuLayer/Dresser") as ColorEditor
 	_menu = get_node_or_null("MenuLayer/Menu") as CharacterMenu
+	_modal = get_node_or_null("MenuLayer/ModalDialog") as ModalDialog
 	if _dresser == null or _menu == null:
 		push_error("[Character] missing Dresser or Menu node")
 		return
@@ -509,6 +514,7 @@ func face_sculpt_display(key: StringName) -> String:
 
 func adjust_face_sculpt(key: StringName, dir: int) -> void:
 	_avatar.adjust_sculpt(key, dir)
+	_manual_sculpt = true # hand edit re-arms the Random/Reset confirm
 
 
 func reset_face_sculpt(key: StringName) -> void:
@@ -600,6 +606,7 @@ func randomize_face(seed := 0) -> void:
 			v += float(pair[1]) * float(base.get(ok, 0.0)) / omax * maxv
 		_avatar.set_sculpt(key, clampf(v, -maxv * 0.6, maxv * 0.6), false)
 	_avatar.fuse_sculpt()
+	_manual_sculpt = false # draws never dirty: Random chains without asking
 	print("[Face] random seed %d (%s)" % [use_seed, _avatar.gender_display()])
 
 
@@ -607,6 +614,63 @@ func reset_face_all() -> void:
 	for key in CharacterAvatar.SCULPT_KEYS:
 		_avatar.set_sculpt(key, 0.0, false)
 	_avatar.fuse_sculpt()
+	_manual_sculpt = false
+
+
+## Face dirty = the player hand-edited sculpt rows AND values still differ
+## (manual reset-to-zero disarms). Shape/styles/colors are never counted:
+## Random/Reset don't touch them, so nothing is lost there.
+func _face_dirty() -> bool:
+	return _manual_sculpt and _avatar.sculpt_max_cliff() > 1e-9
+
+
+func is_modal_open() -> bool:
+	return _modal != null and _modal.is_open()
+
+
+## Menu-row gate: clean face runs at once, manual edits ask first (OK runs,
+## CANCEL/B closes). Core draws stay direct for headless tests.
+func request_randomize_face() -> void:
+	if _face_dirty():
+		_open_face_confirm(randomize_face)
+	else:
+		randomize_face()
+
+
+func request_reset_face() -> void:
+	if _face_dirty():
+		_open_face_confirm(reset_face_all)
+	else:
+		reset_face_all()
+
+
+func _open_face_confirm(action: Callable) -> void:
+	if _modal == null:
+		action.call()
+		return
+	_modal_action = action
+	var content := CONFIRM_DIALOG_SCENE.instantiate() as ConfirmDialog
+	if content == null:
+		action.call()
+		return
+	content.configure("DISCARD FACE CHANGES?", "Your changes will be lost.", _on_face_confirm_ok, _on_face_confirm_cancel)
+	_modal.close()
+	_modal.open(content)
+
+
+func _on_face_confirm_ok() -> void:
+	if _modal != null:
+		_modal.close()
+	var action := _modal_action
+	_modal_action = Callable()
+	if action.is_valid():
+		action.call()
+
+
+func _on_face_confirm_cancel() -> void:
+	if _modal != null:
+		_modal.close()
+	_modal_action = Callable()
 
 
 func phys_display(key: StringName) -> String:
@@ -3064,6 +3128,43 @@ func _run_headless_test() -> void:
 	fails += _expect("random face moves", _avatar.sculpt_max_cliff() > 1e-9)
 	reset_face_all()
 	fails += _expect("face debug restores", _avatar.sculpt_max_cliff() < 1e-9)
+	# Face confirm: clean draws run at once, manual edits ask first (OK runs,
+	# CANCEL/B keeps), draws never re-arm.
+	fails += _expect("confirm clean idle", not _face_dirty() and not is_modal_open())
+	request_randomize_face()
+	fails += _expect("confirm random clean direct", _avatar.sculpt_max_cliff() > 1e-9 and not is_modal_open())
+	request_reset_face()
+	fails += _expect("confirm reset clean direct", _avatar.sculpt_max_cliff() < 1e-9 and not is_modal_open())
+	adjust_face_sculpt(&"NoseLength", 5) # hand edit arms the confirm
+	reset_face_sculpt(&"NoseLength")
+	adjust_face_sculpt(&"NoseWidth", 5) # reset-to-zero path leaves it armed only with values
+	fails += _expect("confirm manual dirties", _face_dirty())
+	var kept := _avatar.sculpt_max_cliff()
+	request_randomize_face()
+	fails += _expect("confirm random asks", is_modal_open())
+	var mcontent := _modal.get("_content") as ConfirmDialog
+	fails += _expect("confirm text", mcontent != null and mcontent._title == "DISCARD FACE CHANGES?" and mcontent._message == "Your changes will be lost.")
+	fails += _expect("confirm buttons", mcontent != null and mcontent._buttons.size() == 2 and mcontent._buttons[0].text == "OK" and mcontent._buttons[1].text == "CANCEL")
+	fails += _expect("confirm defaults cancel", mcontent != null and mcontent._cursor == 1)
+	mcontent._on_input_action(&"place_select") # A/E on CANCEL = cancel
+	fails += _expect("confirm cancel keeps", not is_modal_open() and is_equal_approx(_avatar.sculpt_max_cliff(), kept) and _face_dirty())
+	request_randomize_face()
+	fails += _expect("confirm random asks again", is_modal_open())
+	mcontent = _modal.get("_content") as ConfirmDialog
+	mcontent._on_input_action(&"deselect") # B/Q = cancel
+	fails += _expect("confirm b keeps", not is_modal_open() and is_equal_approx(_avatar.sculpt_max_cliff(), kept))
+	request_reset_face()
+	fails += _expect("confirm reset asks", is_modal_open())
+	mcontent = _modal.get("_content") as ConfirmDialog
+	mcontent._on_input_action(&"tab_next") # L/R flips CANCEL -> OK
+	fails += _expect("confirm flips to ok", mcontent._cursor == 0)
+	mcontent._on_input_action(&"place_select") # A/E = confirm
+	fails += _expect("confirm ok resets", _avatar.sculpt_max_cliff() < 1e-9 and not is_modal_open() and not _face_dirty())
+	request_randomize_face() # clean again: direct, and the draw never dirties
+	fails += _expect("confirm random direct again", _avatar.sculpt_max_cliff() > 1e-9 and not is_modal_open())
+	request_randomize_face()
+	fails += _expect("confirm random never reasks", not is_modal_open())
+	reset_face_all()
 	# Field-cache exactness: a cached bake must equal a fresh full recompute.
 	randomize_face()
 	var csum := _avatar.sculpt_checksum()

@@ -215,9 +215,10 @@ func _load_entries() -> Array:
 		for part in FACE_PARTS:
 			fout.append({"label": String(part["label"]), "call": _push.bind(int(part["level"]))})
 		# TEMP debug rows (removed once character_editor lands): full-face
-		# random draws for male/female test parity, sculpt only.
-		fout.append({"label": "Random Face", "call": _host.randomize_face})
-		fout.append({"label": "Reset Face", "call": _host.reset_face_all})
+		# random draws for male/female test parity, sculpt only. Gated: manual
+		# edits ask first (request_*), clean faces run at once.
+		fout.append({"label": "Random Face", "call": _host.request_randomize_face})
+		fout.append({"label": "Reset Face", "call": _host.request_reset_face})
 		fout.append({"label": "[ ← Back ]", "call": _pop})
 		return fout
 	if _level == LEVEL_EYES:
@@ -323,9 +324,10 @@ func _pop() -> void:
 
 
 ## Gate: the dresser panel reads the same InputManager actions — while it
-## is open the menu stays out of the way (preview remains visible behind).
+## or the face-confirm modal is open the menu stays out of the way (preview
+## remains visible behind).
 func _on_input_action(action: StringName) -> void:
-	if _host != null and _host.is_color_open():
+	if _host != null and (_host.is_color_open() or _host.is_modal_open()):
 		return
 	super._on_input_action(action)
 
