@@ -499,6 +499,37 @@ func reset_face_sculpt(key: StringName) -> void:
 	_avatar.reset_sculpt(key)
 
 
+## TEMP debug (male/female test parity, removed once character_editor lands):
+## random + extreme full-face draws, sculpt keys only (global Width/Length
+## untouched — they drive hair fit, not the face). Reset first so draws never
+## stack; seed logged for report-back repro.
+func randomize_face() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	# Absolute sets never stack: no reset loop, one fused bake at the end.
+	for key in CharacterAvatar.SCULPT_KEYS:
+		var maxv := float((CharacterAvatar.SCULPT_SPEC.get(key, {}) as Dictionary).get("max_cm", 1.0))
+		_avatar.set_sculpt(key, rng.randf_range(-maxv * 0.6, maxv * 0.6), false)
+	_avatar.fuse_sculpt()
+	print("[Face] random seed %d (%s)" % [rng.seed, _avatar.gender_display()])
+
+
+func extreme_face() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	for key in CharacterAvatar.SCULPT_KEYS:
+		var maxv := float((CharacterAvatar.SCULPT_SPEC.get(key, {}) as Dictionary).get("max_cm", 1.0))
+		_avatar.set_sculpt(key, maxv if rng.randi_range(0, 1) == 1 else -maxv, false)
+	_avatar.fuse_sculpt()
+	print("[Face] extreme seed %d (%s)" % [rng.seed, _avatar.gender_display()])
+
+
+func reset_face_all() -> void:
+	for key in CharacterAvatar.SCULPT_KEYS:
+		_avatar.set_sculpt(key, 0.0, false)
+	_avatar.fuse_sculpt()
+
+
 func phys_display(key: StringName) -> String:
 	return _avatar.phys_display(key)
 
@@ -1187,6 +1218,7 @@ func _run_headless_test() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 	var fails := 0
+	var parity_f := {} # StringName sculpt key -> female mean push (ratioed in §17)
 	fails += _expect("peasant head absent", part_file("Male", "Peasant", &"Head").is_empty())
 	fails += _expect("peasant acc absent", part_file("Female", "Peasant", &"Accessories").is_empty())
 	fails += _expect("ranger hood male", part_file("Male", "Ranger", &"Head").ends_with("Male_Ranger_Head_Hood.gltf"))
@@ -1223,14 +1255,15 @@ func _run_headless_test() -> void:
 	fails += _expect("body outfit kept", slot_display(&"Body") == "Ranger")
 	fails += _expect("female avatar fused", _avatar_mi() != null and _avatar_src_has("SuperHero"))
 	fails += _expect("female hands kept", _avatar_finger_verts() > 100)
-	# Both nudes skip brows/eyes at import; only male ships part files yet:
-	# female has no brows/eyes at all until its export pass (pinned gap).
-	fails += _expect("female brow absent", _slot_mats(&"Eyebrows").is_empty())
-	fails += _expect("female eyes absent", _slot_mats(&"Eyes").is_empty())
-	fails += _expect("female lashes absent", _slot_mats(&"Eyelashes").is_empty())
-	fails += _expect("female brow no file", eyebrow_file("Female", &"Default").is_empty())
-	fails += _expect("female eyes no file", eye_file("Female", &"Default").is_empty())
-	fails += _expect("female lashes no file", eyelash_file("Female", &"Default").is_empty())
+	# Female face parts ship (Blender exports wired to shared/): mounted
+	# holders win over the fused nude fallback (holder child = real mount,
+	# mats alone can't tell them apart).
+	fails += _expect("female brow file", eyebrow_file("Female", &"Default").ends_with("Female_Eyebrows.gltf"))
+	fails += _expect("female eyes file", eye_file("Female", &"Default").ends_with("Female_Eyes.gltf"))
+	fails += _expect("female lashes file", eyelash_file("Female", &"Default").ends_with("Female_Eyelashes.gltf"))
+	for fslot in ["Eyebrows", "Eyes", "Eyelashes"]:
+		var fhold := _avatar.get_node_or_null(fslot)
+		fails += _expect("female %s mounted" % fslot.to_lower(), fhold != null and (fhold as Node).get_child_count() > 0)
 	# Breast bones (procedural, female only, appended end of vendor order).
 	var fsk := _avatar_skeleton()
 	fails += _expect("female bones 67", fsk != null and fsk.get_bone_count() == 67)
@@ -1576,6 +1609,20 @@ func _run_headless_test() -> void:
 			else:
 				seen[fk] = true
 	fails += _expect("breast no surface dup", dup_n == 0)
+	# Female parity (male-tuned rows must actuate on female): mask coverage,
+	# moves/restores, and mean-push recorded for the male-side ratio in §17
+	# (same key list — keep in sync).
+	var fcov := _avatar.sculpt_mask_coverage()
+	for region in ["Nose", "Mouth", "Chin", "NoseBridge", "NoseTip", "NostrilFlare", "UpperLip", "LowerLip", "MouthCorners", "Eyelids", "UpperEyelid", "Brows", "BrowRidge", "Jaw", "ChinCleft", "Cheekbones", "Cheeks", "LowerFace", "Forehead", "Ears", "Lobe", "EarTip"]:
+		var cc: Array = fcov.get(region, [0, 0])
+		fails += _expect("female mask %s resolves" % region, int(cc[1]) > 0 and float(cc[0]) / float(cc[1]) > 0.9)
+	for nk in [&"NoseBridge", &"NoseTip", &"NostrilFlare", &"NoseTipLength", &"NosePosition", &"LipUpper", &"LipLower", &"MouthCorners", &"MouthPosition", &"MouthForward", &"NoseTipSize", &"NoseTipAngle", &"NoseCurve", &"MouthPout", &"EyelidHeavy", &"EyeDepth", &"EyeHeight", &"EyeSpacing", &"EyeSize", &"EyeAngle", &"BrowAngle", &"BrowHeight", &"BrowThick", &"BrowDepth", &"JawWidth", &"JawDefinition", &"JawAngle", &"ChinLength", &"ChinWidth", &"ChinProject", &"ChinCleft", &"CheekboneWidth", &"CheekboneHeight", &"CheekFullness", &"FaceFullness", &"ForeheadHeight", &"ForeheadWidth", &"BrowRidgeDepth", &"EarSize", &"EarRotation", &"EarlobeLength", &"EarPoint"]:
+		reset_face_sculpt(nk)
+		adjust_face_sculpt(nk, 10)
+		fails += _expect("female sculpt %s moves" % String(nk), _avatar.sculpt_max_cliff() > 1e-9)
+		parity_f[nk] = _avatar.sculpt_mean_push()
+		reset_face_sculpt(nk)
+		fails += _expect("female sculpt %s restores" % String(nk), _avatar.sculpt_max_cliff() < 1e-9)
 	_avatar._outfit[&"Body"] = 2
 	_apply_nude()
 	_rebuild_avatar()
@@ -2893,19 +2940,35 @@ func _run_headless_test() -> void:
 	_menu._pop()
 	fails += _expect("face exit restores zoom", arm2 != null and is_equal_approx(arm2.spring_length, 3.2))
 	_menu._push(CharacterMenu.LEVEL_FACE)
-	fails += _expect("menu face hub 11+back", _menu._entries.size() == CharacterMenu.FACE_SUBS.size() + CharacterMenu.FACE_PARTS.size() + 1)
+	fails += _expect("menu face hub 11+3debug+back", _menu._entries.size() == CharacterMenu.FACE_SUBS.size() + CharacterMenu.FACE_PARTS.size() + 3 + 1)
 	fails += _expect("face cam on hub", face_active())
 	fails += _expect("face pauses idle", _anim_paused == _idle_only)
 	var hub_labels := []
 	for e in _menu._entries:
 		hub_labels.append(String((e as Dictionary).get("label", "")))
 	fails += _expect("menu hub head grouped", hub_labels.has("Hair >") and hub_labels.has("Eyebrows >") and hub_labels.has("Eyes >") and hub_labels.has("Beard >"))
+	fails += _expect("menu hub debug rows", hub_labels.has("Random Face") and hub_labels.has("Extreme Face") and hub_labels.has("Reset Face"))
+	# TEMP debug rows: draw moves the mesh, full reset restores it (both
+	# genders already covered — here male, female parity ratios in §17).
+	randomize_face()
+	fails += _expect("random face moves", _avatar.sculpt_max_cliff() > 1e-9)
+	extreme_face()
+	fails += _expect("extreme face moves", _avatar.sculpt_max_cliff() > 1e-9)
+	reset_face_all()
+	fails += _expect("face debug restores", _avatar.sculpt_max_cliff() < 1e-9)
+	# Field-cache exactness: a cached bake must equal a fresh full recompute.
+	randomize_face()
+	var csum := _avatar.sculpt_checksum()
+	_avatar.sculpt_drop_cache()
+	_avatar.fuse_sculpt()
+	fails += _expect("field cache exact", _avatar.sculpt_checksum().is_equal_approx(csum))
+	reset_face_all()
 	# Each sub: its rows + Back; Back returns to the hub (two-level Back).
 	_menu._push(CharacterMenu.LEVEL_FACE_GLOBAL)
 	fails += _expect("menu face global rows", _menu._entries.size() == CharacterAvatar.FACE_KEYS.size() + 1)
 	fails += _expect("face cam on sub", face_active())
 	_menu._pop()
-	fails += _expect("menu back to hub", _menu._level == CharacterMenu.LEVEL_FACE and _menu._entries.size() == CharacterMenu.FACE_SUBS.size() + CharacterMenu.FACE_PARTS.size() + 1)
+	fails += _expect("menu back to hub", _menu._level == CharacterMenu.LEVEL_FACE and _menu._entries.size() == CharacterMenu.FACE_SUBS.size() + CharacterMenu.FACE_PARTS.size() + 3 + 1)
 	fails += _expect("face cam stays on hub", face_active())
 	_menu._push(CharacterMenu.LEVEL_FACE_NOSE)
 	fails += _expect("menu face nose rows", _menu._entries.size() == 10 + 1)
@@ -3045,6 +3108,9 @@ func _run_headless_test() -> void:
 		reset_face_sculpt(nk)
 		adjust_face_sculpt(nk, 10)
 		fails += _expect("sculpt %s moves" % String(nk), _avatar.sculpt_max_cliff() > 1e-9)
+		var fm := _avatar.sculpt_mean_push()
+		var ff := float(parity_f.get(nk, -1.0))
+		fails += _expect("parity %s" % String(nk), ff >= 0.0 and fm > 1e-9 and ff / fm >= 0.4 and ff / fm <= 2.5)
 		reset_face_sculpt(nk)
 		fails += _expect("sculpt %s restores" % String(nk), _avatar.sculpt_max_cliff() < 1e-9)
 	# 17b. Seam guard (08/10 live slit near the ear: bit-identical twins on
@@ -3452,6 +3518,12 @@ func _animtest_remap(anim: Animation, master: Skeleton3D) -> Animation:
 func _process(delta: float) -> void:
 	if InputManager.is_just_pressed(&"xray_toggle"):
 		_cycle_xray()
+	if InputManager.is_just_pressed(&"gender_toggle"):
+		# TEMP debug (removed with xray_toggle): same path as the Gender
+		# menu row, plus a menu refresh so value rows never show stale text.
+		adjust_gender(1)
+		if _menu != null:
+			_menu._refresh_list()
 	if not _anim_active or _anim_player == null or _anim_master == null:
 		return
 	if not is_instance_valid(_anim_master):

@@ -245,6 +245,8 @@ var _glue_depth := {}
 func _snap_pristine() -> void:
 	_skin_pristine = null
 	_adj_cache.clear() # keys are mesh rids: rebuild = new meshes
+	_koff_cache.clear() # kval-bound fields: new meshes = new fields
+	_fsmart_cache.clear() # geometry-only t-fields: same reason
 	_glue_grid_rid = -1 # skin rebuilt: grid + maps rebuilt lazily
 	for mi in _avatar_mis():
 		var mmi := mi as MeshInstance3D
@@ -818,6 +820,43 @@ func reset_sculpt(key: StringName) -> void:
 	_sculpt_fused()
 
 
+## Absolute sculpt set (TEMP debug random/extreme face rows): clamped to the
+## key's max like adjust_sculpt. live=false poses the value without fusing —
+## batch loops then call fuse_sculpt() once (one full-mesh bake instead of N).
+## Removed with the debug rows.
+func set_sculpt(key: StringName, val_cm: float, live := true) -> void:
+	var spec: Dictionary = SCULPT_SPEC.get(key, {})
+	_sculpt[key] = clampf(val_cm, -float(spec.get("max_cm", 1.0)), float(spec.get("max_cm", 1.0)))
+	if live:
+		_sculpt_fused()
+
+
+func fuse_sculpt() -> void:
+	_sculpt_fused()
+
+
+## Sum of live Skin verts (TEMP debug pin: proves the per-key field cache
+## bakes bit-identical results to a fresh full recompute).
+func sculpt_checksum() -> Vector3:
+	var sum := Vector3.ZERO
+	for mi in _avatar_mis():
+		var mmi := mi as MeshInstance3D
+		if mmi == null or mmi.mesh == null or mmi.name != &"Skin":
+			continue
+		for s in mmi.mesh.get_surface_count():
+			var vv: PackedVector3Array = mmi.mesh.surface_get_arrays(s)[Mesh.ARRAY_VERTEX]
+			for v in vv:
+				sum += v
+	return sum
+
+
+## Drops the per-key field cache (test-only: forces a fresh full recompute
+## on the next fuse).
+func sculpt_drop_cache() -> void:
+	_koff_cache.clear()
+	_fsmart_cache.clear()
+
+
 ## Sculpt regions for a gender (face_sculpt.json v2): region -> {pts (0.01mm
 ## Vector3i set), cx (centroid x), hx (x half-extent), n, c (centroid), cL/cR
 ## (per-side centroids split at cx, one-sided masks = c)}. Missing file or
@@ -957,6 +996,187 @@ func sculpt_mask_coverage() -> Dictionary:
 const SCULPT_RINGS := 3
 const SCULPT_DECAY := 0.6
 var _adj_cache := {} # pristine mesh rid -> Array per surface of neighbor index Arrays
+var _koff_cache := {} # "rid:surface:key" -> {kval, koff, kwmax} (mask geometry-static, field kval-bound)
+var _fsmart_cache := {} # "rid:surface:" -> {falloff key: smoothed t} (geometry-only)
+## Fills missing smoothed falloff t-fields (geometry-only: cached per mesh
+## surface, recomputed only for newly activated falloff keys).
+func _sculpt_fsmart_fill(fsmart: Dictionary, active: Array, regions: Dictionary, n: int, verts: PackedVector3Array, head_inv: Transform3D, adj: Array) -> void:
+	for fkey in active:
+		if fsmart.has(fkey):
+			continue
+		var fspec: Dictionary = SCULPT_SPEC[fkey]
+		if not String(fspec.get("mode", "")).begins_with("falloff"):
+			continue
+		var fr: Dictionary = regions.get(String(fspec["region"]), {})
+		if fr.is_empty():
+			continue
+		var fmn: Vector3 = fr["mn"]
+		var fmx: Vector3 = fr["mx"]
+		var fa: Vector3 = (fspec["along"] as Vector3).normalized()
+		var fspan := (fmx - fmn).dot(fa)
+		var tt := PackedFloat32Array()
+		tt.resize(n)
+		for i in n:
+			var qq: Vector3 = head_inv * verts[i]
+			var t0 := 0.5
+			if fspan > 1e-9:
+				t0 = clampf((qq - fmn).dot(fa) / fspan, 0.0, 1.0)
+			tt[i] = t0
+		for _p in 6:
+			var nx := tt.duplicate()
+			for i in n:
+				var nb := (adj[i] as Array)
+				if nb.is_empty():
+					continue
+				var m0 := 0.0
+				for j in nb:
+					m0 += tt[int(j)]
+				nx[i] = (tt[i] + m0 / float(nb.size())) * 0.5
+			tt = nx
+		fsmart[fkey] = tt
+
+
+## Per-key offset field (mask + mode + diffusion). Pure w.r.t. (mesh,
+## surface, key, kval): the caller caches the result and recomputes only
+## on kval change. Cached arrays are NEVER mutated in place (read-only
+## downstream: CoW detach in _twin_eq protects them).
+func _sculpt_key_field(key: StringName, kval: float, spec: Dictionary, r: Dictionary, n: int, qs: PackedVector3Array, an: PackedVector3Array, fsmart: Dictionary, adj: Array, head_inv: Transform3D) -> Array:
+	var koff := PackedVector3Array()
+	koff.resize(n)
+	var kwmax := PackedFloat32Array()
+	kwmax.resize(n)
+	for i in n:
+		var q: Vector3 = qs[i]
+		if not (r["pts"] as Dictionary).has(sculpt_key(q)):
+			continue
+		kwmax[i] = 1.0
+		var v: float = kval / 100.0
+		if bool(spec["mirror"]):
+			# Proportional widen/narrow about the region centroid
+			# (no bunching, no fold: center fixed, flanks move most).
+			var hx := maxf(float(r["hx"]), 1e-9)
+			koff[i].x += (q.x - float(r["cx"])) / hx * kval / 100.0
+		else:
+			var mode := String(spec.get("mode", "shift"))
+			if mode == "scale":
+				# Centroid scale (TipSize...): the ball grows,
+				# rate per cm, optionally masked to `axis`
+				# (BrowThick = Y only).
+				var c: Vector3 = r["c"]
+				var sax: Vector3 = spec.get("axis", Vector3.ONE)
+				var dd: Vector3 = (q - c) * (kval * float(spec.get("rate", 0.15)))
+				koff[i] += Vector3(dd.x * sax.x, dd.y * sax.y, dd.z * sax.z)
+			elif mode == "rot":
+				# Pivot rotation about the centroid (+ = tip up for
+				# a +X axis on a +Z nose: angle negated below).
+				var c2: Vector3 = r["c"]
+				var ang := -deg_to_rad(float(spec.get("deg", 8.0)) * kval)
+				koff[i] += Basis((spec["axis"] as Vector3).normalized(), ang) * (q - c2) + c2 - q
+			elif mode == "root":
+				# Per-side ear growth (EarSize): X grows outward from
+				# the mask inner edge (the root stays, the rim moves
+				# most — the skull never grows with the ear) while
+				# Y/Z grow in place about the centroid (free axes,
+				# "orate"). Symmetric masks only.
+				var ix := maxf(float(r.get("ix", 0.0)), 1e-9)
+				var rc: Vector3 = r["c"]
+				var side := signf(q.x - float(r["cx"]))
+				if side == 0.0:
+					side = 1.0
+				var rspan := maxf(maxf(absf((r["mn"] as Vector3).x), absf((r["mx"] as Vector3).x)) - ix, 1e-9)
+				var rover := maxf(absf(q.x - float(r["cx"])) - ix, 0.0)
+				var rrate := float(spec.get("rate", 0.45))
+				var orate := float(spec.get("orate", 0.09))
+				koff[i].x += side * rover * rover / rspan * kval * rrate
+				koff[i].y += (q.y - rc.y) * kval * orate
+				koff[i].z += (q.z - rc.z) * kval * orate
+			elif mode == "rootrot":
+				# Per-side rotation about the mask inner-edge root
+				# (EarRotation): each ear swings about its own
+				# (±ix, cy, cz) pivot with mirrored angles, so both
+				# sides stay symmetric. "axis" + "deg" per cm.
+				var rix := maxf(float(r.get("ix", 0.0)), 1e-9)
+				var rc3: Vector3 = r["c"]
+				var rside := signf(q.x - float(r["cx"]))
+				if rside == 0.0:
+					rside = 1.0
+				var rp := Vector3(rside * rix, rc3.y, rc3.z)
+				# Sign fixed live 09/10 (+ = décolle).
+				var rang := -rside * deg_to_rad(float(spec.get("deg", 15.0)) * kval)
+				koff[i] += Basis((spec["axis"] as Vector3).normalized(), rang) * (q - rp) + rp - q
+			elif mode == "sideshift":
+				# Per-side uniform X translation (EyeSpacing): each
+				# orbit moves out/in as a block, mirrored — the
+				# bridge gap holds no mask, so no step diffuses
+				# across the center. Symmetric masks only.
+				var sside := signf(q.x - float(r["cx"]))
+				if sside == 0.0:
+					sside = 1.0
+				koff[i].x += sside * v
+			elif mode == "sidescale":
+				# Per-side centroid dilation (EyeSize): each orbit
+				# grows about its own center, rate per cm —
+				# symmetric by construction.
+				var sc: Vector3 = r["cL"] if q.x < float(r["cx"]) else r["cR"]
+				koff[i] += (q - sc) * (kval * float(spec.get("rate", 0.15)))
+			elif mode == "siderot":
+				# Per-side rotation about the side centroid
+				# (EyeAngle): mirrored angles keep symmetry
+				# (mirror flips Z-rotation sense, hence the sign).
+				# + = outer corners drop (tombant).
+				var tside := signf(q.x - float(r["cx"]))
+				if tside == 0.0:
+					tside = 1.0
+				var pc: Vector3 = r["cL"] if tside < 0.0 else r["cR"]
+				var tang := -tside * deg_to_rad(float(spec.get("deg", 10.0)) * kval)
+				koff[i] += Basis((spec["axis"] as Vector3).normalized(), tang) * (q - pc) + pc - q
+			elif mode == "tip":							# Linear ramp along `along` (EarlobeLength/EarPoint):
+				# 0 at one bbox end, 1 at the other ("end": "min" /
+				# "max" selects the peak end), pushing `axis`.
+				var tla: Vector3 = (spec["along"] as Vector3).normalized()
+				var td0: float = (r["mn"] as Vector3).dot(tla)
+				var td1: float = (r["mx"] as Vector3).dot(tla)
+				var tw := 0.5
+				if absf(td1 - td0) > 1e-9:
+					tw = clampf((q.dot(tla) - td0) / (td1 - td0), 0.0, 1.0)
+				if String(spec.get("end", "max")) == "min":
+					tw = 1.0 - tw
+				koff[i] += (spec["axis"] as Vector3).normalized() * v * tw * float(spec.get("rate", 1.0))
+			elif mode == "falloff":
+				# Axial falloff bend (Curve, Pout...): sin peak
+				# mid-region along `along`, ends fixed, pushes `axis`.
+				# t comes from the smoothed field (coarse-mesh guard).
+				var t := 0.5
+				if fsmart.has(key):
+					t = (fsmart[key] as PackedFloat32Array)[i]
+				koff[i] += (spec["axis"] as Vector3).normalized() * v * sin(PI * t)
+			elif mode == "falloff_n":
+				# Normal-following bend (NoseCurve, live 11/10:
+				# clearly better than fixed-axis at the tip):
+				# same sin profile, but the push rotates with the surface —
+				# straight wall goes `axis` like today, the tip
+				# kick-up inflates instead of shearing. Facing-
+				# weighted (flanks keep the rigid axis, so no
+				# lateral step opens at the mask sides). Normals
+				# missing = plain-axis fallback (never guess).
+				var adir: Vector3 = (spec["axis"] as Vector3).normalized()
+				var tn := 0.5
+				if fsmart.has(key):
+					tn = (fsmart[key] as PackedFloat32Array)[i]
+				var push := adir
+				var an2: PackedVector3Array = an
+				if an2.size() == n:
+					var nh: Vector3 = (head_inv.basis * an2[i]).normalized()
+					var facing := clampf(nh.dot(adir), 0.0, 1.0)
+					push = (adir * (1.0 - facing) + nh * facing).normalized()
+				koff[i] += push * v * sin(PI * tn)
+			else:
+				koff[i] += (spec["axis"] as Vector3).normalized() * v
+	_sculpt_diffuse(koff, kwmax, adj, int(spec.get("rings", SCULPT_RINGS)))
+	return [koff, kwmax]
+
+
+
 func _sculpt_fused() -> void:
 	var regions := _sculpt_regions()
 	if regions.is_empty():
@@ -1048,39 +1268,13 @@ func _sculpt_fused() -> void:
 			# edge jumps t by 0.3 -> 8mm cliff, and diffusion can't help a
 			# masked vert). Laplacian passes equilibrate local gaps while
 			# the 40mm profile stands (diffusion length ~3 verts).
-			var fsmart := {} # falloff key -> smoothed t per vert
-			for fkey in active:
-				var fspec: Dictionary = SCULPT_SPEC[fkey]
-				if not String(fspec.get("mode", "")).begins_with("falloff"):
-					continue
-				var fr: Dictionary = regions.get(String(fspec["region"]), {})
-				if fr.is_empty():
-					continue
-				var fmn: Vector3 = fr["mn"]
-				var fmx: Vector3 = fr["mx"]
-				var fa: Vector3 = (fspec["along"] as Vector3).normalized()
-				var fspan := (fmx - fmn).dot(fa)
-				var adj0 := _sculpt_adj(src_mesh, s, verts, a[Mesh.ARRAY_INDEX])
-				var tt := PackedFloat32Array()
-				tt.resize(n)
-				for i in n:
-					var qq: Vector3 = head_inv * verts[i]
-					var t0 := 0.5
-					if fspan > 1e-9:
-						t0 = clampf((qq - fmn).dot(fa) / fspan, 0.0, 1.0)
-					tt[i] = t0
-				for _p in 6:
-					var nx := tt.duplicate()
-					for i in n:
-						var nb := (adj0[i] as Array)
-						if nb.is_empty():
-							continue
-						var m0 := 0.0
-						for j in nb:
-							m0 += tt[int(j)]
-						nx[i] = (tt[i] + m0 / float(nb.size())) * 0.5
-					tt = nx
-				fsmart[fkey] = tt
+			var cprefix := "%d:%d:" % [src_mesh.get_rid().get_id(), s]
+			var adj: Array = _sculpt_adj(src_mesh, s, verts, a[Mesh.ARRAY_INDEX])
+			var an: PackedVector3Array = a[Mesh.ARRAY_NORMAL]
+			var fsmart: Dictionary = _fsmart_cache.get(cprefix, {})
+			_sculpt_fsmart_fill(fsmart, active, regions, n, verts, head_inv, adj)
+			_fsmart_cache[cprefix] = fsmart
+			var used_fields := {}
 			for i in n:
 				qs[i] = head_inv * verts[i]
 			var total := PackedVector3Array()
@@ -1099,138 +1293,21 @@ func _sculpt_fused() -> void:
 				if r.is_empty():
 					continue
 				var kval: float = float(_sculpt.get(key, 0.0))
+				var ck := cprefix + String(key)
+				var ce: Dictionary = _koff_cache.get(ck, {})
 				var koff := PackedVector3Array()
-				koff.resize(n)
 				var kwmax := PackedFloat32Array()
-				kwmax.resize(n)
-				for i in n:
-					var q: Vector3 = qs[i]
-					if not (r["pts"] as Dictionary).has(sculpt_key(q)):
+				if (ce.get("koff", PackedVector3Array()) as PackedVector3Array).size() == n and float(ce.get("kval", INF)) == kval:
+					koff = ce["koff"] as PackedVector3Array
+					kwmax = ce["kwmax"] as PackedFloat32Array
+				else:
+					var f: Array = _sculpt_key_field(key, kval, spec, r, n, qs, an, fsmart, adj, head_inv)
+					if f.is_empty():
 						continue
-					kwmax[i] = 1.0
-					var v: float = kval / 100.0
-					if bool(spec["mirror"]):
-						# Proportional widen/narrow about the region centroid
-						# (no bunching, no fold: center fixed, flanks move most).
-						var hx := maxf(float(r["hx"]), 1e-9)
-						koff[i].x += (q.x - float(r["cx"])) / hx * kval / 100.0
-					else:
-						var mode := String(spec.get("mode", "shift"))
-						if mode == "scale":
-							# Centroid scale (TipSize...): the ball grows,
-							# rate per cm, optionally masked to `axis`
-							# (BrowThick = Y only).
-							var c: Vector3 = r["c"]
-							var sax: Vector3 = spec.get("axis", Vector3.ONE)
-							var dd: Vector3 = (q - c) * (kval * float(spec.get("rate", 0.15)))
-							koff[i] += Vector3(dd.x * sax.x, dd.y * sax.y, dd.z * sax.z)
-						elif mode == "rot":
-							# Pivot rotation about the centroid (+ = tip up for
-							# a +X axis on a +Z nose: angle negated below).
-							var c2: Vector3 = r["c"]
-							var ang := -deg_to_rad(float(spec.get("deg", 8.0)) * kval)
-							koff[i] += Basis((spec["axis"] as Vector3).normalized(), ang) * (q - c2) + c2 - q
-						elif mode == "root":
-							# Per-side ear growth (EarSize): X grows outward from
-							# the mask inner edge (the root stays, the rim moves
-							# most — the skull never grows with the ear) while
-							# Y/Z grow in place about the centroid (free axes,
-							# "orate"). Symmetric masks only.
-							var ix := maxf(float(r.get("ix", 0.0)), 1e-9)
-							var rc: Vector3 = r["c"]
-							var side := signf(q.x - float(r["cx"]))
-							if side == 0.0:
-								side = 1.0
-							var rspan := maxf(maxf(absf((r["mn"] as Vector3).x), absf((r["mx"] as Vector3).x)) - ix, 1e-9)
-							var rover := maxf(absf(q.x - float(r["cx"])) - ix, 0.0)
-							var rrate := float(spec.get("rate", 0.45))
-							var orate := float(spec.get("orate", 0.09))
-							koff[i].x += side * rover * rover / rspan * kval * rrate
-							koff[i].y += (q.y - rc.y) * kval * orate
-							koff[i].z += (q.z - rc.z) * kval * orate
-						elif mode == "rootrot":
-							# Per-side rotation about the mask inner-edge root
-							# (EarRotation): each ear swings about its own
-							# (±ix, cy, cz) pivot with mirrored angles, so both
-							# sides stay symmetric. "axis" + "deg" per cm.
-							var rix := maxf(float(r.get("ix", 0.0)), 1e-9)
-							var rc3: Vector3 = r["c"]
-							var rside := signf(q.x - float(r["cx"]))
-							if rside == 0.0:
-								rside = 1.0
-							var rp := Vector3(rside * rix, rc3.y, rc3.z)
-							# Sign fixed live 09/10 (+ = décolle).
-							var rang := -rside * deg_to_rad(float(spec.get("deg", 15.0)) * kval)
-							koff[i] += Basis((spec["axis"] as Vector3).normalized(), rang) * (q - rp) + rp - q
-						elif mode == "sideshift":
-							# Per-side uniform X translation (EyeSpacing): each
-							# orbit moves out/in as a block, mirrored — the
-							# bridge gap holds no mask, so no step diffuses
-							# across the center. Symmetric masks only.
-							var sside := signf(q.x - float(r["cx"]))
-							if sside == 0.0:
-								sside = 1.0
-							koff[i].x += sside * v
-						elif mode == "sidescale":
-							# Per-side centroid dilation (EyeSize): each orbit
-							# grows about its own center, rate per cm —
-							# symmetric by construction.
-							var sc: Vector3 = r["cL"] if q.x < float(r["cx"]) else r["cR"]
-							koff[i] += (q - sc) * (kval * float(spec.get("rate", 0.15)))
-						elif mode == "siderot":
-							# Per-side rotation about the side centroid
-							# (EyeAngle): mirrored angles keep symmetry
-							# (mirror flips Z-rotation sense, hence the sign).
-							# + = outer corners drop (tombant).
-							var tside := signf(q.x - float(r["cx"]))
-							if tside == 0.0:
-								tside = 1.0
-							var pc: Vector3 = r["cL"] if tside < 0.0 else r["cR"]
-							var tang := -tside * deg_to_rad(float(spec.get("deg", 10.0)) * kval)
-							koff[i] += Basis((spec["axis"] as Vector3).normalized(), tang) * (q - pc) + pc - q
-						elif mode == "tip":							# Linear ramp along `along` (EarlobeLength/EarPoint):
-							# 0 at one bbox end, 1 at the other ("end": "min" /
-							# "max" selects the peak end), pushing `axis`.
-							var tla: Vector3 = (spec["along"] as Vector3).normalized()
-							var td0: float = (r["mn"] as Vector3).dot(tla)
-							var td1: float = (r["mx"] as Vector3).dot(tla)
-							var tw := 0.5
-							if absf(td1 - td0) > 1e-9:
-								tw = clampf((q.dot(tla) - td0) / (td1 - td0), 0.0, 1.0)
-							if String(spec.get("end", "max")) == "min":
-								tw = 1.0 - tw
-							koff[i] += (spec["axis"] as Vector3).normalized() * v * tw * float(spec.get("rate", 1.0))
-						elif mode == "falloff":
-							# Axial falloff bend (Curve, Pout...): sin peak
-							# mid-region along `along`, ends fixed, pushes `axis`.
-							# t comes from the smoothed field (coarse-mesh guard).
-							var t := 0.5
-							if fsmart.has(key):
-								t = (fsmart[key] as PackedFloat32Array)[i]
-							koff[i] += (spec["axis"] as Vector3).normalized() * v * sin(PI * t)
-						elif mode == "falloff_n":
-							# Normal-following bend (NoseCurve, live 11/10:
-							# clearly better than fixed-axis at the tip):
-							# same sin profile, but the push rotates with the surface —
-							# straight wall goes `axis` like today, the tip
-							# kick-up inflates instead of shearing. Facing-
-							# weighted (flanks keep the rigid axis, so no
-							# lateral step opens at the mask sides). Normals
-							# missing = plain-axis fallback (never guess).
-							var adir: Vector3 = (spec["axis"] as Vector3).normalized()
-							var tn := 0.5
-							if fsmart.has(key):
-								tn = (fsmart[key] as PackedFloat32Array)[i]
-							var push := adir
-							var an2: PackedVector3Array = a[Mesh.ARRAY_NORMAL]
-							if an2.size() == n:
-								var nh: Vector3 = (head_inv.basis * an2[i]).normalized()
-								var facing := clampf(nh.dot(adir), 0.0, 1.0)
-								push = (adir * (1.0 - facing) + nh * facing).normalized()
-							koff[i] += push * v * sin(PI * tn)
-						else:
-							koff[i] += (spec["axis"] as Vector3).normalized() * v
-				_sculpt_diffuse(koff, kwmax, _sculpt_adj(src_mesh, s, verts, a[Mesh.ARRAY_INDEX]), int(spec.get("rings", SCULPT_RINGS)))
+					koff = f[0] as PackedVector3Array
+					kwmax = f[1] as PackedFloat32Array
+					_koff_cache[ck] = {"kval": kval, "koff": koff, "kwmax": kwmax}
+				used_fields[ck] = true
 				for i in n:
 					total[i] += koff[i]
 				if follow_acc.has(key):
@@ -1254,6 +1331,9 @@ func _sculpt_fused() -> void:
 					# Ear/skull seam set (twin-eq exclusion below): the max
 					# rule would yank skull twins to the full ear offset.
 					ear_mask = kwmax
+			for ck2 in _koff_cache.keys():
+				if String(ck2).begins_with(cprefix) and not used_fields.has(ck2):
+					_koff_cache.erase(ck2)
 			off = total
 			# Twin equalization (seam guard): bit-identical verts share the
 			# strongest offset — a section seam can never crack open even
@@ -1774,6 +1854,32 @@ func sculpt_max_cliff() -> float:
 				for j in (adj[i] as Array):
 					m = maxf(m, (di - (cv[j] - pv[j])).length())
 	return m
+
+
+## Mean sculpt displacement (parity metric): mean |live - pristine| over Skin
+## verts, 0 when the authored mesh is active. Deterministic per gender+key —
+## the chartest records it on female, then ratios it on male (§17).
+func sculpt_mean_push() -> float:
+	var pris := _skin_pristine
+	if pris == null:
+		return 0.0
+	var sum := 0.0
+	var n := 0
+	for mi in _avatar_mis():
+		var mmi := mi as MeshInstance3D
+		if mmi == null or mmi.mesh == null or mmi.name != &"Skin":
+			continue
+		for s in mini(mmi.mesh.get_surface_count(), pris.get_surface_count()):
+			var ca: Array = mmi.mesh.surface_get_arrays(s)
+			var pa: Array = pris.surface_get_arrays(s)
+			var cv: PackedVector3Array = ca[Mesh.ARRAY_VERTEX]
+			var pv: PackedVector3Array = pa[Mesh.ARRAY_VERTEX]
+			if cv.size() != pv.size() or cv.is_empty():
+				continue
+			for i in cv.size():
+				sum += (cv[i] - pv[i]).length()
+				n += 1
+	return sum / float(maxi(n, 1))
 
 
 ## Procedural breast bones (female only). Added END of the vendor order in
@@ -2628,9 +2734,9 @@ func _apply_beard() -> void:
 ## no nude counterpart and no menu: auto-mounted when the file exists, albedo
 ## color defaults like hair.
 const FACE_PART_DIR := "res://assets/meshes/characters/parts/"
-const EYEBROW_FILES := {"Male": [&"Default"]}
-const EYE_FILES := {"Male": [&"Default"]}
-const EYELASH_FILES := {"Male": [&"Default"]}
+const EYEBROW_FILES := {"Male": [&"Default"], "Female": [&"Default"]}
+const EYE_FILES := {"Male": [&"Default"], "Female": [&"Default"]}
+const EYELASH_FILES := {"Male": [&"Default"], "Female": [&"Default"]}
 
 
 func eyebrow_file(gender: String, style: StringName) -> String:

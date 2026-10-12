@@ -102,6 +102,11 @@ const PROFILES := {
 		# TEMP debug (character_editor X-ray skin/garments toggle, removed
 		# once the cut is validated): N on keyboard, L3 on pad.
 		"xray_toggle": {"sources": [{"key": KEY_N}, {"btn": JOY_BUTTON_LEFT_STICK}]},
+		# TEMP debug (character_editor gender swap for male/female test
+		# parity, removed with xray_toggle once character_editor lands):
+		# G on keyboard, Select on pad (game-table gestures mirror,
+		# editor-local meaning).
+		"gender_toggle": {"sources": [{"key": KEY_G}, {"btn": JOY_BUTTON_BACK}]},
 	},
 	# Frozen game table (features/11 + DS3 gaps). Defined but NOT consumed
 	# until the P2 player controller — input_audit.gd still validates it.
