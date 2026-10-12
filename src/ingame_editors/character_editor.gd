@@ -861,6 +861,17 @@ func _region_floors(before: PackedVector3Array, after: PackedVector3Array, regio
 ## Returns [front_before, front_after].
 ## Mean model-space position of a mounted face part's verts (Vector3.ZERO
 ## when nothing mounted): proves sculpt follow moves the part with its socket.
+## Global bone scale by walking the pose-scale chain (pin-only: proves head
+## content isolation without reusing the avatar's own formula).
+func _bone_global_scale(sk: Skeleton3D, bi: int) -> Vector3:
+	var g := Vector3.ONE
+	var b := bi
+	while b != -1:
+		g *= sk.get_bone_pose_scale(b)
+		b = sk.get_bone_parent(b)
+	return g
+
+
 func _face_part_mean(slot: String) -> Vector3:
 	var holder := _avatar.get_node_or_null("" + slot) as Node3D
 	if holder == null:
@@ -1729,7 +1740,7 @@ func _run_headless_test() -> void:
 		for bname in ["bcurve display", "bcurve plus", "bcurve clamp", "bcurve reset", "bcurve pointy", "bcurve pointy tight", "bcurve standalone", "bcurve scoop", "bcurve lower identical"]:
 			fails += _expect(bname, false)
 	_menu._push(CharacterMenu.LEVEL_PHYSICS)
-	fails += _expect("female physics breast rows", _menu._entries.size() == 12)
+	fails += _expect("female physics breast rows", _menu._entries.size() == 13)
 	_menu._pop()
 	# Wiggle attaches live only — headless stays deterministic.
 	var wig_n := 0
@@ -1843,7 +1854,7 @@ func _run_headless_test() -> void:
 	_menu._push(CharacterMenu.LEVEL_COLORS)
 	fails += _expect("menu outfit colors 6+back", _menu._entries.size() == 7)
 	_menu._push(CharacterMenu.LEVEL_PHYSICS)
-	fails += _expect("menu physics 6+back", _menu._entries.size() == 7)
+	fails += _expect("menu physics 7+back", _menu._entries.size() == 8)
 	_menu._pop()
 	var want_take := _animtest_take() if _animtest_wanted() else IDLE_TAKE
 	fails += _expect("preview anim playing", _anim_player != null and _anim_player.current_animation == want_take)
@@ -1922,7 +1933,7 @@ func _run_headless_test() -> void:
 	adjust_phys(&"Waist", 2)
 	adjust_phys(&"Hips", 2)
 	var want_inv := 1.0 / 1.0404
-	fails += _expect("phys head untouched", sk.get_bone_pose_scale(sk.find_bone(&"Head")).is_equal_approx(Vector3.ONE))
+	fails += _expect("phys head global stable", _bone_global_scale(sk, sk.find_bone(&"Head")).is_equal_approx(Vector3.ONE))
 	fails += _expect("phys neck counters", sk.get_bone_pose_scale(sk.find_bone(&"Neck")).is_equal_approx(Vector3(want_inv, 1.0, want_inv)))
 	reset_phys(&"Waist")
 	reset_phys(&"Hips")
@@ -1937,6 +1948,16 @@ func _run_headless_test() -> void:
 	fails += _expect("phys head uniform", sk.get_bone_pose_scale(sk.find_bone(&"Head")).is_equal_approx(Vector3(1.02, 1.02, 1.02)))
 	reset_phys(&"Head")
 	fails += _expect("phys head reset", sk.get_bone_pose_scale(sk.find_bone(&"Head")).is_equal_approx(Vector3.ONE))
+	adjust_phys(&"Neck", -5) # short neck: uniform, Y carries the height
+	fails += _expect("phys neck display", phys_display(&"Neck") == "95%")
+	fails += _expect("phys neck uniform", sk.get_bone_pose_scale(sk.find_bone(&"Neck")).is_equal_approx(Vector3(0.95, 0.95, 0.95)))
+	fails += _expect("phys head ignores neck", _bone_global_scale(sk, sk.find_bone(&"Head")).is_equal_approx(Vector3.ONE))
+	adjust_phys(&"Neck", -50)
+	fails += _expect("phys neck clamped low", phys_display(&"Neck") == "60%")
+	adjust_phys(&"Neck", 100)
+	fails += _expect("phys neck clamped high", phys_display(&"Neck") == "100%")
+	reset_phys(&"Neck")
+	fails += _expect("phys neck row reset", sk.get_bone_pose_scale(sk.find_bone(&"Neck")).is_equal_approx(Vector3.ONE))
 	var hud := get_node_or_null("MenuLayer/HUD")
 	fails += _expect("phys height shown", hud != null and String(hud.get("_persistent").get(&"height", "")).begins_with("HEIGHT: 1."))
 	# 6. Hair menu (style cycle, master mount, color).

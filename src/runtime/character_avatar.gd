@@ -57,7 +57,7 @@ const SLOT_SRC_KEYS := {
 ## Physics silhouette pack (v1): slider key -> bones + scaled axes (Standard
 ## bone names). Applied as absolute bone-pose scale on the fused master
 ## skeleton, reapplied after every rebuild (new skeleton each time).
-const PHYS_KEYS: Array[StringName] = [&"Height", &"Legs", &"Shoulders", &"Waist", &"Hips", &"Head", &"BreastDroop", &"BreastFirmness"]
+const PHYS_KEYS: Array[StringName] = [&"Height", &"Legs", &"Shoulders", &"Waist", &"Hips", &"Head", &"Neck", &"BreastDroop", &"BreastFirmness"]
 const PHYS_STEP := 0.01
 ## Bounds per row (07/10, eye-tuned): limbs/height stay near the authored
 ## body (90-110); Waist is tighter (95-105, the nude is already muscular —
@@ -68,6 +68,7 @@ const PHYS_STEP := 0.01
 const PHYS_LIMITS := {
 	&"Height": [0.9, 1.1], &"Legs": [0.9, 1.1], &"Shoulders": [0.9, 1.1],
 	&"Waist": [0.95, 1.05], &"Hips": [0.9, 1.1], &"Head": [0.9, 1.1],
+	&"Neck": [0.6, 1.0],
 	&"BreastDroop": [0.7, 1.4], &"BreastFirmness": [0.5, 2.5],
 }
 const PHYS_BONES := {
@@ -77,6 +78,7 @@ const PHYS_BONES := {
 	&"Waist": {"bones": [&"Spine", &"Chest"], "axes": Vector3(1, 0, 1)},
 	&"Hips": {"bones": [&"Hips"], "axes": Vector3(1, 0, 1)},
 	&"Head": {"bones": [&"Head"], "axes": Vector3(1, 1, 1)},
+	&"Neck": {"bones": [&"Neck"], "axes": Vector3(1, 1, 1)},
 	## Droop is a rigid Y offset (not a scale) and Firmness drives the wiggle
 	## — both list the bones with zero axes so the scale pass is a no-op.
 	&"BreastDroop": {"bones": [&"LeftBreast", &"RightBreast"], "axes": Vector3(0, 0, 0)},
@@ -2654,18 +2656,31 @@ func _apply_physics() -> void:
 			(ch as WiggleBone).force = _firm_force(firm_v)
 	# Head stays out of Waist/Hips: bone scale inherits down the chain, so
 	# the neck counter-scales the ancestor XZ product (arms still inherit —
-	# known approximation until arm-local rows exist).
+	# known approximation until arm-local rows exist). The Neck row applies
+	# first via the accumulation loop; here only XZ is counter-scaled, Y
+	# (neck height) survives.
 	var torso_xz := float(_phys.get(&"Waist", 1.0)) * float(_phys.get(&"Hips", 1.0))
 	var neck := sk.find_bone(&"Neck")
 	if neck != -1:
 		var inv := 1.0 / maxf(torso_xz, 0.01)
-		sk.set_bone_pose_scale(neck, Vector3(inv, 1.0, inv))
+		var cur: Vector3 = sk.get_bone_pose_scale(neck)
+		sk.set_bone_pose_scale(neck, Vector3(cur.x * inv, cur.y, cur.z * inv))
 	# Face shape multiplies the Physics Head size (uniform h): final Head =
 	# (h*w, h*l, h*w). Defaults neutral — Head-only asserts unaffected.
+	# Head-subtree isolation: Head inherits every ancestor scale (Root,
+	# Hips, Spine/Chest, Neck), so its LOCAL scale divides the walked
+	# ancestor product out — the head content (skull, eyes, hair…) keeps
+	# its global size no matter what Neck/Waist/Hips do. No hierarchy
+	# assumption: the walk multiplies whatever pose scales exist.
 	var head := sk.find_bone(&"Head")
 	if head != -1:
 		var h := float(_phys.get(&"Head", 1.0))
-		sk.set_bone_pose_scale(head, Vector3(h * float(_face.get(&"Width", 1.0)), h * float(_face.get(&"Length", 1.0)), h * float(_face.get(&"Width", 1.0))))
+		var anc := Vector3.ONE
+		var p := sk.get_bone_parent(head)
+		while p != -1:
+			anc *= sk.get_bone_pose_scale(p)
+			p = sk.get_bone_parent(p)
+		sk.set_bone_pose_scale(head, Vector3(h * float(_face.get(&"Width", 1.0)) / maxf(anc.x, 0.01), h * float(_face.get(&"Length", 1.0)) / maxf(anc.y, 0.01), h * float(_face.get(&"Width", 1.0)) / maxf(anc.z, 0.01)))
 	# Height readout (host status line): rest crown from the fused
 	# bind-pose AABBs times the Root scale.
 	_crown_rest = 0.0
