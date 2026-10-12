@@ -91,6 +91,8 @@ func _ready() -> void:
 		_run_headless_test()
 	if "--capturetest" in OS.get_cmdline_user_args() or "--capturetest" in OS.get_cmdline_args():
 		_run_capture_test()
+	if "--browprobe" in OS.get_cmdline_user_args() or "--browprobe" in OS.get_cmdline_args():
+		_run_brow_probe()
 	if _animtest_wanted():
 		_animtest_setup()
 	else:
@@ -3280,6 +3282,233 @@ func _run_headless_test() -> void:
 	fails += _expect("no stowaway mis", _no_stowaway_mis())
 	print("[CharTest] %d FAIL" % fails)
 	get_tree().quit()
+
+
+## TEMP brow-burial probe (female brows sink under random sculpt, male does
+## not — live report 12/10). Compares skin motion at the brow site vs part
+## motion, at rest and with the reported seed replayed, then isolates each
+## brow-driving key. Removed once diagnosed.
+func _run_brow_probe() -> void:
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var brow_keys := [&"BrowHeight", &"BrowThick", &"BrowAngle", &"BrowDepth", &"BrowRidgeDepth"]
+	var eye_keys := [&"EyelidHeavy", &"EyeDepth", &"EyeHeight", &"EyeSpacing", &"EyeSize", &"EyeAngle"]
+	for g in [0, 1]:
+		if g == 0:
+			reset_gender()
+		else:
+			adjust_gender(1)
+		reset_face_all()
+		var n0 := _browprobe_skin_pn()
+		var r0: PackedVector3Array = n0[0]
+		var sn0: PackedVector3Array = n0[1]
+		var p0 := _browprobe_part_verts()
+		var pair := _browprobe_pair(p0, r0)
+		var rg := _browprobe_sink(p0, r0, sn0, p0, r0, pair)
+		print("[BrowProbe] %s rest sink mean=%+.2fmm min=%+.2fmm buried=%d (part %d)" % [gender_display(), rg[0], rg[1], rg[2], p0.size()])
+		_browprobe_apply_seed()
+		var kvals := []
+		for bk in brow_keys:
+			kvals.append("%s=%+.2f" % [String(bk), float(_avatar.get("_sculpt").get(bk, 0.0)) * 10.0])
+		print("[BrowProbe] %s seed kvals(mm): %s" % [gender_display(), " ".join(kvals)])
+		var sg := _browprobe_sink(p0, r0, sn0, _browprobe_part_verts(), _browprobe_skin_pn()[0], pair)
+		print("[BrowProbe] %s seed sink mean=%+.2fmm min=%+.2fmm buried=%d" % [gender_display(), sg[0], sg[1], sg[2]])
+		# Attribution: seed minus the eye keys (cross-talk suspects).
+		for ek in eye_keys:
+			_avatar.set_sculpt(ek, 0.0, false)
+		_avatar.fuse_sculpt()
+		var ng := _browprobe_sink(p0, r0, sn0, _browprobe_part_verts(), _browprobe_skin_pn()[0], pair)
+		print("[BrowProbe] %s seed-noeye sink mean=%+.2fmm min=%+.2fmm buried=%d" % [gender_display(), ng[0], ng[1], ng[2]])
+		# Attribution: brow keys alone at their seed values.
+		reset_face_all()
+		_browprobe_apply_seed()
+		for key in CharacterAvatar.SCULPT_KEYS:
+			if not brow_keys.has(key):
+				_avatar.set_sculpt(key, 0.0, false)
+		_avatar.fuse_sculpt()
+		var bg := _browprobe_sink(p0, r0, sn0, _browprobe_part_verts(), _browprobe_skin_pn()[0], pair)
+		print("[BrowProbe] %s seed-browsonly sink mean=%+.2fmm min=%+.2fmm buried=%d" % [gender_display(), bg[0], bg[1], bg[2]])
+		reset_face_all()
+		for bk in brow_keys:
+			reset_face_sculpt(bk)
+			var b0 := _head_dom_verts()
+			var q0 := _browprobe_part_verts()
+			adjust_face_sculpt(bk, 10)
+			var b1 := _head_dom_verts()
+			var q1 := _browprobe_part_verts()
+			var skv := _browprobe_region_vec(b0, b1, "Brows")
+			var pkv := _browprobe_mean_vec(q0, q1)
+			print("[BrowProbe] %s %s skin=%s part=%s" % [gender_display(), String(bk), str(skv * 1000.0), str(pkv * 1000.0)])
+			reset_face_sculpt(bk)
+	print("[BrowProbe] done")
+	get_tree().quit()
+
+
+## Replays the reported seed exactly (fresh RNG + same call order as
+## randomize_face: one randf_range per SCULPT_KEYS entry).
+func _browprobe_apply_seed() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = -4760453800869451545
+	for key in CharacterAvatar.SCULPT_KEYS:
+		var maxv := float((CharacterAvatar.SCULPT_SPEC.get(key, {}) as Dictionary).get("max_cm", 1.0))
+		_avatar.set_sculpt(key, rng.randf_range(-maxv * 0.6, maxv * 0.6), false)
+	_avatar.fuse_sculpt()
+
+
+## Rest pairing: nearest rest-skin index per part vert (stride 1 — the head
+## patch is small). Fixed set for all later sink measurements.
+func _browprobe_pair(p0: PackedVector3Array, r0: PackedVector3Array) -> PackedInt32Array:
+	var out := PackedInt32Array()
+	out.resize(p0.size())
+	for i in p0.size():
+		var best := 1e18
+		var bi := 0
+		for j in r0.size():
+			var d2 := p0[i].distance_squared_to(r0[j])
+			if d2 < best:
+				best = d2
+				bi = j
+		out[i] = bi
+	return out
+
+
+## Per-vert sink depth: part motion minus paired-skin motion, signed on the
+## REST skin normal. Negative = the part dove under the skin there.
+## Returns [mean_mm, min_mm, buried_count(< -0.2mm)].
+func _browprobe_sink(p0: PackedVector3Array, r0: PackedVector3Array, sn0: PackedVector3Array, p1: PackedVector3Array, r1: PackedVector3Array, pair: PackedInt32Array) -> Array:
+	if p0.size() != p1.size() or r0.size() != r1.size() or p0.size() != pair.size() or sn0.size() != r0.size():
+		return [9999.0, 9999.0, 0]
+	var sum := 0.0
+	var mn := 1e9
+	var buried := 0
+	for i in p0.size():
+		var j := pair[i]
+		var rel: Vector3 = (p1[i] - p0[i]) - (r1[j] - r0[j])
+		var sd := rel.dot(sn0[j])
+		sum += sd
+		mn = minf(mn, sd)
+		if sd < -0.0002:
+			buried += 1
+	return [sum / float(p0.size()) * 1000.0, mn * 1000.0, buried]
+
+
+## All Eyebrows-holder verts in Skin-model space (relative transform applied,
+## no equal-transform assumption).
+func _browprobe_part_verts() -> PackedVector3Array:
+	var out := PackedVector3Array()
+	var holder := _avatar.get_node_or_null("Eyebrows")
+	var skin_mi := _avatar_skin_mi()
+	if holder == null or skin_mi == null:
+		return out
+	var rel: Transform3D = skin_mi.global_transform.affine_inverse()
+	for mi in (holder as Node).find_children("*", "MeshInstance3D", true, false):
+		var mmi := mi as MeshInstance3D
+		if mmi == null or mmi.mesh == null:
+			continue
+		var xf: Transform3D = rel * mmi.global_transform
+		var mesh := mmi.mesh as ArrayMesh
+		for s in mesh.get_surface_count():
+			var vv: PackedVector3Array = mesh.surface_get_arrays(s)[Mesh.ARRAY_VERTEX]
+			for v in vv:
+				out.append(xf * v)
+	return out
+
+
+func _browprobe_mean_vec(before: PackedVector3Array, after: PackedVector3Array) -> Vector3:
+	if before.size() != after.size() or before.is_empty():
+		return Vector3.ZERO
+	var acc := Vector3.ZERO
+	for i in before.size():
+		acc += after[i] - before[i]
+	return acc / float(before.size())
+
+
+## Mean displacement VECTOR of a region's mask members (fixed set, membership
+## on BEFORE Head-frame positions).
+func _browprobe_region_vec(before: PackedVector3Array, after: PackedVector3Array, region: String) -> Vector3:
+	var sk := _avatar_skeleton()
+	var bi := sk.find_bone(&"Head") if sk != null else -1
+	if bi == -1 or before.size() != after.size():
+		return Vector3.ZERO
+	var inv: Transform3D = _avatar._bone_rest_world(sk, bi).affine_inverse()
+	var acc := Vector3.ZERO
+	var n := 0
+	for i in before.size():
+		if _avatar.sculpt_in_region(region, inv * before[i]):
+			acc += after[i] - before[i]
+			n += 1
+	return acc / float(maxi(n, 1))
+
+
+## Head-dominated skin positions + normals (model space), for the signed
+## burial gap (sign via skin normal: + = outside, - = buried).
+func _browprobe_skin_pn() -> Array:
+	var pos := PackedVector3Array()
+	var nrm := PackedVector3Array()
+	var sk := _avatar_skeleton()
+	if sk == null:
+		return [pos, nrm]
+	var head := sk.find_bone(&"Head")
+	for mi in _avatar_mis():
+		var mmi := mi as MeshInstance3D
+		if mmi == null or mmi.mesh == null or mmi.name != &"Skin":
+			continue
+		for s in mmi.mesh.get_surface_count():
+			var a := mmi.mesh.surface_get_arrays(s)
+			if a[Mesh.ARRAY_BONES] == null or a[Mesh.ARRAY_WEIGHTS] == null:
+				continue
+			var an: PackedVector3Array = a[Mesh.ARRAY_NORMAL]
+			if an.size() != (a[Mesh.ARRAY_VERTEX] as PackedVector3Array).size():
+				continue
+			var bv: PackedVector3Array = a[Mesh.ARRAY_VERTEX]
+			var bi: PackedInt32Array = a[Mesh.ARRAY_BONES]
+			var bw: PackedFloat32Array = a[Mesh.ARRAY_WEIGHTS]
+			for i in bv.size():
+				var bb := -1
+				var ww := 0.0
+				for k in 4:
+					if bw[i * 4 + k] > ww:
+						ww = bw[i * 4 + k]
+						bb = bi[i * 4 + k]
+				if bb == head:
+					pos.append(bv[i])
+					nrm.append(an[i].normalized())
+	return [pos, nrm]
+
+
+## Signed burial gap: mean/min over part verts of (signed distance to the
+## nearest skin vert). Also counts buried verts (< -0.2mm).
+func _browprobe_gap(part: PackedVector3Array, skin_pn: Array) -> Array:
+	# Returns [mean_mm, min_mm, buried_count]. Signed on the nearest skin
+	# normal: a part vert just inside the surface reads negative.
+	var skin: PackedVector3Array = skin_pn[0]
+	var snrm: PackedVector3Array = skin_pn[1]
+	if part.is_empty() or skin.is_empty():
+		return [9999.0, 9999.0, 0]
+	var sum := 0.0
+	var mn := 1e9
+	var buried := 0
+	for pv in part:
+		var best := 1e18
+		var bi := 0
+		var k := 0
+		while k < skin.size():
+			var d2 := pv.distance_squared_to(skin[k])
+			if d2 < best:
+				best = d2
+				bi = k
+			k += 4
+		var d: Vector3 = pv - skin[bi]
+		var sd := d.length()
+		if sd > 1e-9:
+			sd = signf(d.dot(snrm[bi])) * sd
+		else:
+			sd = 0.0
+		sum += sd
+		mn = minf(mn, sd)
+		if sd < -0.0002:
+			buried += 1
+	return [sum / float(part.size()) * 1000.0, mn * 1000.0, buried]
 
 
 ## X-ray debug (TEMP, N / L3): 0 fused, 1 skin only, 2 fused + volumes,
