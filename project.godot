@@ -20,6 +20,10 @@ config/icon="res://icon.svg"
 GameState="*res://src/autoloads/game_state.gd"
 InputManager="*res://src/autoloads/input_manager.gd"
 
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/wigglebone/plugin.cfg")
+
 [physics]
 
 3d/physics_engine="Jolt Physics"

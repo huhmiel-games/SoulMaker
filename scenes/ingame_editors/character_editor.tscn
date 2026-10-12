@@ -84,4 +84,4 @@ grow_horizontal = 0
 
 [node name="HUD" parent="MenuLayer" unique_id=1369654397 instance=ExtResource("7")]
 
-[node name="ModalDialog" parent="MenuLayer" instance=ExtResource("8")]
+[node name="ModalDialog" parent="MenuLayer" unique_id=1947312010 instance=ExtResource("8")]
