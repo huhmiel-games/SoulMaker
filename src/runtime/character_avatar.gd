@@ -128,6 +128,7 @@ var _hair := 0 # index into hair_styles() (0 = None/bald)
 var _beard := 0 # index into beard_styles() (0 = None/clean-shaven)
 var _eyebrow := 0 # index into EYEBROW_STYLES (single Default for now)
 var _eye := 0 # index into EYE_STYLES (single Default for now)
+var _eyelash := 0 # index into EYELASH_STYLES (single Default for now)
 var _phys := {} # StringName phys key -> float scale (1.0 default)
 ## Face shape (Face submenu): global head form, Width = Head XZ, Length =
 ## Head Y. Multiplies with the Physics Head size row (uniform): final Head
@@ -2872,8 +2873,8 @@ func _apply_beard() -> void:
 ## like hair (bone remap by name, missing -> Head). Empty path = the gender
 ## ships no file yet (female until its export pass): no-op, and the fused
 ## nude carries brows/eyes (male nude skips them at import). Eyelashes have
-## no nude counterpart and no menu: auto-mounted when the file exists, albedo
-## color defaults like hair.
+## no nude counterpart: auto-mounted when the file exists, albedo color
+## defaults like hair, Style + Color submenu under the Face hub.
 const FACE_PART_DIR := "res://assets/meshes/characters/parts/"
 const EYEBROW_FILES := {"Male": [&"Default"], "Female": [&"Default"]}
 const EYE_FILES := {"Male": [&"Default"], "Female": [&"Default"]}
@@ -2974,7 +2975,9 @@ func _apply_eye() -> void:
 
 
 func _apply_eyelashes() -> void:
-	_mount_face_part("Eyelashes", eyelash_file(GENDERS[_gender], &"Default"), true)
+	_mount_face_part("Eyelashes", eyelash_file(GENDERS[_gender], EYELASH_STYLES[_eyelash]), true)
+	if _eyelash >= EYELASH_STYLES.size():
+		_eyelash = 0
 
 
 ## Eyebrow menu verbs (same value-row contract; single style for now,
@@ -3009,6 +3012,23 @@ func adjust_eye(dir: int) -> void:
 
 func reset_eye() -> void:
 	_eye = 0
+
+
+## Eyelash menu verbs (same value-row contract; single Default for now,
+## more files later — the cycle/reset plumbing is ready).
+const EYELASH_STYLES: Array[StringName] = [&"Default"]
+
+
+func eyelash_display() -> String:
+	return String(EYELASH_STYLES[_eyelash])
+
+
+func adjust_eyelash(dir: int) -> void:
+	_eyelash = posmod(_eyelash + dir, EYELASH_STYLES.size())
+
+
+func reset_eyelash() -> void:
+	_eyelash = 0
 
 
 ## Face anchor for host close-ups: Head bone world position.

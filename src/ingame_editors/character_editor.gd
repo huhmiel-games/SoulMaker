@@ -479,6 +479,18 @@ func reset_eye() -> void:
 	_avatar.reset_eye()
 
 
+func eyelash_display() -> String:
+	return _avatar.eyelash_display()
+
+
+func adjust_eyelash(dir: int) -> void:
+	_avatar.adjust_eyelash(dir)
+
+
+func reset_eyelash() -> void:
+	_avatar.reset_eyelash()
+
+
 func face_shape_display(key: StringName) -> String:
 	return _avatar.face_display(key)
 
@@ -506,7 +518,7 @@ func reset_face_sculpt(key: StringName) -> void:
 ## TEMP debug (male/female test parity, removed once character_editor lands):
 ## random full-face draws, sculpt keys only (global Width/Length
 ## untouched — they drive hair fit, not the face). Absolute sets never stack;
-## seed logged + full kvals for manual repro.
+## seed logged for report-back repro.
 var _coupling := {} # StringName key -> Array of [StringName other, float factor] (lazy, face_correlations.json)
 
 
@@ -588,10 +600,7 @@ func randomize_face(seed := 0) -> void:
 			v += float(pair[1]) * float(base.get(ok, 0.0)) / omax * maxv
 		_avatar.set_sculpt(key, clampf(v, -maxv * 0.6, maxv * 0.6), false)
 	_avatar.fuse_sculpt()
-	var kline := []
-	for key in CharacterAvatar.SCULPT_KEYS:
-		kline.append("%s=%+.1f" % [String(key), float(_avatar.get("_sculpt").get(key, 0.0)) * 10.0])
-	print("[Face] random seed %d (%s) kvals(mm): %s" % [use_seed, _avatar.gender_display(), " ".join(kline)])
+	print("[Face] random seed %d (%s)" % [use_seed, _avatar.gender_display()])
 
 
 func reset_face_all() -> void:
@@ -2025,8 +2034,12 @@ func _run_headless_test() -> void:
 	fails += _expect("face eyes back to hub", _menu._level == CharacterMenu.LEVEL_FACE and face_active())
 	_menu._pop()
 	fails += _expect("face cam off eyes", not face_active())
-	# 9b. Eyelashes (mounted male part, no nude counterpart, no menu: albedo
-	# defaults like hair; female ships no file yet).
+	# 9b. Eyelashes (mounted part both genders, no nude counterpart: albedo
+	# defaults like hair; Face hub submenu = Style + Color, single style).
+	fails += _expect("lash style default", eyelash_display() == "Default")
+	adjust_eyelash(1)
+	fails += _expect("lash style single", eyelash_display() == "Default")
+	reset_eyelash()
 	fails += _expect("lash file male", eyelash_file("Male", &"Default").ends_with("Male_Eyelashes.gltf"))
 	var lmi := _avatar.get_node_or_null("Eyelashes/Male_Eyelashes") as MeshInstance3D
 	fails += _expect("lashes mounted", lmi != null and lmi.mesh != null)
@@ -2048,6 +2061,19 @@ func _run_headless_test() -> void:
 		if _slot_mats(&"Skin").has(m):
 			lash_shared = true
 	fails += _expect("lashes split from skin", not lash_shared)
+	open_color(&"Eyelashes")
+	fails += _expect("lashes color opens", is_color_open())
+	_dresser._params = {"hue": 300.0, "sat": 0.8, "val": 0.6}
+	_dresser._apply()
+	var want_lash := Color.from_hsv(300.0 / 360.0, 0.8, 0.6)
+	fails += _expect("lashes albedo written", ((lash_mats[0] as ShaderMaterial).get_shader_parameter("albedo") as Color).is_equal_approx(want_lash))
+	_dresser._confirm()
+	fails += _expect("lashes color stored", _avatar._color_params.has(&"Eyelashes"))
+	_menu._push(CharacterMenu.LEVEL_FACE_EYELASHES)
+	fails += _expect("menu lashes rows", _menu._entries.size() == 3)
+	fails += _expect("face cam on lashes", face_active())
+	_menu._pop()
+	fails += _expect("face lashes back to hub", _menu._level == CharacterMenu.LEVEL_FACE and face_active())
 	# 9c. Face-part follow (09/10, site-mean 12/10): socket rows move the rigid
 	# parts with the socket's local motion (mesh space, anim-exact); rest
 	# restores pristine. Balls ride lids/tilt/socket spillover, shape held.
@@ -3030,7 +3056,7 @@ func _run_headless_test() -> void:
 	var hub_labels := []
 	for e in _menu._entries:
 		hub_labels.append(String((e as Dictionary).get("label", "")))
-	fails += _expect("menu hub head grouped", hub_labels.has("Hair >") and hub_labels.has("Eyebrows >") and hub_labels.has("Eyes >") and hub_labels.has("Beard >"))
+	fails += _expect("menu hub head grouped", hub_labels.has("Hair >") and hub_labels.has("Eyebrows >") and hub_labels.has("Eyelashes >") and hub_labels.has("Eyes >") and hub_labels.has("Beard >"))
 	fails += _expect("menu hub debug rows", hub_labels.has("Random Face") and hub_labels.has("Reset Face"))
 	# TEMP debug rows: draw moves the mesh, full reset restores it (both
 	# genders already covered — here male, female parity ratios in §17).
@@ -3138,6 +3164,10 @@ func _run_headless_test() -> void:
 	_menu._push(CharacterMenu.LEVEL_FACE_EARS)
 	fails += _expect("menu face ears rows", _menu._entries.size() == 4 + 1)
 	fails += _expect("face cam on ears", face_active())
+	_menu._pop()
+	_menu._push(CharacterMenu.LEVEL_FACE_EYELASHES)
+	fails += _expect("menu face lashes rows", _menu._entries.size() == 2 + 1)
+	fails += _expect("face cam on lashes hub", face_active())
 	_menu._pop()
 	fails += _expect("menu back to hub forehead", _menu._level == CharacterMenu.LEVEL_FACE)
 	_menu._pop()
