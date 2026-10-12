@@ -1414,10 +1414,17 @@ func _sculpt_fused() -> void:
 			if not active.is_empty():
 				flist.append({"total": true})
 		else:
+			var site_skip := false
+			if fslot2 == &"Eyes":
+				var em := _eyes_site_mean(head_inv)
+				if bool(em[0]):
+					flist.append({"sides": true, "cx": em[1], "meanL": em[2], "meanR": em[3]})
+					site_skip = true
 			for fkey2 in _follow_keys(SCULPT_FOLLOW[fslot2]):
 				if SCULPT_FOLLOW_ROT.has(fkey2) and active.has(fkey2):
-					# Rigid per-side rotation (lashes ride the tilt): analytic
-					# angle/pivot, same convention as the siderot skin mode.
+					# Rigid per-side rotation (EyeAngle: the balls must not
+					# roll): analytic angle/pivot, same convention as the
+					# siderot skin mode.
 					var rspec: Dictionary = SCULPT_SPEC.get(fkey2, {})
 					var rreg: Dictionary = regions.get(String(rspec.get("region", "")), {})
 					if rreg.is_empty():
@@ -1434,7 +1441,7 @@ func _sculpt_fused() -> void:
 					if sreg.is_empty():
 						continue
 					flist.append({"key": fkey2, "scale": true, "cx": float(sreg["cx"]), "factor": float(_sculpt.get(fkey2, 0.0)) * float(sspec.get("rate", 0.15)), "axis": sspec.get("axis", Vector3.ONE), "pivL": sreg["cL"], "pivR": sreg["cR"]})
-				elif follow_acc.has(fkey2):
+				elif follow_acc.has(fkey2) and not site_skip:
 					var fa2: Dictionary = follow_acc[fkey2]
 					if bool(fa2.get("sides", false)):
 						if int(fa2["countL"]) > 0 and int(fa2["countR"]) > 0:
@@ -1755,6 +1762,54 @@ func _face_glue_total_bake(slot: String, head_world: Transform3D, head_inv: Tran
 			pout.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, a)
 			pout.surface_set_material(s, pristine.surface_get_material(s))
 		mi.mesh = pout
+
+
+## Site translation for the Eyes (12/10): side-split mean of the retained
+## TOTAL skin offset over lid skin near the FRONT of the balls (fixed rest
+## set) — the globes ride the aperture's local motion for every key, driving
+## or not. Whole-mask means lagged (spillover blind spots); whole-socket
+## means were polluted by far-field spillover (brow diffusion at the upper
+## rim). Front-only avoids diluting with deep-socket anchors behind the
+## balls. Rotation (EyeAngle) and dilation (EyeSize) stay analytic on top
+## (their site means read ~0, motion about the side centroids).
+## Returns [ok, cx, meanL, meanR].
+func _eyes_site_mean(head_inv: Transform3D) -> Array:
+	var pristine := _face_pristine.get("Eyes") as ArrayMesh
+	if pristine == null or _glue_qs.is_empty() or _glue_grid.is_empty() or _glue_total.is_empty():
+		return [false]
+	var rid := pristine.get_rid().get_id()
+	if not _glue_map.has(rid):
+		_glue_map[rid] = _glue_build_map(pristine, head_inv)
+	var emap: PackedInt32Array = _glue_map[rid]
+	var cx := float(sculpt_region_stats("Eyelids").get("cx", 0.0))
+	var tL := Vector3.ZERO
+	var tR := Vector3.ZERO
+	var nL := 0
+	var nR := 0
+	var gi := 0
+	for s in pristine.get_surface_count():
+		var a := pristine.surface_get_arrays(s)
+		var pv: PackedVector3Array = a[Mesh.ARRAY_VERTEX]
+		var pn: PackedVector3Array = a[Mesh.ARRAY_NORMAL]
+		var has_n := pn.size() == pv.size()
+		for i in pv.size():
+			var keep := true
+			if has_n:
+				var fn: Vector3 = (head_inv.basis * pn[i]).normalized()
+				keep = fn.z > 0.3
+			if keep and gi < emap.size():
+				var sk: int = emap[gi]
+				if sk >= 0 and sk < _glue_total.size():
+					if _glue_qs[sk].x >= cx:
+						tR += _glue_total[sk]
+						nR += 1
+					else:
+						tL += _glue_total[sk]
+						nL += 1
+			gi += 1
+	if nL == 0 or nR == 0:
+		return [false]
+	return [true, cx, tL / float(nL), tR / float(nR)]
 
 
 ## Restores every mounted part to its pristine mesh (all-zero sculpt path).

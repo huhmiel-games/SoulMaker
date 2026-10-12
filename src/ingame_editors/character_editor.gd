@@ -93,6 +93,8 @@ func _ready() -> void:
 		_run_capture_test()
 	if "--browprobe" in OS.get_cmdline_user_args() or "--browprobe" in OS.get_cmdline_args():
 		_run_brow_probe()
+	if "--facesweep" in OS.get_cmdline_user_args() or "--facesweep" in OS.get_cmdline_args():
+		_run_face_sweep()
 	if _animtest_wanted():
 		_animtest_setup()
 	else:
@@ -3303,7 +3305,13 @@ func _run_brow_probe() -> void:
 		var r0: PackedVector3Array = n0[0]
 		var sn0: PackedVector3Array = n0[1]
 		var p0 := _browprobe_part_verts()
+		var e0 := _browprobe_part_verts("Eyes")
 		var pair := _browprobe_pair(p0, r0)
+		var site := _browprobe_eye_site()
+		var paire := _browprobe_pair(e0, site[0])
+		print("[BrowProbe] %s eye site skin=%d ballpair=%d" % [gender_display(), (site[0] as PackedVector3Array).size(), paire.size()])
+		var lid := _browprobe_eye_site("Eyelids", 0.005)
+		print("[BrowProbe] %s lid verts=%d" % [gender_display(), (lid[0] as PackedVector3Array).size()])
 		var rg := _browprobe_sink(p0, r0, sn0, p0, r0, pair)
 		print("[BrowProbe] %s rest sink mean=%+.2fmm min=%+.2fmm buried=%d (part %d)" % [gender_display(), rg[0], rg[1], rg[2], p0.size()])
 		_browprobe_apply_seed()
@@ -3313,6 +3321,45 @@ func _run_brow_probe() -> void:
 		print("[BrowProbe] %s seed kvals(mm): %s" % [gender_display(), " ".join(kvals)])
 		var sg := _browprobe_sink(p0, r0, sn0, _browprobe_part_verts(), _browprobe_skin_pn()[0], pair)
 		print("[BrowProbe] %s seed sink mean=%+.2fmm min=%+.2fmm buried=%d" % [gender_display(), sg[0], sg[1], sg[2]])
+		var ekvals := []
+		for ek in eye_keys:
+			ekvals.append("%s=%+.2f" % [String(ek), float(_avatar.get("_sculpt").get(ek, 0.0)) * 10.0])
+		print("[BrowProbe] %s seed eyekvals(mm): %s" % [gender_display(), " ".join(ekvals)])
+		var s1 := _browprobe_eye_site_pos(site[2])
+		var e1 := _browprobe_part_verts("Eyes")
+		var se := _browprobe_sink(e0, site[0], site[1], e1, s1[0], paire)
+		print("[BrowProbe] %s seed eyes sink mean=%+.2fmm min=%+.2fmm buried=%d paired=%d (balls %d)" % [gender_display(), se[0], se[1], se[2], se[3], e0.size()])
+		var ap0 := _browprobe_aperture(e0, lid[0])
+		var l1 := _browprobe_eye_site_pos(lid[2])
+		var ap1 := _browprobe_aperture(e1, l1[0])
+		print("[BrowProbe] %s aperture rest lidU=%+.2f lidL=%+.2f ballU=%+.2f ballL=%+.2f vs seed lidU=%+.2f lidL=%+.2f ballU=%+.2f ballL=%+.2f" % [gender_display(), ap0[0], ap0[1], ap0[2], ap0[3], ap1[0], ap1[1], ap1[2], ap1[3]])
+		var inv := _browprobe_headinv()
+		var cx := float(_avatar.sculpt_region_stats("Eyelids").get("cx", 0.0))
+		var he0 := PackedVector3Array()
+		var he1 := PackedVector3Array()
+		for v in e0:
+			he0.append(inv * v)
+		for v in e1:
+			he1.append(inv * v)
+		var hl0 := PackedVector3Array()
+		var hl1 := PackedVector3Array()
+		for v in (lid[0] as PackedVector3Array):
+			hl0.append(inv * v)
+		for v in (l1[0] as PackedVector3Array):
+			hl1.append(inv * v)
+		var hc0 := PackedVector3Array()
+		var hc1 := PackedVector3Array()
+		for i in hl0.size():
+			if absf(hl0[i].x - cx) < 0.02:
+				hc0.append(hl0[i])
+				hc1.append(hl1[i])
+		var sb := _browprobe_sidemeans(he0, he1, cx)
+		var sl := _browprobe_sidemeans(hl0, hl1, cx)
+		var sc := _browprobe_sidemeans(hc0, hc1, cx)
+		print("[BrowProbe] %s lateral ball L=%s R=%s | lids L=%s R=%s | canthi L=%s R=%s (mm x1000)" % [gender_display(), str(sb[0] * 1000.0), str(sb[1] * 1000.0), str(sl[0] * 1000.0), str(sl[1] * 1000.0), str(sc[0] * 1000.0), str(sc[1] * 1000.0)])
+		var pen0 := _browprobe_pen(e0, site[0], site[1])
+		var pen1 := _browprobe_pen(_browprobe_part_verts("Eyes"), s1[0], s1[1])
+		print("[BrowProbe] %s eyes pen rest min=%+.2fmm bad=%d/balls=%d vs seed min=%+.2fmm bad=%d y=%+.1fmm" % [gender_display(), pen0[0], pen0[1], e0.size(), pen1[0], pen1[1], pen1[2]])
 		# Attribution: seed minus the eye keys (cross-talk suspects).
 		for ek in eye_keys:
 			_avatar.set_sculpt(ek, 0.0, false)
@@ -3329,26 +3376,142 @@ func _run_brow_probe() -> void:
 		var bg := _browprobe_sink(p0, r0, sn0, _browprobe_part_verts(), _browprobe_skin_pn()[0], pair)
 		print("[BrowProbe] %s seed-browsonly sink mean=%+.2fmm min=%+.2fmm buried=%d" % [gender_display(), bg[0], bg[1], bg[2]])
 		reset_face_all()
+		var iso := []
 		for bk in brow_keys:
-			reset_face_sculpt(bk)
+			iso.append([bk, "Brows", "Eyebrows"])
+		for ek2 in eye_keys:
+			iso.append([ek2, "Eyelids", "Eyes"])
+		for entry in iso:
+			var ik: StringName = entry[0]
+			var ireg: String = entry[1]
+			var islot: String = entry[2]
+			reset_face_sculpt(ik)
 			var b0 := _head_dom_verts()
-			var q0 := _browprobe_part_verts()
-			adjust_face_sculpt(bk, 10)
+			var pn0 := _browprobe_skin_pn()
+			var q0 := _browprobe_part_verts(islot)
+			adjust_face_sculpt(ik, 10)
 			var b1 := _head_dom_verts()
-			var q1 := _browprobe_part_verts()
-			var skv := _browprobe_region_vec(b0, b1, "Brows")
+			var pn1 := _browprobe_skin_pn()
+			var q1 := _browprobe_part_verts(islot)
+			var skv := _browprobe_region_vec(b0, b1, ireg)
 			var pkv := _browprobe_mean_vec(q0, q1)
-			print("[BrowProbe] %s %s skin=%s part=%s" % [gender_display(), String(bk), str(skv * 1000.0), str(pkv * 1000.0)])
-			reset_face_sculpt(bk)
+			var isk := [0.0, 0.0, 0, 0]
+			if islot == "Eyes":
+				var st1 := _browprobe_eye_site_pos(site[2])
+				var pair0e := _browprobe_pair(q0, site[0])
+				isk = _browprobe_sink(q0, site[0], site[1], q1, st1[0], pair0e)
+				var pe0 := _browprobe_pen(q0, site[0], site[1])
+				var pe1 := _browprobe_pen(q1, st1[0], st1[1])
+				print("[BrowProbe] %s %s pen rest min=%+.2fmm bad=%d vs state min=%+.2fmm bad=%d y=%+.1fmm" % [gender_display(), String(ik), pe0[0], pe0[1], pe1[0], pe1[1], pe1[2]])
+			else:
+				var pair0b := _browprobe_pair(q0, pn0[0])
+				isk = _browprobe_sink(q0, pn0[0], pn0[1], q1, pn1[0], pair0b)
+			print("[BrowProbe] %s %s skin=%s part=%s sink=%+.2f/%+.2f/%d/%d" % [gender_display(), String(ik), str(skv * 1000.0), str(pkv * 1000.0), isk[0], isk[1], isk[2], isk[3]])
+			reset_face_sculpt(ik)
 	print("[BrowProbe] done")
+	get_tree().quit()
+
+
+## TEMP clearance sweep (face acceptance landscape): 20 FIXED seeds (bit
+## reproducible) x both genders, full-face ±60% draws. Per seed: brow sink
+## min (paired set), lid-vs-ball aperture upper/lower, lateral ball-vs-canthi
+## outrun. Reporting thresholds only (no pins yet): brow < -1.0 burial,
+## aperture < +1.0 tight, lateral > +1.0 strain. Worst seed's full kvals print
+## for manual repro. Removed once the bar is set.
+func _run_face_sweep() -> void:
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var n := 20
+	var worst_brow := [1e9, -1, ""]
+	var worst_apu := [1e9, -1, ""]
+	var worst_apl := [1e9, -1, ""]
+	var worst_lat := [-1e9, -1, ""]
+	var worst_kvals := {}
+	var nbad_brow := 0
+	var nbad_ap := 0
+	var nbad_lat := 0
+	for g in [0, 1]:
+		if g == 0:
+			reset_gender()
+		else:
+			adjust_gender(1)
+		reset_face_all()
+		var n0 := _browprobe_skin_pn()
+		var r0: PackedVector3Array = n0[0]
+		var sn0: PackedVector3Array = n0[1]
+		var p0 := _browprobe_part_verts()
+		var pair := _browprobe_pair(p0, r0)
+		var e0 := _browprobe_part_verts("Eyes")
+		var lid := _browprobe_eye_site("Eyelids", 0.005)
+		var inv := _browprobe_headinv()
+		var cx := float(_avatar.sculpt_region_stats("Eyelids").get("cx", 0.0))
+		var hc_idx := PackedInt32Array()
+		var hl0rest := PackedVector3Array()
+		for v in (lid[0] as PackedVector3Array):
+			hl0rest.append(inv * v)
+		for i in hl0rest.size():
+			if absf(hl0rest[i].x - cx) < 0.02:
+				hc_idx.append(i)
+		for i in n:
+			var seed := 7000 + i
+			_browprobe_apply_seed(seed)
+			var p1 := _browprobe_part_verts()
+			var sg := _browprobe_sink(p0, r0, sn0, p1, _browprobe_skin_pn()[0], pair)
+			var e1 := _browprobe_part_verts("Eyes")
+			var l1 := _browprobe_eye_site_pos(lid[2])
+			var ap := _browprobe_aperture(e1, l1[0])
+			var apu: float = ap[0] - ap[2]
+			var apl: float = ap[1] - ap[3]
+			var he0 := PackedVector3Array()
+			var he1 := PackedVector3Array()
+			for v in e0:
+				he0.append(inv * v)
+			for v in e1:
+				he1.append(inv * v)
+			var hl1 := PackedVector3Array()
+			for v in (l1[0] as PackedVector3Array):
+				hl1.append(inv * v)
+			var hc0 := PackedVector3Array()
+			var hc1 := PackedVector3Array()
+			for ci in hc_idx:
+				hc0.append(hl0rest[int(ci)])
+				hc1.append(hl1[int(ci)])
+			var sb := _browprobe_sidemeans(he0, he1, cx)
+			var sc := _browprobe_sidemeans(hc0, hc1, cx)
+			var lat := maxf(absf((sb[0] as Vector3).x) - absf((sc[0] as Vector3).x), absf((sb[1] as Vector3).x) - absf((sc[1] as Vector3).x))
+			var tag := "%d %s" % [seed, gender_display()]
+			print("[FaceSweep] seed=%d %s brow=%+.2f apU=%+.2f apL=%+.2f lat=%+.2f sp=%+.2f" % [seed, gender_display(), sg[1], apu, apl, lat, float(_avatar.get("_sculpt").get(&"EyeSpacing", 0.0)) * 10.0])
+			if sg[1] < worst_brow[0]:
+				worst_brow = [sg[1], seed, gender_display()]
+				worst_kvals = (_avatar.get("_sculpt") as Dictionary).duplicate()
+			if apu < worst_apu[0]:
+				worst_apu = [apu, seed, gender_display()]
+			if apl < worst_apl[0]:
+				worst_apl = [apl, seed, gender_display()]
+			if lat > worst_lat[0]:
+				worst_lat = [lat, seed, gender_display()]
+			if sg[1] < -1.0:
+				nbad_brow += 1
+			if minf(apu, apl) < 1.0:
+				nbad_ap += 1
+			if lat > 1.0:
+				nbad_lat += 1
+		reset_face_all()
+	print("[FaceSweep] worst brow=%+.2f (seed %d %s) apU=%+.2f (%d %s) apL=%+.2f (%d %s) lat=%+.2f (%d %s)" % [worst_brow[0], worst_brow[1], worst_brow[2], worst_apu[0], worst_apu[1], worst_apu[2], worst_apl[0], worst_apl[1], worst_apl[2], worst_lat[0], worst_lat[1], worst_lat[2]])
+	print("[FaceSweep] over bar: brow %d/40 aperture %d/40 lateral %d/40" % [nbad_brow, nbad_ap, nbad_lat])
+	var wline := []
+	for key in CharacterAvatar.SCULPT_KEYS:
+		wline.append("%s=%+.1f" % [String(key), float(worst_kvals.get(key, 0.0)) * 10.0])
+	print("[FaceSweep] worst-brow kvals(mm): %s" % " ".join(wline))
+	print("[FaceSweep] done")
 	get_tree().quit()
 
 
 ## Replays the reported seed exactly (fresh RNG + same call order as
 ## randomize_face: one randf_range per SCULPT_KEYS entry).
-func _browprobe_apply_seed() -> void:
+func _browprobe_apply_seed(seed := -4760453800869451545) -> void:
 	var rng := RandomNumberGenerator.new()
-	rng.seed = -4760453800869451545
+	rng.seed = seed
 	for key in CharacterAvatar.SCULPT_KEYS:
 		var maxv := float((CharacterAvatar.SCULPT_SPEC.get(key, {}) as Dictionary).get("max_cm", 1.0))
 		_avatar.set_sculpt(key, rng.randf_range(-maxv * 0.6, maxv * 0.6), false)
@@ -3356,47 +3519,55 @@ func _browprobe_apply_seed() -> void:
 
 
 ## Rest pairing: nearest rest-skin index per part vert (stride 1 — the head
-## patch is small). Fixed set for all later sink measurements.
+## patch is small). Fixed set for all later sink measurements. Verts pairing
+## farther than 1.5mm (deep-socket ball backs with no true skin neighbor)
+## get -1 and are excluded: their relative motion is meaningless.
 func _browprobe_pair(p0: PackedVector3Array, r0: PackedVector3Array) -> PackedInt32Array:
 	var out := PackedInt32Array()
 	out.resize(p0.size())
 	for i in p0.size():
 		var best := 1e18
-		var bi := 0
+		var bi := -1
 		for j in r0.size():
 			var d2 := p0[i].distance_squared_to(r0[j])
 			if d2 < best:
 				best = d2
 				bi = j
-		out[i] = bi
+		out[i] = bi if best <= 0.0015 * 0.0015 else -1
 	return out
 
 
 ## Per-vert sink depth: part motion minus paired-skin motion, signed on the
 ## REST skin normal. Negative = the part dove under the skin there.
-## Returns [mean_mm, min_mm, buried_count(< -0.2mm)].
+## Returns [mean_mm, min_mm, buried_count(< -0.2mm), paired_count].
 func _browprobe_sink(p0: PackedVector3Array, r0: PackedVector3Array, sn0: PackedVector3Array, p1: PackedVector3Array, r1: PackedVector3Array, pair: PackedInt32Array) -> Array:
 	if p0.size() != p1.size() or r0.size() != r1.size() or p0.size() != pair.size() or sn0.size() != r0.size():
-		return [9999.0, 9999.0, 0]
+		return [9999.0, 9999.0, 0, 0]
 	var sum := 0.0
 	var mn := 1e9
 	var buried := 0
+	var n := 0
 	for i in p0.size():
 		var j := pair[i]
+		if j < 0:
+			continue
 		var rel: Vector3 = (p1[i] - p0[i]) - (r1[j] - r0[j])
 		var sd := rel.dot(sn0[j])
 		sum += sd
 		mn = minf(mn, sd)
 		if sd < -0.0002:
 			buried += 1
-	return [sum / float(p0.size()) * 1000.0, mn * 1000.0, buried]
+		n += 1
+	if n == 0:
+		return [0.0, 0.0, 0, 0]
+	return [sum / float(n) * 1000.0, mn * 1000.0, buried, n]
 
 
-## All Eyebrows-holder verts in Skin-model space (relative transform applied,
-## no equal-transform assumption).
-func _browprobe_part_verts() -> PackedVector3Array:
+## All holder verts of a face slot in Skin-model space (relative transform
+## applied, no equal-transform assumption).
+func _browprobe_part_verts(slot := "Eyebrows") -> PackedVector3Array:
 	var out := PackedVector3Array()
-	var holder := _avatar.get_node_or_null("Eyebrows")
+	var holder := _avatar.get_node_or_null(slot)
 	var skin_mi := _avatar_skin_mi()
 	if holder == null or skin_mi == null:
 		return out
@@ -3438,6 +3609,173 @@ func _browprobe_region_vec(before: PackedVector3Array, after: PackedVector3Array
 			acc += after[i] - before[i]
 			n += 1
 	return acc / float(maxi(n, 1))
+
+
+## Eye-site skin: head-local Eyelids bbox (±30mm) filter over ALL Skin verts
+## (no Head-dominance filter — the lids themselves are barely Head-weighted,
+## which is why the head-dom set saw nothing near the balls). Topology never
+## changes under sculpt, so a rest-computed flat index set stays valid all
+## bake long. Returns [pos, nrm, idx] (model space + flat counters).
+func _browprobe_eye_site(region := "Eyelids", margin := 0.03) -> Array:
+	var pos := PackedVector3Array()
+	var nrm := PackedVector3Array()
+	var idx := PackedInt32Array()
+	var sk := _avatar_skeleton()
+	var bi := sk.find_bone(&"Head") if sk != null else -1
+	if bi == -1:
+		return [pos, nrm, idx]
+	var inv: Transform3D = _avatar._bone_rest_world(sk, bi).affine_inverse()
+	var r: Dictionary = _avatar._sculpt_regions().get(region, {})
+	if r.is_empty():
+		return [pos, nrm, idx]
+	var mn: Vector3 = (r["mn"] as Vector3) - Vector3(margin, margin, margin)
+	var mx: Vector3 = (r["mx"] as Vector3) + Vector3(margin, margin, margin)
+	var k := 0
+	for mi in _avatar_mis():
+		var mmi := mi as MeshInstance3D
+		if mmi == null or mmi.mesh == null or mmi.name != &"Skin":
+			continue
+		for s in mmi.mesh.get_surface_count():
+			var a := mmi.mesh.surface_get_arrays(s)
+			var bv: PackedVector3Array = a[Mesh.ARRAY_VERTEX]
+			var an: PackedVector3Array = a[Mesh.ARRAY_NORMAL]
+			if an.size() != bv.size():
+				k += bv.size()
+				continue
+			for i in bv.size():
+				var q: Vector3 = inv * bv[i]
+				if q.x >= mn.x and q.x <= mx.x and q.y >= mn.y and q.y <= mx.y and q.z >= mn.z and q.z <= mx.z:
+					pos.append(bv[i])
+					nrm.append(an[i].normalized())
+					idx.append(k)
+				k += 1
+	return [pos, nrm, idx]
+
+
+## Current positions/normals for a rest-computed eye-site index set.
+func _browprobe_eye_site_pos(idxs: PackedInt32Array) -> Array:
+	var pos := PackedVector3Array()
+	var nrm := PackedVector3Array()
+	var want := {}
+	for v in idxs:
+		want[int(v)] = true
+	var k := 0
+	for mi in _avatar_mis():
+		var mmi := mi as MeshInstance3D
+		if mmi == null or mmi.mesh == null or mmi.name != &"Skin":
+			continue
+		for s in mmi.mesh.get_surface_count():
+			var a := mmi.mesh.surface_get_arrays(s)
+			var bv: PackedVector3Array = a[Mesh.ARRAY_VERTEX]
+			var an: PackedVector3Array = a[Mesh.ARRAY_NORMAL]
+			if an.size() != bv.size():
+				k += bv.size()
+				continue
+			for i in bv.size():
+				if want.has(k):
+					pos.append(bv[i])
+					nrm.append(an[i].normalized())
+				k += 1
+	return [pos, nrm]
+
+
+## True interpenetration probe (no rest pairing): per ball vert, signed
+## distance to the nearest CURRENT site-skin vert (4mm cap). Returns
+## [min_mm, bad_count(< -0.3mm), bad_meany_minus_centery_mm, paired].
+## Compare rest vs sculpted: NEW deep negatives = real penetration. The Y
+## tells superior (+) from inferior (−).
+func _browprobe_pen(pv: PackedVector3Array, sp: PackedVector3Array, sn: PackedVector3Array) -> Array:
+	if pv.is_empty() or sp.is_empty() or sp.size() != sn.size():
+		return [0.0, 0.0, 0.0, 0]
+	var cy := 0.0
+	for v in pv:
+		cy += v.y
+	cy /= float(pv.size())
+	var mn := 1e9
+	var bad := 0
+	var by := 0.0
+	var n := 0
+	for p in pv:
+		var best := 1e18
+		var bi := 0
+		for j in sp.size():
+			var d2 := p.distance_squared_to(sp[j])
+			if d2 < best:
+				best = d2
+				bi = j
+		if best > 0.004 * 0.004:
+			continue
+		n += 1
+		var d: Vector3 = p - sp[bi]
+		var sd := d.length()
+		if sd > 1e-9:
+			sd = signf(d.dot(sn[bi])) * sd
+		else:
+			sd = 0.0
+		mn = minf(mn, sd)
+		if sd < -0.0003:
+			bad += 1
+			by += p.y
+	var rel := 0.0
+	if bad > 0:
+		rel = (by / float(bad) - cy) * 1000.0
+	if n == 0:
+		return [0.0, 0.0, 0.0, 0]
+	return [mn * 1000.0, bad, rel, n]
+
+
+## Head-inverse (IDENTITY when no skeleton): puts probe verts in Head frame.
+func _browprobe_headinv() -> Transform3D:
+	var sk := _avatar_skeleton()
+	var bi := sk.find_bone(&"Head") if sk != null else -1
+	if bi == -1:
+		return Transform3D.IDENTITY
+	return _avatar._bone_rest_world(sk, bi).affine_inverse()
+
+
+## Side-split mean motions in Head frame (x >= cx = R): [meanL, meanR].
+func _browprobe_sidemeans(r0: PackedVector3Array, r1: PackedVector3Array, cx: float) -> Array:
+	var sL := Vector3.ZERO
+	var sR := Vector3.ZERO
+	var nL := 0
+	var nR := 0
+	for i in mini(r0.size(), r1.size()):
+		if r0[i].x >= cx:
+			sR += r1[i] - r0[i]
+			nR += 1
+		else:
+			sL += r1[i] - r0[i]
+			nL += 1
+	if nL == 0 or nR == 0:
+		return [Vector3.ZERO, Vector3.ZERO]
+	return [sL / float(nL), sR / float(nR)]
+
+
+## Lid-vs-ball aperture (model +z = face-forward): max z of site skin and of
+## balls, split upper/lower by ball-center y. Poke-through = ballmax passing
+## lidmax vs the rest baseline. Returns [lid_up, lid_lo, ball_up, ball_lo].
+func _browprobe_aperture(balls: PackedVector3Array, skin: PackedVector3Array) -> Array:
+	if balls.is_empty() or skin.is_empty():
+		return [0.0, 0.0, 0.0, 0.0]
+	var cy := 0.0
+	for v in balls:
+		cy += v.y
+	cy /= float(balls.size())
+	var lu := -1e9
+	var ll := -1e9
+	for v in skin:
+		if v.y >= cy:
+			lu = maxf(lu, v.z)
+		else:
+			ll = maxf(ll, v.z)
+	var bu := -1e9
+	var bl := -1e9
+	for v in balls:
+		if v.y >= cy:
+			bu = maxf(bu, v.z)
+		else:
+			bl = maxf(bl, v.z)
+	return [lu * 1000.0, ll * 1000.0, bu * 1000.0, bl * 1000.0]
 
 
 ## Head-dominated skin positions + normals (model space), for the signed
