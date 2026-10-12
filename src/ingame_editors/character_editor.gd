@@ -523,6 +523,18 @@ func reset_bproj() -> void:
 	_avatar.reset_bproj()
 
 
+func bangle_display() -> String:
+	return _avatar.bangle_display()
+
+
+func adjust_bangle(dir: int) -> void:
+	_avatar.adjust_bangle(dir)
+
+
+func reset_bangle() -> void:
+	_avatar.reset_bangle()
+
+
 ## Avatar data access for the probe/overlay/capture tools + chartest.
 func _avatar_skeleton() -> Skeleton3D:
 	return _avatar.master_skeleton()
@@ -1442,8 +1454,21 @@ func _run_headless_test() -> void:
 	else:
 		for bname in ["bproj display", "bproj nipple push", "bproj floor still", "bproj cloth follows", "bproj reset display", "bproj restore exact", "bproj clamp max", "bproj clamp min"]:
 			fails += _expect(bname, false)
+	# BreastAngle: rigid mirrored yaw (+ = inward), exact identity on reset.
+	adjust_bangle(10)
+	fails += _expect("bangle display", bangle_display() == "+10°")
+	var fsk3 := _avatar_skeleton()
+	var fbl3 := fsk3.find_bone(&"LeftBreast") if fsk3 != null else -1
+	var fbr3 := fsk3.find_bone(&"RightBreast") if fsk3 != null else -1
+	var gql: Quaternion = fsk3.get_bone_pose_rotation(fbl3)
+	var gqr: Quaternion = fsk3.get_bone_pose_rotation(fbr3)
+	var eul := gql.get_euler()
+	var eur := gqr.get_euler()
+	fails += _expect("bangle mirrored", absf(rad_to_deg(eul.y) - 10.0) < 0.01 and absf(rad_to_deg(eur.y) + 10.0) < 0.01)
+	reset_bangle()
+	fails += _expect("bangle reset", bangle_display() == "+0°" and fsk3.get_bone_pose_rotation(fbl3).is_equal_approx(Quaternion.IDENTITY))
 	_menu._push(CharacterMenu.LEVEL_PHYSICS)
-	fails += _expect("female physics breast rows", _menu._entries.size() == 10)
+	fails += _expect("female physics breast rows", _menu._entries.size() == 11)
 	_menu._pop()
 	# Wiggle attaches live only — headless stays deterministic.
 	var wig_n := 0

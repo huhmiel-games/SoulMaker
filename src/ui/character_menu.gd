@@ -171,6 +171,10 @@ func _load_entries() -> Array:
 				"get": _host.bproj_display,
 				"adjust": _host.adjust_bproj,
 				"reset": _host.reset_bproj})
+			pout.append({"label": "BreastAngle", "kind": "value",
+				"get": _host.bangle_display,
+				"adjust": _host.adjust_bangle,
+				"reset": _host.reset_bangle})
 		pout.append({"label": "[ ← Back ]", "call": _pop})
 		return pout
 	if _level == LEVEL_HAIR:

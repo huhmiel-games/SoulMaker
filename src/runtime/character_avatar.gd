@@ -2125,6 +2125,29 @@ func reset_bproj() -> void:
 	_breast_sculpt()
 
 
+## Breast angle (female only): rigid mirrored yaw of the breast bones about
+## their origin (near nipple, so the mound swings as a block and the nipple
+## normal turns). Degrees, + = inward toward the midline, - = outward.
+## Same block-motion contract as EyeAngle->lashes.
+const BANGLE_STEP := 1.0
+const BANGLE_MAX_DEG := 30.0
+var _bangle := 0.0
+
+
+func bangle_display() -> String:
+	return "%+d°" % int(round(float(_bangle)))
+
+
+func adjust_bangle(dir: int) -> void:
+	_bangle = clampf(float(_bangle) + float(dir) * BANGLE_STEP, -BANGLE_MAX_DEG, BANGLE_MAX_DEG)
+	_apply_physics()
+
+
+func reset_bangle() -> void:
+	_bangle = 0.0
+	_apply_physics()
+
+
 ## Continuous breast field (mesh-independent chest-frame parameters): nipple
 ## centers + radius + gate floor. Painted wins; unpainted falls back to the
 ## auto apex (same fallbacks as the weights). {} when unusable or male.
@@ -2314,6 +2337,14 @@ func _apply_physics() -> void:
 		if sbi == -1:
 			continue
 		sk.set_bone_pose_position(sbi, Vector3(0.0, sag_off, 0.0))
+	# BreastAngle: rigid mirrored yaw about each bone origin (near nipple).
+	var bang := deg_to_rad(float(_bangle))
+	var bli := sk.find_bone(BREAST_BONES[0])
+	if bli != -1:
+		sk.set_bone_pose_rotation(bli, Quaternion(Vector3.UP, bang))
+	var bri := sk.find_bone(BREAST_BONES[1])
+	if bri != -1:
+		sk.set_bone_pose_rotation(bri, Quaternion(Vector3.UP, -bang))
 	# BreastFirmness: stiffness + damping + max_distance on the shared wiggle
 	# resource (live nodes reference it, so they follow; headless has no
 	# nodes but the resource still records the value for the next live
