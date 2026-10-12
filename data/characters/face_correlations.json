@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "comment": "Face random coherence table (12/10): symmetric size-correlation pairs consumed ONLY by the Random Face draw (TEMP debug row). Manual rows, Extreme Face and the seed stream stay untouched. factor in [-1, 1]: kval_i gets factor * (neighbor base normalized to i's range). Mild 0.3-0.5: plausible faces, still varied. FROZEN once user presets pick seeds (any change reshuffles preset faces).",
+  "pairs": [
+    {"a": "JawWidth", "b": "ChinWidth", "factor": 0.5},
+    {"a": "FaceFullness", "b": "CheekFullness", "factor": 0.5},
+    {"a": "NoseWidth", "b": "NostrilFlare", "factor": 0.5},
+    {"a": "ForeheadWidth", "b": "CheekboneWidth", "factor": 0.4},
+    {"a": "LipUpper", "b": "LipLower", "factor": 0.4},
+    {"a": "EyeSpacing", "b": "ForeheadWidth", "factor": 0.3},
+    {"a": "ForeheadHeight", "b": "BrowHeight", "factor": 0.3},
+    {"a": "ChinLength", "b": "ChinProject", "factor": 0.3},
+    {"a": "NoseBridge", "b": "BrowRidgeDepth", "factor": 0.3},
+    {"a": "MouthW", "b": "JawWidth", "factor": 0.3},
+    {"a": "CheekboneWidth", "b": "JawWidth", "factor": 0.3},
+    {"a": "MouthW", "b": "ChinWidth", "factor": 0.3}
+  ]
+}

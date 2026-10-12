@@ -211,9 +211,8 @@ func _load_entries() -> Array:
 		for part in FACE_PARTS:
 			fout.append({"label": String(part["label"]), "call": _push.bind(int(part["level"]))})
 		# TEMP debug rows (removed once character_editor lands): full-face
-		# random/extreme draws for male/female test parity, sculpt only.
+		# random draws for male/female test parity, sculpt only.
 		fout.append({"label": "Random Face", "call": _host.randomize_face})
-		fout.append({"label": "Extreme Face", "call": _host.extreme_face})
 		fout.append({"label": "Reset Face", "call": _host.reset_face_all})
 		fout.append({"label": "[ ← Back ]", "call": _pop})
 		return fout

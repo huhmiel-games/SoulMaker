@@ -504,28 +504,94 @@ func reset_face_sculpt(key: StringName) -> void:
 
 
 ## TEMP debug (male/female test parity, removed once character_editor lands):
-## random + extreme full-face draws, sculpt keys only (global Width/Length
-## untouched — they drive hair fit, not the face). Reset first so draws never
-## stack; seed logged for report-back repro.
-func randomize_face() -> void:
-	var rng := RandomNumberGenerator.new()
-	rng.randomize()
-	# Absolute sets never stack: no reset loop, one fused bake at the end.
-	for key in CharacterAvatar.SCULPT_KEYS:
-		var maxv := float((CharacterAvatar.SCULPT_SPEC.get(key, {}) as Dictionary).get("max_cm", 1.0))
-		_avatar.set_sculpt(key, rng.randf_range(-maxv * 0.6, maxv * 0.6), false)
-	_avatar.fuse_sculpt()
-	print("[Face] random seed %d (%s)" % [rng.seed, _avatar.gender_display()])
+## random full-face draws, sculpt keys only (global Width/Length
+## untouched — they drive hair fit, not the face). Absolute sets never stack;
+## seed logged + full kvals for manual repro.
+var _coupling := {} # StringName key -> Array of [StringName other, float factor] (lazy, face_correlations.json)
 
 
-func extreme_face() -> void:
+## Coherence table for the Random draw (frozen once user presets pick seeds:
+## any change reshuffles preset faces). Invalid entries dropped, never fatal.
+func _face_coupling() -> Dictionary:
+	if not _coupling.is_empty():
+		return _coupling
+	var out := {}
+	var path := "res://data/characters/face_correlations.json"
+	if FileAccess.file_exists(path):
+		var doc: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
+		if doc is Dictionary:
+			for p in (doc as Dictionary).get("pairs", []):
+				var d: Dictionary = p
+				var a := StringName(String(d.get("a", "")))
+				var b := StringName(String(d.get("b", "")))
+				var f := clampf(float(d.get("factor", 0.0)), -1.0, 1.0)
+				if CharacterAvatar.SCULPT_SPEC.has(a) and CharacterAvatar.SCULPT_SPEC.has(b) and a != b and f != 0.0:
+					if not out.has(a):
+						out[a] = []
+					if not out.has(b):
+						out[b] = []
+					(out[a] as Array).append([b, f])
+					(out[b] as Array).append([a, f])
+	_coupling = out
+	return out
+
+
+func _face_max_cm(key: StringName) -> float:
+	return float((CharacterAvatar.SCULPT_SPEC.get(key, {}) as Dictionary).get("max_cm", 1.0))
+
+
+## Sparse-draw window (12/10, user-tuned): a Random face touches COUNT keys,
+## COUNT uniform in [RANDOM_MIN_KEYS, RANDOM_MAX_KEYS]. Fewer simultaneous
+## rows = fewer freak combos; coupling still whispers between chosen keys.
+const RANDOM_MIN_KEYS := 6
+const RANDOM_MAX_KEYS := 14
+
+
+func randomize_face(seed := 0) -> void:
 	var rng := RandomNumberGenerator.new()
-	rng.randomize()
+	if seed == 0:
+		rng.randomize()
+	else:
+		rng.seed = seed
+	var use_seed: int = rng.seed
+	# Sparse uniform subset: one priority draw per key (fixed order), top
+	# count wins. Unchosen keys stay exactly 0 (coupling only flows between
+	# chosen keys, never wakes a zero).
+	var count := rng.randi_range(RANDOM_MIN_KEYS, RANDOM_MAX_KEYS)
+	var prio := {}
 	for key in CharacterAvatar.SCULPT_KEYS:
-		var maxv := float((CharacterAvatar.SCULPT_SPEC.get(key, {}) as Dictionary).get("max_cm", 1.0))
-		_avatar.set_sculpt(key, maxv if rng.randi_range(0, 1) == 1 else -maxv, false)
+		prio[key] = rng.randf()
+	var order := CharacterAvatar.SCULPT_KEYS.duplicate()
+	order.sort_custom(func(a: StringName, b: StringName) -> bool: return float(prio[a]) < float(prio[b]))
+	var chosen := {}
+	for i in mini(count, order.size()):
+		chosen[order[order.size() - 1 - i]] = true
+	# Independent bases (fixed order: one draw per key), then one
+	# non-recursive coupling pass (neighbor bases normalized to this key's
+	# range), clamped to the draw range. Deterministic per seed.
+	var coup := _face_coupling()
+	var base := {}
+	for key in CharacterAvatar.SCULPT_KEYS:
+		base[key] = rng.randf_range(-_face_max_cm(key) * 0.6, _face_max_cm(key) * 0.6)
+	for key in CharacterAvatar.SCULPT_KEYS:
+		if not chosen.has(key):
+			base[key] = 0.0
+	for key in CharacterAvatar.SCULPT_KEYS:
+		if not chosen.has(key):
+			_avatar.set_sculpt(key, 0.0, false)
+			continue
+		var maxv := _face_max_cm(key)
+		var v: float = base[key]
+		for pair in (coup.get(key, []) as Array):
+			var ok: StringName = pair[0]
+			var omax := maxf(_face_max_cm(ok), 1e-9)
+			v += float(pair[1]) * float(base.get(ok, 0.0)) / omax * maxv
+		_avatar.set_sculpt(key, clampf(v, -maxv * 0.6, maxv * 0.6), false)
 	_avatar.fuse_sculpt()
-	print("[Face] extreme seed %d (%s)" % [rng.seed, _avatar.gender_display()])
+	var kline := []
+	for key in CharacterAvatar.SCULPT_KEYS:
+		kline.append("%s=%+.1f" % [String(key), float(_avatar.get("_sculpt").get(key, 0.0)) * 10.0])
+	print("[Face] random seed %d (%s) kvals(mm): %s" % [use_seed, _avatar.gender_display(), " ".join(kline)])
 
 
 func reset_face_all() -> void:
@@ -1982,8 +2048,9 @@ func _run_headless_test() -> void:
 		if _slot_mats(&"Skin").has(m):
 			lash_shared = true
 	fails += _expect("lashes split from skin", not lash_shared)
-	# 9c. Face-part follow (09/10): socket rows bake the mask-mean into the
-	# rigid parts (mesh space, anim-exact); unrelated rows leave them pristine.
+	# 9c. Face-part follow (09/10, site-mean 12/10): socket rows move the rigid
+	# parts with the socket's local motion (mesh space, anim-exact); rest
+	# restores pristine. Balls ride lids/tilt/socket spillover, shape held.
 	var eyes0 := _face_part_mean("Eyes")
 	adjust_face_sculpt(&"EyeDepth", 8)
 	var eyes1 := _face_part_mean("Eyes")
@@ -1992,11 +2059,14 @@ func _run_headless_test() -> void:
 	reset_face_sculpt(&"EyeDepth")
 	fails += _expect("eyes follow restores", (_avatar.get_node_or_null("Eyes/Male_Eyes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyes"])
 	var lash0 := _face_part_mean("Eyelashes")
+	var ey0 := _face_part_mean("Eyes")
 	adjust_face_sculpt(&"EyelidHeavy", 8)
 	var lash1 := _face_part_mean("Eyelashes")
+	var ey1 := _face_part_mean("Eyes")
 	fails += _expect("lashes follow lid", lash1.y < lash0.y - 0.003)
-	fails += _expect("eyes ignore lid", (_avatar.get_node_or_null("Eyes/Male_Eyes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyes"])
+	fails += _expect("eyes ride lid", ey1.y < ey0.y - 0.002)
 	reset_face_sculpt(&"EyelidHeavy")
+	fails += _expect("eyes lid restores", (_avatar.get_node_or_null("Eyes/Male_Eyes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyes"])
 	fails += _expect("lashes follow restores", (_avatar.get_node_or_null("Eyelashes/Male_Eyelashes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyelashes"])
 	var brow0 := _face_part_mean("Eyebrows")
 	adjust_face_sculpt(&"BrowRidgeDepth", 8)
@@ -2054,14 +2124,17 @@ func _run_headless_test() -> void:
 	# Lashes ride the tilt (live report 10/10: they stayed straight): outer
 	# lash verts drop with the lid margin.
 	var lan0 := _face_part_verts("Eyelashes")
+	var esr0 := _face_part_side_radii("Eyes")
 	adjust_face_sculpt(&"EyeAngle", 8)
-	fails += _expect("eyes ignore angle", (_avatar.get_node_or_null("Eyes/Male_Eyes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyes"])
+	fails += _expect("eyes tilt bakes", (_avatar.get_node_or_null("Eyes/Male_Eyes") as MeshInstance3D).mesh != _avatar._face_pristine["Eyes"])
+	var esr1 := _face_part_side_radii("Eyes")
+	fails += _expect("eyes tilt keeps shape", is_equal_approx(esr1[0], esr0[0]) and is_equal_approx(esr1[1], esr0[1]))
 	var lan1 := _face_part_verts("Eyelashes")
 	var lod := _face_part_outer_dy(lan0, lan1)
 	fails += _expect("lashes ride tilt", int(lod[1]) > 0 and float(lod[0]) < -0.0005)
 	reset_face_sculpt(&"EyeAngle")
 	fails += _expect("lashes tilt restores", (_avatar.get_node_or_null("Eyelashes/Male_Eyelashes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyelashes"])
-	# Brows ride their own tilt (same rigid-rotation follow as lashes).
+	# Brows ride their own tilt via total glue (same site-tracking as lashes).
 	var brw0 := _face_part_verts("Eyebrows")
 	adjust_face_sculpt(&"BrowAngle", 8)
 	var brw1 := _face_part_verts("Eyebrows")
@@ -2103,8 +2176,12 @@ func _run_headless_test() -> void:
 	# the skin never slides under the cards; unrelated parts stay pristine.
 	adjust_hair(1) # mount Buzzed (male) for a measurable follow target
 	var hbefore := _face_part_verts("Hair")
+	var eyf0 := _face_part_mean("Eyes")
+	var skf0 := _head_dom_verts()
 	adjust_face_sculpt(&"ForeheadHeight", 8)
 	var hafter := _face_part_verts("Hair")
+	var eyf1 := _face_part_mean("Eyes")
+	var skf1 := _head_dom_verts()
 	# Weighted zone rises (front band past the ears plane; the global mean
 	# is diluted by the frozen back mass, so measure the band, not the cap).
 	var hsk := _avatar_skeleton()
@@ -2124,8 +2201,11 @@ func _run_headless_test() -> void:
 			else:
 				backmax = maxf(backmax, hbefore[i].distance_to(hafter[i]))
 	fails += _expect("hair follows forehead", frontn > 0 and (front1 - front0) / float(frontn) > 0.002)
-	fails += _expect("eyes ignore forehead", (_avatar.get_node_or_null("Eyes/Male_Eyes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyes"])
+	var sockv := _browprobe_region_vec(skf0, skf1, "Eyelids")
+	var eyebv := eyf1 - eyf0
+	fails += _expect("eyes ride forehead", sockv.length() < 1e-7 or eyebv.dot(sockv) > 0.0)
 	reset_face_sculpt(&"ForeheadHeight")
+	fails += _expect("eyes forehead restores", (_avatar.get_node_or_null("Eyes/Male_Eyes") as MeshInstance3D).mesh == _avatar._face_pristine["Eyes"])
 	fails += _expect("hair follow restores", (_avatar.get_node_or_null("Hair/Buzzed") as MeshInstance3D).mesh == _avatar._face_pristine["Hair"])
 	reset_hair()
 	# 9e. Width follow (09/10 live: temples clipped the hair sides): shell
@@ -2944,20 +3024,18 @@ func _run_headless_test() -> void:
 	_menu._pop()
 	fails += _expect("face exit restores zoom", arm2 != null and is_equal_approx(arm2.spring_length, 3.2))
 	_menu._push(CharacterMenu.LEVEL_FACE)
-	fails += _expect("menu face hub 11+3debug+back", _menu._entries.size() == CharacterMenu.FACE_SUBS.size() + CharacterMenu.FACE_PARTS.size() + 3 + 1)
+	fails += _expect("menu face hub 11+2debug+back", _menu._entries.size() == CharacterMenu.FACE_SUBS.size() + CharacterMenu.FACE_PARTS.size() + 2 + 1)
 	fails += _expect("face cam on hub", face_active())
 	fails += _expect("face pauses idle", _anim_paused == _idle_only)
 	var hub_labels := []
 	for e in _menu._entries:
 		hub_labels.append(String((e as Dictionary).get("label", "")))
 	fails += _expect("menu hub head grouped", hub_labels.has("Hair >") and hub_labels.has("Eyebrows >") and hub_labels.has("Eyes >") and hub_labels.has("Beard >"))
-	fails += _expect("menu hub debug rows", hub_labels.has("Random Face") and hub_labels.has("Extreme Face") and hub_labels.has("Reset Face"))
+	fails += _expect("menu hub debug rows", hub_labels.has("Random Face") and hub_labels.has("Reset Face"))
 	# TEMP debug rows: draw moves the mesh, full reset restores it (both
 	# genders already covered — here male, female parity ratios in §17).
 	randomize_face()
 	fails += _expect("random face moves", _avatar.sculpt_max_cliff() > 1e-9)
-	extreme_face()
-	fails += _expect("extreme face moves", _avatar.sculpt_max_cliff() > 1e-9)
 	reset_face_all()
 	fails += _expect("face debug restores", _avatar.sculpt_max_cliff() < 1e-9)
 	# Field-cache exactness: a cached bake must equal a fresh full recompute.
@@ -2967,12 +3045,41 @@ func _run_headless_test() -> void:
 	_avatar.fuse_sculpt()
 	fails += _expect("field cache exact", _avatar.sculpt_checksum().is_equal_approx(csum))
 	reset_face_all()
+	# Correlated draw: deterministic per seed (RNG order + coupling math),
+	# clamped to the draw range, coupling table valid.
+	randomize_face(12345)
+	var snap0 := (_avatar.get("_sculpt") as Dictionary).duplicate()
+	var inrange := true
+	for key in CharacterAvatar.SCULPT_KEYS:
+		if absf(float(snap0.get(key, 0.0))) > _face_max_cm(key) * 0.6 + 1e-6:
+			inrange = false
+	reset_face_all()
+	randomize_face(12345)
+	var snap1 := (_avatar.get("_sculpt") as Dictionary).duplicate()
+	var same := true
+	for key in CharacterAvatar.SCULPT_KEYS:
+		if float(snap0.get(key, 0.0)) != float(snap1.get(key, 0.0)):
+			same = false
+	reset_face_all()
+	fails += _expect("random deterministic", same)
+	fails += _expect("random in range", inrange)
+	var nactive := 0
+	for key in CharacterAvatar.SCULPT_KEYS:
+		if absf(float(snap1.get(key, 0.0))) > 1e-9:
+			nactive += 1
+	fails += _expect("random sparse count", nactive >= RANDOM_MIN_KEYS and nactive <= RANDOM_MAX_KEYS)
+	var coup_ok := not _face_coupling().is_empty()
+	for ck in _face_coupling():
+		for pair in (_face_coupling()[ck] as Array):
+			if not CharacterAvatar.SCULPT_KEYS.has(ck) or not CharacterAvatar.SCULPT_KEYS.has(pair[0] as StringName) or absf(float(pair[1])) > 1.0:
+				coup_ok = false
+	fails += _expect("coupling table valid", coup_ok)
 	# Each sub: its rows + Back; Back returns to the hub (two-level Back).
 	_menu._push(CharacterMenu.LEVEL_FACE_GLOBAL)
 	fails += _expect("menu face global rows", _menu._entries.size() == CharacterAvatar.FACE_KEYS.size() + 1)
 	fails += _expect("face cam on sub", face_active())
 	_menu._pop()
-	fails += _expect("menu back to hub", _menu._level == CharacterMenu.LEVEL_FACE and _menu._entries.size() == CharacterMenu.FACE_SUBS.size() + CharacterMenu.FACE_PARTS.size() + 3 + 1)
+	fails += _expect("menu back to hub", _menu._level == CharacterMenu.LEVEL_FACE and _menu._entries.size() == CharacterMenu.FACE_SUBS.size() + CharacterMenu.FACE_PARTS.size() + 2 + 1)
 	fails += _expect("face cam stays on hub", face_active())
 	_menu._push(CharacterMenu.LEVEL_FACE_NOSE)
 	fails += _expect("menu face nose rows", _menu._entries.size() == 10 + 1)
@@ -3057,6 +3164,9 @@ func _run_headless_test() -> void:
 	adjust_face_sculpt(&"MouthW", -200) # clamp to -8mm
 	fails += _expect("sculpt mouth clamped", face_sculpt_display(&"MouthW") == "-8mm")
 	reset_face_sculpt(&"MouthW")
+	adjust_face_sculpt(&"EarPoint", -200) # asymmetric floor -10mm (user-tuned)
+	fails += _expect("sculpt earpoint floored", face_sculpt_display(&"EarPoint") == "-10mm")
+	reset_face_sculpt(&"EarPoint")
 	# 13. Sculpt round 2 (user eye-tune 07/10: negatives, base-vs-bridge, chin drop).
 	adjust_face_sculpt(&"NoseLength", -5) # front pad catches the tip: retracts
 	fails += _expect("sculpt nose back", _nose_tip_z() < tip0 - 0.002)

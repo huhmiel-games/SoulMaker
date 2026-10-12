@@ -770,16 +770,17 @@ const SCULPT_SPEC := {
 	&"EarSize": {"region": "Ears", "menu": "ears", "mode": "root", "rate": 0.45, "orate": 0.09, "mirror": false, "max_cm": 0.8, "rings": 1},
 	&"EarRotation": {"region": "Ears", "menu": "ears", "mode": "rootrot", "axis": Vector3(0, 1, 0), "deg": 15.0, "mirror": false, "max_cm": 0.8, "rings": 1},
 	&"EarlobeLength": {"region": "Lobe", "menu": "ears", "mode": "tip", "along": Vector3(0, 1, 0), "end": "min", "axis": Vector3(0, -1, 0), "rate": 0.6, "mirror": false, "max_cm": 0.8, "rings": 1},
-	&"EarPoint": {"region": "EarTip", "menu": "ears", "mode": "tip", "along": Vector3(0, 1, 0), "end": "max", "axis": Vector3(0, 1, 0), "rate": 0.6, "mirror": false, "max_cm": 4.8, "rings": 1},
+	&"EarPoint": {"region": "EarTip", "menu": "ears", "mode": "tip", "along": Vector3(0, 1, 0), "end": "max", "axis": Vector3(0, 1, 0), "rate": 0.6, "mirror": false, "max_cm": 4.8, "min_cm": 1.0, "rings": 1},
 }
-## Face-part follow (09/10): holder slot -> driving sculpt keys. Eyes stay
-## analytic (compact rigid balls: SUM of per-key mask means + rigid
-## rotation/dilation — the globe must track the aperture, never deform with
-## the socket). Brows + lashes are thin shells: each vert copies the TOTAL
-## skin offset of its nearest skin vert ("total" glue, 12/10 — the means
-## lagged whenever non-driving keys moved the site via diffusion spillover,
-## burying the parts ~2mm under multi-key randoms on both genders). Hair is
-## a shell, not a lump
+## Face-part follow (09/10, site-mean 12/10): holder slot -> follow rule. Eyes
+## stay analytic and rigid (compact balls must track the aperture, never
+## deform with the socket): side-split translation by the socket's LOCAL
+## motion (mean TOTAL offset over lid skin near the ball fronts — every key
+## incl. spillover) + rigid rotation (EyeAngle) + dilation (EyeSize) on top.
+## Brows + lashes are thin shells: each vert copies the TOTAL skin offset of
+## its nearest skin vert ("total" glue, 12/10 — mask means lagged whenever
+## non-driving keys moved the site via diffusion spillover, burying the parts
+## ~2mm under multi-key randoms on both genders). Hair is a shell, not a lump
 ## (09/10 live: every proxy failed — z-ramp starved the temples at ~40%,
 ## full-width breathed the whole cap and dived inside the skin when
 ## narrowing, bbox-column starved verts just outside the paint): each hair
@@ -816,9 +817,18 @@ func sculpt_display(key: StringName) -> String:
 	return "%+dmm" % int(round(float(_sculpt.get(key, 0.0)) * 10.0))
 
 
-func adjust_sculpt(key: StringName, dir: int) -> void:
+## Sculpt range (lo, hi) in cm for a key. Symmetric ±max_cm unless the spec
+## carries min_cm (EarPoint 12/10: -10mm floor, user-tuned — deep negatives
+## fold the tip into the skull).
+static func sculpt_limits(key: StringName) -> Vector2:
 	var spec: Dictionary = SCULPT_SPEC.get(key, {})
-	_sculpt[key] = clampf(float(_sculpt.get(key, 0.0)) + float(dir) * SCULPT_STEP, -float(spec.get("max_cm", 1.0)), float(spec.get("max_cm", 1.0)))
+	var hi := float(spec.get("max_cm", 1.0))
+	return Vector2(-float(spec.get("min_cm", hi)), hi)
+
+
+func adjust_sculpt(key: StringName, dir: int) -> void:
+	var lim := sculpt_limits(key)
+	_sculpt[key] = clampf(float(_sculpt.get(key, 0.0)) + float(dir) * SCULPT_STEP, lim.x, lim.y)
 	_sculpt_fused() # live on the fused mesh, no rebuild (reapplied in _post_build)
 
 
@@ -827,13 +837,13 @@ func reset_sculpt(key: StringName) -> void:
 	_sculpt_fused()
 
 
-## Absolute sculpt set (TEMP debug random/extreme face rows): clamped to the
+## Absolute sculpt set (TEMP debug random face row): clamped to the
 ## key's max like adjust_sculpt. live=false poses the value without fusing —
 ## batch loops then call fuse_sculpt() once (one full-mesh bake instead of N).
 ## Removed with the debug rows.
 func set_sculpt(key: StringName, val_cm: float, live := true) -> void:
-	var spec: Dictionary = SCULPT_SPEC.get(key, {})
-	_sculpt[key] = clampf(val_cm, -float(spec.get("max_cm", 1.0)), float(spec.get("max_cm", 1.0)))
+	var lim := sculpt_limits(key)
+	_sculpt[key] = clampf(val_cm, lim.x, lim.y)
 	if live:
 		_sculpt_fused()
 
